@@ -5,7 +5,7 @@ description = "A TUI app for monitoring SLURM jobs"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
-authors = [{ name = "pjh" }]
+authors = [{ name = "Philip Hartout", email = "philip.hartout@protonmail.com" }]
 keywords = ["slurm", "tui", "hpc", "jobs", "monitor"]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -22,6 +22,11 @@ dependencies = [
     "textual>=0.89.1",
     "loguru>=0.7.2",
 ]
+
+[project.urls]
+Homepage = "https://github.com/pjhartout/stoei"
+Repository = "https://github.com/pjhartout/stoei"
+Issues = "https://github.com/pjhartout/stoei/issues"
 
 [project.scripts]
 stoei = "stoei.__main__:main"
