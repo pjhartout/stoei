@@ -90,13 +90,13 @@ class TestParseSacctOutput:
     """Tests for sacct output parsing."""
 
     def test_parse_basic_output(self, sample_sacct_output: str) -> None:
-        jobs, total, requeues, max_req = parse_sacct_output(sample_sacct_output)
+        jobs, total, _requeues, _max_req = parse_sacct_output(sample_sacct_output)
 
         assert len(jobs) == 4
         assert total == 4
 
     def test_parse_requeue_counts(self, sample_sacct_output: str) -> None:
-        jobs, total, requeues, max_req = parse_sacct_output(sample_sacct_output)
+        _jobs, _total, requeues, max_req = parse_sacct_output(sample_sacct_output)
 
         # 0 + 2 + 0 + 1 = 3 total requeues
         assert requeues == 3
@@ -119,7 +119,7 @@ class TestParseSacctOutput:
 
     def test_parse_header_only(self) -> None:
         header_only = "JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList"
-        jobs, total, requeues, max_req = parse_sacct_output(header_only)
+        jobs, total, _requeues, _max_req = parse_sacct_output(header_only)
 
         assert jobs == []
         assert total == 0
