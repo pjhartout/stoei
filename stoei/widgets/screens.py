@@ -100,7 +100,7 @@ class JobInfoScreen(ModalScreen[None]):
                     yield Static(self.job_info, id="job-info-text")
 
             with Container(id="job-info-footer"):
-                yield Static("[dim]Press [bold]Esc[/bold] or [bold]Q[/bold] to close[/dim]", id="hint-text")
+                yield Static("Press [bold]Esc[/bold] or [bold]Q[/bold] to close", id="hint-text")
                 yield Button("✕ Close", variant="default", id="close-button")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:

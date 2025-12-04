@@ -51,7 +51,7 @@ class SlurmMonitor(App[None]):
             yield DataTable(id="running_jobs_table")
 
         with VerticalScroll(id="history-table"):
-            yield Static("[bold]📜 Job History (Last 24 Hours)[/bold]")
+            yield Static("[bold]📜 Job History (Last 30 Days)[/bold]")
             yield DataTable(id="history_jobs_table")
 
         yield Footer()

@@ -109,7 +109,7 @@ def get_running_jobs() -> list[tuple[str, ...]]:
 
 
 def get_job_history() -> tuple[list[tuple[str, ...]], int, int, int]:
-    """Return job history for the last 24 hours (sacct).
+    """Return job history for the last 30 days (sacct).
 
     Returns:
         Tuple of (jobs list, total jobs count, total requeues, max requeues).
@@ -123,7 +123,7 @@ def get_job_history() -> tuple[list[tuple[str, ...]], int, int, int]:
             username,
             "--format=JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList",
             "-S",
-            "today",
+            "now-30days",
             "-X",
             "-P",
         ]

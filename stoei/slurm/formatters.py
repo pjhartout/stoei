@@ -87,7 +87,7 @@ def format_value(key: str, value: str) -> str:
         Formatted string with Rich markup.
     """
     if not value or value in ("(null)", "N/A", "None", ""):
-        return "[dim italic](not set)[/dim italic]"
+        return "[italic](not set)[/italic]"
 
     # State coloring
     if key in ("JobState", "State"):
@@ -136,7 +136,7 @@ def format_job_info(raw_output: str) -> str:
     parsed = parse_scontrol_output(raw_output)
 
     if not parsed:
-        return "[dim]No job information could be parsed.[/dim]"
+        return "[italic]No job information could be parsed.[/italic]"
 
     lines: list[str] = []
     seen_keys: set[str] = set()
