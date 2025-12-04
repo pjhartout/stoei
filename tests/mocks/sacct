@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Mock sacct command for testing."""
+
+import argparse
+
+MOCK_HISTORY = [
+    ("12345", "train_model", "RUNNING", "0", "2:34:56", "0:0", "gpu-node-[01-04]"),
+    ("12344", "train_model", "COMPLETED", "2", "4:00:00", "0:0", "gpu-node-[01-04]"),
+    ("12343", "preprocess", "COMPLETED", "0", "0:30:00", "0:0", "cpu-node-05"),
+    ("12342", "failed_job", "FAILED", "3", "0:05:23", "1:0", "gpu-node-02"),
+    ("12341", "timeout_job", "TIMEOUT", "0", "24:00:00", "0:0", "cpu-node-[01-08]"),
+    ("12340", "cancelled", "CANCELLED", "0", "0:10:00", "0:0", "gpu-node-01"),
+    ("12339", "inference", "COMPLETED", "1", "1:45:00", "0:0", "gpu-node-03"),
+    ("12338", "data_prep", "COMPLETED", "0", "0:20:00", "0:0", "cpu-node-10"),
+    ("12337", "node_fail", "NODE_FAIL", "0", "0:15:00", "0:0", "gpu-node-07"),
+    ("12336", "long_train", "COMPLETED", "5", "48:00:00", "0:0", "gpu-node-[01-08]"),
+]
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-u", "--user", default=None)
+    parser.add_argument("--format", default=None)
+    parser.add_argument("-S", "--starttime", default=None)
+    parser.add_argument("-X", action="store_true")
+    parser.add_argument("-P", action="store_true")
+    args = parser.parse_args()
+
+    # Output header
+    print("JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList")
+
+    # Output all mock history
+    for job in MOCK_HISTORY:
+        print("|".join(job))
+
+
+if __name__ == "__main__":
+    main()
