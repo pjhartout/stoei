@@ -7,6 +7,7 @@ from textual.app import App, ComposeResult
 from textual.containers import Container, VerticalScroll
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets.data_table import RowKey
 
 from stoei.logging import get_logger
 from stoei.slurm.commands import get_job_history, get_job_info, get_running_jobs
@@ -123,6 +124,31 @@ class SlurmMonitor(App[None]):
                 self.push_screen(JobInfoScreen(job_id, job_info, error))
 
         self.push_screen(JobInputScreen(), handle_job_id)
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        """Handle row selection (Enter key) in DataTable.
+
+        Args:
+            event: The row selection event from the DataTable.
+        """
+        self._show_job_info_for_row(event.data_table, event.row_key)
+
+    def _show_job_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
+        """Show job info for a specific row in a table.
+
+        Args:
+            table: The DataTable containing the row.
+            row_key: The key of the row to show info for.
+        """
+        try:
+            row_data = table.get_row(row_key)
+            job_id = str(row_data[0]).strip()
+            logger.info(f"Showing info for selected job {job_id}")
+            job_info, error = get_job_info(job_id)
+            self.push_screen(JobInfoScreen(job_id, job_info, error))
+        except (IndexError, KeyError) as exc:
+            logger.error(f"Could not get job ID from row {row_key}: {exc}")
+            self.notify("Could not get job ID from selected row", severity="error")
 
     def action_show_selected_job_info(self) -> None:
         """Show job info for the currently selected row in either table."""
