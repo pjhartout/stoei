@@ -1,0 +1,123 @@
+/*
+ * Main application styles for stoei TUI.
+ *
+ * Uses ANSI color references to inherit from terminal's color scheme.
+ * This ensures compatibility with tmux and terminals configured with Nord or other themes.
+ *
+ * ANSI color mapping (typical Nord):
+ *   0/black     → nord1    8/bright_black   → nord3
+ *   1/red       → nord11   9/bright_red     → nord11
+ *   2/green     → nord14  10/bright_green   → nord14
+ *   3/yellow    → nord13  11/bright_yellow  → nord13
+ *   4/blue      → nord10  12/bright_blue    → nord9
+ *   5/magenta   → nord15  13/bright_magenta → nord15
+ *   6/cyan      → nord8   14/bright_cyan    → nord7
+ *   7/white     → nord5   15/bright_white   → nord6
+ *   background  → nord0   foreground        → nord4
+ */
+
+/* Base screen */
+Screen {
+    background: $background;
+}
+
+/* Header and Footer */
+Header {
+    background: ansi_black;
+    color: ansi_cyan;
+}
+
+Footer {
+    background: ansi_black;
+    color: $foreground;
+}
+
+Footer > .footer--key {
+    background: ansi_bright_black;
+    color: ansi_cyan;
+}
+
+Footer > .footer--description {
+    color: $foreground;
+}
+
+/* Statistics container */
+#stats-container {
+    height: auto;
+    padding: 1;
+    border: heavy ansi_bright_black;
+    margin-bottom: 1;
+    background: ansi_black;
+}
+
+JobStats {
+    color: $foreground;
+}
+
+/* Job tables */
+#running-table {
+    height: 1fr;
+    border: heavy ansi_blue;
+    margin-bottom: 1;
+    background: $background;
+}
+
+#running-table:focus-within {
+    border: heavy ansi_cyan;
+}
+
+#history-table {
+    height: 2fr;
+    border: heavy ansi_bright_black;
+    background: $background;
+}
+
+#history-table:focus-within {
+    border: heavy ansi_cyan;
+}
+
+#running-table Static,
+#history-table Static {
+    color: ansi_cyan;
+    background: ansi_black;
+    padding: 0 1;
+}
+
+/* DataTable styling */
+DataTable {
+    height: 1fr;
+    width: 100%;
+    background: $background;
+}
+
+DataTable > .datatable--header {
+    text-style: bold;
+    background: ansi_black;
+    color: ansi_cyan;
+}
+
+DataTable > .datatable--cursor {
+    background: ansi_bright_black;
+    color: ansi_bright_white;
+}
+
+DataTable > .datatable--hover {
+    background: ansi_black;
+}
+
+DataTable > .datatable--even-row {
+    background: $background;
+}
+
+DataTable > .datatable--odd-row {
+    background: ansi_black;
+}
+
+/* Scrollbar styling */
+VerticalScroll {
+    scrollbar-background: ansi_black;
+    scrollbar-color: ansi_bright_black;
+    scrollbar-color-hover: ansi_bright_blue;
+    scrollbar-color-active: ansi_cyan;
+}
+

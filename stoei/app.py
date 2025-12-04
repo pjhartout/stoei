@@ -1,5 +1,6 @@
 """Main Textual TUI application for stoei."""
 
+from pathlib import Path
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
@@ -9,23 +10,30 @@ from textual.widgets import DataTable, Footer, Header, Static
 
 from stoei.logging import get_logger
 from stoei.slurm.commands import get_job_history, get_job_info, get_running_jobs
-from stoei.styles.theme import ANSI_CSS
 from stoei.widgets.job_stats import JobStats
 from stoei.widgets.screens import JobInfoScreen, JobInputScreen
 
 logger = get_logger(__name__)
+
+# Path to styles directory
+STYLES_DIR = Path(__file__).parent / "styles"
 
 
 class SlurmMonitor(App[None]):
     """Textual TUI app for monitoring SLURM jobs."""
 
     ENABLE_COMMAND_PALETTE = False
-    CSS = ANSI_CSS
+    CSS_PATH: ClassVar[list[Path]] = [
+        STYLES_DIR / "app.tcss",
+        STYLES_DIR / "modals.tcss",
+    ]
     BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh Now"),
         ("i", "show_job_info", "Job Info"),
         ("enter", "show_selected_job_info", "View Selected Job"),
+        ("1", "focus_running", "Running Jobs"),
+        ("2", "focus_history", "History"),
     )
 
     def __init__(self) -> None:
@@ -71,6 +79,9 @@ class SlurmMonitor(App[None]):
         self.refresh_data()
         self.auto_refresh_timer = self.set_interval(self.refresh_interval, self.refresh_data)
         logger.info(f"Auto-refresh started with interval {self.refresh_interval}s")
+
+        # Focus the running jobs table by default
+        running_table.focus()
 
     def refresh_data(self) -> None:
         """Refresh tables and summary statistics."""
@@ -147,6 +158,16 @@ class SlurmMonitor(App[None]):
         except (IndexError, KeyError):
             logger.error(f"Could not get job ID from row {cursor_row}")
             self.notify("Could not get job ID from selected row", severity="error")
+
+    def action_focus_running(self) -> None:
+        """Focus the running jobs table."""
+        logger.debug("Focusing running jobs table")
+        self.query_one("#running_jobs_table", DataTable).focus()
+
+    def action_focus_history(self) -> None:
+        """Focus the history jobs table."""
+        logger.debug("Focusing history jobs table")
+        self.query_one("#history_jobs_table", DataTable).focus()
 
     async def action_quit(self) -> None:
         """Quit the application."""

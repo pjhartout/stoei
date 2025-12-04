@@ -1,5 +1,6 @@
-"""Styles and theming for stoei."""
+"""Styles and theming for stoei.
 
-from stoei.styles.theme import ANSI_CSS
-
-__all__ = ["ANSI_CSS"]
+CSS styles are defined in .tcss files:
+- app.tcss: Main application styles
+- modals.tcss: Modal screen styles
+"""
