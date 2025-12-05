@@ -195,6 +195,10 @@ JobInfoScreen #close-button:focus {
     border: tall ansi_bright_cyan;
 }
 
+JobInfoScreen #job-info-content:focus {
+    border: tall ansi_cyan;
+}
+
 /* Log Viewer Modal */
 LogViewerScreen {
     align: center middle;

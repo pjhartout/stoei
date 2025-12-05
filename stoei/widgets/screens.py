@@ -52,7 +52,7 @@ class LogViewerScreen(ModalScreen[None]):
                     id="log-viewer-title",
                 )
                 yield Static(
-                    f"[dim]{self.filepath}[/dim]",
+                    self.filepath,
                     id="log-viewer-path",
                 )
 
@@ -196,8 +196,10 @@ class JobInfoScreen(ModalScreen[None]):
         ("q", "close", "Close"),
         ("o", "open_stdout", "Open StdOut"),
         ("e", "open_stderr", "Open StdErr"),
-        ("left", "focus_previous_button", "Previous"),
-        ("right", "focus_next_button", "Next"),
+        ("left", "focus_previous", "Previous"),
+        ("right", "focus_next", "Next"),
+        ("up", "focus_content", "Content"),
+        ("down", "focus_buttons", "Buttons"),
     )
 
     def __init__(
@@ -245,7 +247,7 @@ class JobInfoScreen(ModalScreen[None]):
 
             with Container(id="job-info-footer"):
                 yield Static(
-                    "Press [bold]O[/bold] StdOut | [bold]E[/bold] StdErr | [bold]Esc/Q[/bold] Close",
+                    "[bold]↑↓[/bold] Nav | [bold]←→[/bold] Buttons | [bold]O/E[/bold] Logs | [bold]Esc[/bold] Close",
                     id="hint-text",
                 )
                 with Container(id="log-buttons"):
@@ -264,17 +266,13 @@ class JobInfoScreen(ModalScreen[None]):
                 yield Button("✕ Close", variant="default", id="close-button")
 
     def on_mount(self) -> None:
-        """Focus the first available log button on mount."""
-        # Focus the first enabled log button for arrow key navigation
-        stdout_btn = self.query_one("#stdout-button", Button)
-        stderr_btn = self.query_one("#stderr-button", Button)
-
-        if not stdout_btn.disabled:
-            stdout_btn.focus()
-        elif not stderr_btn.disabled:
-            stderr_btn.focus()
-        else:
-            self.query_one("#close-button", Button).focus()
+        """Focus the content area on mount for scrolling."""
+        try:
+            content = self.query_one("#job-info-content", VerticalScroll)
+            content.focus()
+        except Exception:
+            # If no content (error case), focus the first button
+            self._focus_first_button()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press.
@@ -316,17 +314,46 @@ class JobInfoScreen(ModalScreen[None]):
                 return idx
         return None
 
-    def action_focus_next_button(self) -> None:
-        """Focus the next button (right arrow)."""
+    def _focus_first_button(self) -> None:
+        """Focus the first enabled button."""
+        buttons = self._get_button_order()
+        for btn in buttons:
+            if not btn.disabled:
+                btn.focus()
+                return
+        # Fallback to close button
+        self.query_one("#close-button", Button).focus()
+
+    def _is_button_focused(self) -> bool:
+        """Check if any button is currently focused."""
+        buttons = self._get_button_order()
+        return self._get_focused_button_index(buttons) is not None
+
+    def action_focus_content(self) -> None:
+        """Focus the content area (up arrow)."""
+        try:
+            content = self.query_one("#job-info-content", VerticalScroll)
+            content.focus()
+        except Exception:
+            # No content area available (error state), ignore
+            logger.debug("No content area to focus")
+
+    def action_focus_buttons(self) -> None:
+        """Focus the button area (down arrow)."""
+        self._focus_first_button()
+
+    def action_focus_next(self) -> None:
+        """Focus the next element (right arrow)."""
+        if not self._is_button_focused():
+            # If not on buttons, go to buttons
+            self._focus_first_button()
+            return
+
         buttons = self._get_button_order()
         current_idx = self._get_focused_button_index(buttons)
 
         if current_idx is None:
-            # If no button focused, focus the first enabled one
-            for btn in buttons:
-                if not btn.disabled:
-                    btn.focus()
-                    return
+            self._focus_first_button()
             return
 
         # Find next enabled button
@@ -336,17 +363,22 @@ class JobInfoScreen(ModalScreen[None]):
                 buttons[next_idx].focus()
                 return
 
-    def action_focus_previous_button(self) -> None:
-        """Focus the previous button (left arrow)."""
-        buttons = self._get_button_order()
-        current_idx = self._get_focused_button_index(buttons)
-
-        if current_idx is None:
-            # If no button focused, focus the last enabled one
+    def action_focus_previous(self) -> None:
+        """Focus the previous element (left arrow)."""
+        if not self._is_button_focused():
+            # If not on buttons, go to buttons (last one)
+            buttons = self._get_button_order()
             for btn in reversed(buttons):
                 if not btn.disabled:
                     btn.focus()
                     return
+            return
+
+        buttons = self._get_button_order()
+        current_idx = self._get_focused_button_index(buttons)
+
+        if current_idx is None:
+            self._focus_first_button()
             return
 
         # Find previous enabled button
