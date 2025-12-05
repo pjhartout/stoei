@@ -37,7 +37,7 @@ def get_editor() -> str | None:
     return None
 
 
-def open_in_editor(filepath: str) -> tuple[bool, str]:
+def open_in_editor(filepath: str | None) -> tuple[bool, str]:  # noqa: PLR0911
     """Open a file in the user's editor.
 
     Args:
@@ -46,6 +46,11 @@ def open_in_editor(filepath: str) -> tuple[bool, str]:
     Returns:
         Tuple of (success, message).
     """
+    if not filepath:
+        error_msg = "No file path provided"
+        logger.warning(error_msg)
+        return False, error_msg
+
     path = Path(filepath)
 
     # Check if file exists
@@ -84,17 +89,17 @@ def open_in_editor(filepath: str) -> tuple[bool, str]:
             error_msg = f"Editor exited with code {result.returncode}"
             logger.warning(error_msg)
             return False, error_msg
-
-        return True, f"Opened {filepath} in {editor}"
     except FileNotFoundError as exc:
         error_msg = f"Editor not found: {exc}"
-        logger.error(error_msg)
+        logger.exception(error_msg)
         return False, error_msg
     except subprocess.SubprocessError as exc:
         error_msg = f"Error running editor: {exc}"
-        logger.error(error_msg)
+        logger.exception(error_msg)
         return False, error_msg
     except OSError as exc:
         error_msg = f"OS error opening editor: {exc}"
-        logger.error(error_msg)
+        logger.exception(error_msg)
         return False, error_msg
+    else:
+        return True, f"Opened {filepath} in {editor}"
