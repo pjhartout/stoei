@@ -1,6 +1,6 @@
 # Stoei
 
-A TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track of your HPC cluster jobs with an intuitive, auto-refreshing interface.
+A Slurm TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track of your HPC cluster jobs with an intuitive, auto-refreshing interface.
 
 [![GitHub release](https://img.shields.io/github/v/tag/pjhartout/stoei?label=version)](https://github.com/pjhartout/stoei/releases)
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)

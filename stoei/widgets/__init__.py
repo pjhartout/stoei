@@ -1,6 +1,6 @@
 """TUI widgets for stoei."""
 
 from stoei.widgets.job_stats import JobStats
-from stoei.widgets.screens import JobInfoScreen, JobInputScreen
+from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen
 
-__all__ = ["JobInfoScreen", "JobInputScreen", "JobStats"]
+__all__ = ["CancelConfirmScreen", "JobInfoScreen", "JobInputScreen", "JobStats"]

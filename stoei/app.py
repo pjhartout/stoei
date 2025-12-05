@@ -10,9 +10,9 @@ from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
 
 from stoei.logging import get_logger
-from stoei.slurm.commands import get_job_history, get_job_info, get_job_log_paths, get_running_jobs
+from stoei.slurm.commands import cancel_job, get_job_history, get_job_info, get_job_log_paths, get_running_jobs
 from stoei.widgets.job_stats import JobStats
-from stoei.widgets.screens import JobInfoScreen, JobInputScreen
+from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen
 
 logger = get_logger(__name__)
 
@@ -32,6 +32,7 @@ class SlurmMonitor(App[None]):
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh Now"),
         ("i", "show_job_info", "Job Info"),
+        ("c", "cancel_selected_job", "Cancel Job"),
         ("enter", "show_selected_job_info", "View Selected Job"),
         ("1", "focus_running", "Running Jobs"),
         ("2", "focus_history", "History"),
@@ -205,6 +206,57 @@ class SlurmMonitor(App[None]):
         except (IndexError, KeyError):
             logger.error(f"Could not get job ID from row {cursor_row}")
             self.notify("Could not get job ID from selected row", severity="error")
+
+    def _get_selected_job_id(self) -> str | None:
+        """Get the job ID from the currently selected row.
+
+        Returns:
+            The job ID string, or None if no valid selection.
+        """
+        running_table = self.query_one("#running_jobs_table", DataTable)
+        history_table = self.query_one("#history_jobs_table", DataTable)
+
+        # Check which table has focus
+        focused = self.focused
+        if focused is running_table and running_table.row_count > 0:
+            table = running_table
+        elif focused is history_table and history_table.row_count > 0:
+            table = history_table
+        elif running_table.row_count > 0:
+            table = running_table
+        elif history_table.row_count > 0:
+            table = history_table
+        else:
+            return None
+
+        cursor_row = table.cursor_row
+        if cursor_row is None or cursor_row < 0:
+            return None
+
+        try:
+            row_data = table.get_row_at(cursor_row)
+            return str(row_data[0]).strip()
+        except (IndexError, KeyError):
+            return None
+
+    def action_cancel_selected_job(self) -> None:
+        """Cancel the currently selected job after confirmation."""
+        job_id = self._get_selected_job_id()
+        if not job_id:
+            self.notify("No job selected", severity="warning")
+            return
+
+        def handle_cancel_confirm(confirmed: bool) -> None:
+            if confirmed:
+                logger.info(f"Cancelling job {job_id}")
+                success, error = cancel_job(job_id)
+                if success:
+                    self.notify(f"Job {job_id} cancelled", severity="information")
+                    self.refresh_data()
+                else:
+                    self.notify(f"Failed to cancel job: {error}", severity="error")
+
+        self.push_screen(CancelConfirmScreen(job_id), handle_cancel_confirm)
 
     def action_focus_running(self) -> None:
         """Focus the running jobs table."""

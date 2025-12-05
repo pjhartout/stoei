@@ -188,6 +188,62 @@ class JobInputScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
+class CancelConfirmScreen(ModalScreen[bool]):
+    """Modal screen to confirm job cancellation."""
+
+    BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (("escape", "dismiss_cancel", "Keep Running"),)
+
+    def __init__(self, job_id: str) -> None:
+        """Initialize the cancel confirmation screen.
+
+        Args:
+            job_id: The SLURM job ID to cancel.
+        """
+        super().__init__()
+        self.job_id = job_id
+
+    def compose(self) -> ComposeResult:
+        """Create the confirmation dialog layout.
+
+        Yields:
+            The widgets that make up the confirmation dialog.
+        """
+        with Vertical(id="cancel-confirm-container"):
+            yield Static("⚠️  [bold]Cancel Job[/bold]", id="cancel-title")
+            yield Static(
+                f"Are you sure you want to cancel job [bold cyan]{self.job_id}[/bold cyan]?",
+                id="cancel-message",
+            )
+            yield Static(
+                "[dim]This action cannot be undone.[/dim]",
+                id="cancel-warning",
+            )
+            with Container(id="cancel-button-row"):
+                yield Button("🛑 Cancel Job", variant="error", id="confirm-cancel-btn")
+                yield Button("✓ Keep Running", variant="success", id="keep-running-btn")
+
+    def on_mount(self) -> None:
+        """Focus the keep running button on mount (safer default)."""
+        self.query_one("#keep-running-btn", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button press.
+
+        Args:
+            event: The button press event.
+        """
+        if event.button.id == "confirm-cancel-btn":
+            logger.info(f"User confirmed cancellation of job {self.job_id}")
+            self.dismiss(True)
+        elif event.button.id == "keep-running-btn":
+            logger.debug(f"User cancelled cancellation of job {self.job_id}")
+            self.dismiss(False)
+
+    def action_dismiss_cancel(self) -> None:
+        """Dismiss without cancelling the job."""
+        self.dismiss(False)
+
+
 class JobInfoScreen(ModalScreen[None]):
     """Modal screen to display job information."""
 
