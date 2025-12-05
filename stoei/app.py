@@ -10,7 +10,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
 
 from stoei.logging import get_logger
-from stoei.slurm.commands import get_job_history, get_job_info, get_running_jobs
+from stoei.slurm.commands import get_job_history, get_job_info, get_job_log_paths, get_running_jobs
 from stoei.widgets.job_stats import JobStats
 from stoei.widgets.screens import JobInfoScreen, JobInputScreen
 
@@ -91,18 +91,36 @@ class SlurmMonitor(App[None]):
         # Get running jobs
         running_jobs = get_running_jobs()
         running_table = self.query_one("#running_jobs_table", DataTable)
+
+        # Save cursor position before clearing
+        running_cursor_row = running_table.cursor_row
+
         running_table.clear()
 
         for job in running_jobs:
             running_table.add_row(*job)
 
+        # Restore cursor position if possible
+        if running_cursor_row is not None and running_table.row_count > 0:
+            new_row = min(running_cursor_row, running_table.row_count - 1)
+            running_table.move_cursor(row=new_row)
+
         # Get job history
         history_jobs, total_jobs, total_requeues, max_requeues = get_job_history()
         history_table = self.query_one("#history_jobs_table", DataTable)
+
+        # Save cursor position before clearing
+        history_cursor_row = history_table.cursor_row
+
         history_table.clear()
 
         for job in history_jobs:
             history_table.add_row(*job)
+
+        # Restore cursor position if possible
+        if history_cursor_row is not None and history_table.row_count > 0:
+            new_row = min(history_cursor_row, history_table.row_count - 1)
+            history_table.move_cursor(row=new_row)
 
         # Update statistics
         stats_widget = self.query_one(JobStats)
@@ -121,7 +139,8 @@ class SlurmMonitor(App[None]):
             if job_id:
                 logger.info(f"Looking up job info for {job_id}")
                 job_info, error = get_job_info(job_id)
-                self.push_screen(JobInfoScreen(job_id, job_info, error))
+                stdout_path, stderr_path, _ = get_job_log_paths(job_id)
+                self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
 
         self.push_screen(JobInputScreen(), handle_job_id)
 
@@ -145,7 +164,8 @@ class SlurmMonitor(App[None]):
             job_id = str(row_data[0]).strip()
             logger.info(f"Showing info for selected job {job_id}")
             job_info, error = get_job_info(job_id)
-            self.push_screen(JobInfoScreen(job_id, job_info, error))
+            stdout_path, stderr_path, _ = get_job_log_paths(job_id)
+            self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
         except (IndexError, KeyError) as exc:
             logger.error(f"Could not get job ID from row {row_key}: {exc}")
             self.notify("Could not get job ID from selected row", severity="error")
@@ -180,7 +200,8 @@ class SlurmMonitor(App[None]):
             job_id = str(row_key[0]).strip()
             logger.info(f"Showing info for selected job {job_id}")
             job_info, error = get_job_info(job_id)
-            self.push_screen(JobInfoScreen(job_id, job_info, error))
+            stdout_path, stderr_path, _ = get_job_log_paths(job_id)
+            self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
         except (IndexError, KeyError):
             logger.error(f"Could not get job ID from row {cursor_row}")
             self.notify("Could not get job ID from selected row", severity="error")

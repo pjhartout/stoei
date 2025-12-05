@@ -145,14 +145,156 @@ JobInfoScreen #job-info-footer {
 
 JobInfoScreen #close-button {
     width: auto;
-    min-width: 20;
+    min-width: 16;
     background: ansi_bright_black;
 }
 
 JobInfoScreen #hint-text {
     width: 1fr;
-    content-align: right middle;
+    content-align: left middle;
     color: ansi_bright_black;
     margin-right: 2;
 }
 
+JobInfoScreen #log-buttons {
+    width: auto;
+    height: auto;
+    layout: horizontal;
+    margin-right: 1;
+}
+
+JobInfoScreen #stdout-button {
+    width: auto;
+    min-width: 16;
+    background: ansi_blue;
+    margin-right: 1;
+}
+
+JobInfoScreen #stderr-button {
+    width: auto;
+    min-width: 16;
+    background: ansi_yellow;
+    color: ansi_black;
+    margin-right: 1;
+}
+
+JobInfoScreen #stdout-button:disabled,
+JobInfoScreen #stderr-button:disabled {
+    opacity: 0.5;
+}
+
+JobInfoScreen #stdout-button:focus {
+    border: tall ansi_bright_cyan;
+}
+
+JobInfoScreen #stderr-button:focus {
+    border: tall ansi_bright_cyan;
+}
+
+JobInfoScreen #close-button:focus {
+    border: tall ansi_bright_cyan;
+}
+
+JobInfoScreen #job-info-content:focus {
+    border: tall ansi_cyan;
+}
+
+/* Log Viewer Modal */
+LogViewerScreen {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.85);
+}
+
+LogViewerScreen #log-viewer-container {
+    width: 95%;
+    max-width: 140;
+    height: 90%;
+    padding: 0;
+    background: ansi_black;
+    border: double ansi_green;
+}
+
+LogViewerScreen #log-viewer-header {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: ansi_black;
+    border-bottom: heavy ansi_green;
+}
+
+LogViewerScreen #log-viewer-title {
+    width: 100%;
+    content-align: center middle;
+    color: ansi_green;
+    text-style: bold;
+}
+
+LogViewerScreen #log-viewer-path {
+    width: 100%;
+    content-align: center middle;
+    color: ansi_bright_black;
+    margin-top: 1;
+}
+
+LogViewerScreen #log-content-scroll {
+    height: 1fr;
+    padding: 1 2;
+    background: $background;
+}
+
+LogViewerScreen #log-content-text {
+    width: 100%;
+    color: $foreground;
+}
+
+LogViewerScreen #log-error-container {
+    height: 1fr;
+    padding: 2;
+    content-align: center middle;
+    background: $background;
+}
+
+LogViewerScreen #log-error-text {
+    width: 100%;
+    content-align: center middle;
+    color: ansi_red;
+}
+
+LogViewerScreen #log-viewer-footer {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: ansi_black;
+    border-top: solid ansi_bright_black;
+    layout: horizontal;
+    align: center middle;
+}
+
+LogViewerScreen #log-hint-text {
+    width: 1fr;
+    content-align: left middle;
+    color: ansi_bright_black;
+}
+
+LogViewerScreen #editor-button {
+    width: auto;
+    min-width: 20;
+    background: ansi_green;
+    color: ansi_black;
+    margin-right: 1;
+}
+
+LogViewerScreen #log-close-button {
+    width: auto;
+    min-width: 12;
+    background: ansi_bright_black;
+}
+
+LogViewerScreen #editor-button:focus,
+LogViewerScreen #log-close-button:focus {
+    border: tall ansi_bright_cyan;
+}
+
+LogViewerScreen #log-content-scroll:focus {
+    border: tall ansi_green;
+}

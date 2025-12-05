@@ -163,3 +163,86 @@ def format_job_info(raw_output: str) -> str:
             lines.append(f"  [bold cyan]{key:.<24}[/bold cyan] {formatted}")
 
     return "\n".join(lines)
+
+
+# Field mapping for sacct output to display names
+SACCT_FIELD_DISPLAY: dict[str, str] = {
+    "JobID": "Job ID",
+    "JobName": "Job Name",
+    "User": "User",
+    "Account": "Account",
+    "Partition": "Partition",
+    "State": "State",
+    "ExitCode": "Exit Code",
+    "Start": "Start Time",
+    "End": "End Time",
+    "Elapsed": "Elapsed Time",
+    "TimelimitRaw": "Time Limit (min)",
+    "NNodes": "Nodes",
+    "NCPUS": "CPUs",
+    "NTasks": "Tasks",
+    "ReqMem": "Requested Memory",
+    "MaxRSS": "Max RSS",
+    "MaxVMSize": "Max VM Size",
+    "NodeList": "Node List",
+    "WorkDir": "Work Directory",
+    "StdOut": "StdOut Path",
+    "StdErr": "StdErr Path",
+    "Submit": "Submit Time",
+    "Priority": "Priority",
+    "QOS": "QOS",
+}
+
+# Categories for sacct fields
+SACCT_CATEGORIES: dict[str, tuple[str, list[str]]] = {
+    "identity": ("🏷️  Identity", ["JobID", "JobName", "User", "Account", "QOS"]),
+    "status": ("📊 Status", ["State", "ExitCode", "Priority"]),
+    "resources": ("💻 Resources", ["Partition", "NNodes", "NCPUS", "NTasks", "ReqMem", "MaxRSS", "MaxVMSize"]),
+    "nodes": ("🖥️  Nodes", ["NodeList"]),
+    "timing": ("⏱️  Timing", ["Submit", "Start", "End", "Elapsed", "TimelimitRaw"]),
+    "paths": ("📁 Paths", ["WorkDir", "StdOut", "StdErr"]),
+}
+
+
+def format_sacct_job_info(parsed: dict[str, str]) -> str:
+    """Format sacct job info with categories and colors.
+
+    Args:
+        parsed: Dictionary of parsed sacct field values.
+
+    Returns:
+        Formatted string with Rich markup for display.
+    """
+    if not parsed:
+        return "[italic]No job information could be parsed.[/italic]"
+
+    lines: list[str] = []
+    seen_keys: set[str] = set()
+
+    # Add header indicating this is historical data
+    lines.append("[dim italic](i) Historical data from sacct (job completed)[/dim italic]")
+
+    # Display categorized fields
+    for _category_id, (category_title, fields) in SACCT_CATEGORIES.items():
+        category_lines: list[str] = []
+        for field in fields:
+            if field in parsed:
+                display_name = SACCT_FIELD_DISPLAY.get(field, field)
+                formatted = format_value(field, parsed[field])
+                category_lines.append(f"  [bold cyan]{display_name:.<24}[/bold cyan] {formatted}")
+                seen_keys.add(field)
+
+        if category_lines:
+            lines.append(f"\n[bold reverse] {category_title} [/bold reverse]")
+            lines.extend(category_lines)
+
+    # Display any remaining fields not in categories
+    remaining = {k: v for k, v in parsed.items() if k not in seen_keys}
+    if remaining:
+        lines.append("\n[bold reverse] 📋 Other [/bold reverse]")
+        for key, value in sorted(remaining.items()):
+            display_name = SACCT_FIELD_DISPLAY.get(key, key)
+            formatted = format_value(key, value)
+            lines.append(f"  [bold cyan]{display_name:.<24}[/bold cyan] {formatted}")
+
+    return "\n".join(lines)

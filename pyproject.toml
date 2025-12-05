@@ -29,7 +29,7 @@ Repository = "https://github.com/pjhartout/stoei"
 Issues = "https://github.com/pjhartout/stoei/issues"
 
 [project.scripts]
-stoei = "stoei.__main__:main"
+stoei = "stoei.__main__:run"
 
 [project.optional-dependencies]
 dev = [

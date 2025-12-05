@@ -90,3 +90,45 @@ def parse_sacct_output(raw_output: str) -> tuple[list[tuple[str, ...]], int, int
     jobs.sort(key=job_sort_key, reverse=True)
 
     return jobs, total_jobs, total_requeues, max_requeues
+
+
+def parse_sacct_job_output(raw_output: str, fields: list[str]) -> dict[str, str]:
+    """Parse sacct output for a single job into key-value pairs.
+
+    Args:
+        raw_output: Raw output from sacct command (pipe-delimited, no header).
+        fields: List of field names corresponding to the output columns.
+
+    Returns:
+        Dictionary of parsed key-value pairs. Returns the first (main) job entry.
+    """
+    lines = raw_output.strip().split("\n")
+    if not lines:
+        return {}
+
+    # Take the first line (main job, not sub-steps like .batch, .extern)
+    # Sub-steps have IDs like "12345.batch" or "12345.0"
+    main_line = None
+    for line in lines:
+        parts = line.split("|")
+        if parts:
+            job_id = parts[0]
+            # Skip sub-steps (contain a dot after the main ID)
+            if "." not in job_id or job_id.endswith("."):
+                main_line = line
+                break
+
+    if not main_line:
+        # Fallback to first line if no main job found
+        main_line = lines[0]
+
+    parts = main_line.split("|")
+
+    result: dict[str, str] = {}
+    for i, field in enumerate(fields):
+        if i < len(parts):
+            value = parts[i].strip()
+            if value:
+                result[field] = value
+
+    return result
