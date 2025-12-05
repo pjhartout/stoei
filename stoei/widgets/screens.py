@@ -1,11 +1,140 @@
 """Modal screens for job information display."""
 
+from pathlib import Path
 from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import Button, Input, Static
+
+from stoei.editor import open_in_editor
+from stoei.logging import get_logger
+
+logger = get_logger(__name__)
+
+
+class LogViewerScreen(ModalScreen[None]):
+    """Modal screen to display log file contents."""
+
+    BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
+        ("escape", "close", "Close"),
+        ("q", "close", "Close"),
+        ("e", "open_in_editor", "Open in $EDITOR"),
+    )
+
+    def __init__(self, filepath: str, log_type: str) -> None:
+        """Initialize the log viewer screen.
+
+        Args:
+            filepath: Path to the log file.
+            log_type: Type of log (e.g., "stdout" or "stderr").
+        """
+        super().__init__()
+        self.filepath = filepath
+        self.log_type = log_type
+        self.file_contents: str = ""
+        self.load_error: str | None = None
+
+    def compose(self) -> ComposeResult:
+        """Create the log viewer layout.
+
+        Yields:
+            The widgets that make up the log viewer.
+        """
+        # Load file contents
+        self._load_file()
+
+        with Vertical(id="log-viewer-container"):
+            with Container(id="log-viewer-header"):
+                yield Static(
+                    f"📄  [bold]{self.log_type.upper()} Log[/bold]",
+                    id="log-viewer-title",
+                )
+                yield Static(
+                    f"[dim]{self.filepath}[/dim]",
+                    id="log-viewer-path",
+                )
+
+            if self.load_error:
+                with Container(id="log-error-container"):
+                    yield Static(f"⚠️  {self.load_error}", id="log-error-text")
+            else:
+                with VerticalScroll(id="log-content-scroll"):
+                    yield Static(self.file_contents, id="log-content-text")
+
+            with Container(id="log-viewer-footer"):
+                yield Static(
+                    "[bold]E[/bold] Open in $EDITOR | [bold]↑↓[/bold] Scroll | [bold]Esc/Q[/bold] Close",
+                    id="log-hint-text",
+                )
+                yield Button("📝 Open in $EDITOR", variant="primary", id="editor-button")
+                yield Button("✕ Close", variant="default", id="log-close-button")
+
+    def _load_file(self) -> None:
+        """Load the file contents."""
+        path = Path(self.filepath)
+
+        if not path.exists():
+            self.load_error = f"File does not exist: {self.filepath}"
+            logger.warning(self.load_error)
+            return
+
+        if not path.is_file():
+            self.load_error = f"Not a regular file: {self.filepath}"
+            logger.warning(self.load_error)
+            return
+
+        try:
+            self.file_contents = path.read_text()
+            if not self.file_contents:
+                self.file_contents = "[dim](empty file)[/dim]"
+            logger.info(f"Loaded log file: {self.filepath}")
+        except PermissionError:
+            self.load_error = f"Permission denied: {self.filepath}"
+            logger.warning(self.load_error)
+        except OSError as exc:
+            self.load_error = f"Error reading file: {exc}"
+            logger.warning(self.load_error)
+
+    def on_mount(self) -> None:
+        """Focus the scroll area for keyboard navigation."""
+        try:
+            scroll = self.query_one("#log-content-scroll", VerticalScroll)
+            scroll.focus()
+        except Exception:
+            # If no scroll area (error case), focus the close button
+            self.query_one("#log-close-button", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button press.
+
+        Args:
+            event: The button press event.
+        """
+        if event.button.id == "log-close-button":
+            self.dismiss(None)
+        elif event.button.id == "editor-button":
+            self._open_in_editor()
+
+    def action_open_in_editor(self) -> None:
+        """Open the log file in $EDITOR."""
+        self._open_in_editor()
+
+    def _open_in_editor(self) -> None:
+        """Open the file in the user's editor."""
+        logger.info(f"Opening {self.filepath} in external editor")
+        with self.app.suspend():
+            success, message = open_in_editor(self.filepath)
+
+        if success:
+            self.app.notify("Opened in editor")
+        else:
+            self.app.notify(f"Failed: {message}", severity="error")
+
+    def action_close(self) -> None:
+        """Close the modal."""
+        self.dismiss(None)
 
 
 class JobInputScreen(ModalScreen[str | None]):
@@ -65,20 +194,35 @@ class JobInfoScreen(ModalScreen[None]):
     BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("escape", "close", "Close"),
         ("q", "close", "Close"),
+        ("o", "open_stdout", "Open StdOut"),
+        ("e", "open_stderr", "Open StdErr"),
+        ("left", "focus_previous_button", "Previous"),
+        ("right", "focus_next_button", "Next"),
     )
 
-    def __init__(self, job_id: str, job_info: str, error: str | None = None) -> None:
+    def __init__(
+        self,
+        job_id: str,
+        job_info: str,
+        error: str | None = None,
+        stdout_path: str | None = None,
+        stderr_path: str | None = None,
+    ) -> None:
         """Initialize the job info screen.
 
         Args:
             job_id: The SLURM job ID being displayed.
             job_info: Formatted job information string.
             error: Optional error message if job info couldn't be retrieved.
+            stdout_path: Optional path to the job's stdout log file.
+            stderr_path: Optional path to the job's stderr log file.
         """
         super().__init__()
         self.job_id = job_id
         self.job_info = job_info
         self.error = error
+        self.stdout_path = stdout_path
+        self.stderr_path = stderr_path
 
     def compose(self) -> ComposeResult:
         """Create the job info display layout.
@@ -100,8 +244,37 @@ class JobInfoScreen(ModalScreen[None]):
                     yield Static(self.job_info, id="job-info-text")
 
             with Container(id="job-info-footer"):
-                yield Static("Press [bold]Esc[/bold] or [bold]Q[/bold] to close", id="hint-text")
+                yield Static(
+                    "Press [bold]O[/bold] StdOut | [bold]E[/bold] StdErr | [bold]Esc/Q[/bold] Close",
+                    id="hint-text",
+                )
+                with Container(id="log-buttons"):
+                    yield Button(
+                        "📄 Open StdOut",
+                        variant="primary",
+                        id="stdout-button",
+                        disabled=not self.stdout_path,
+                    )
+                    yield Button(
+                        "📄 Open StdErr",
+                        variant="warning",
+                        id="stderr-button",
+                        disabled=not self.stderr_path,
+                    )
                 yield Button("✕ Close", variant="default", id="close-button")
+
+    def on_mount(self) -> None:
+        """Focus the first available log button on mount."""
+        # Focus the first enabled log button for arrow key navigation
+        stdout_btn = self.query_one("#stdout-button", Button)
+        stderr_btn = self.query_one("#stderr-button", Button)
+
+        if not stdout_btn.disabled:
+            stdout_btn.focus()
+        elif not stderr_btn.disabled:
+            stderr_btn.focus()
+        else:
+            self.query_one("#close-button", Button).focus()
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press.
@@ -111,6 +284,99 @@ class JobInfoScreen(ModalScreen[None]):
         """
         if event.button.id == "close-button":
             self.dismiss(None)
+        elif event.button.id == "stdout-button":
+            self._open_log(self.stdout_path, "stdout")
+        elif event.button.id == "stderr-button":
+            self._open_log(self.stderr_path, "stderr")
+
+    def _get_button_order(self) -> list[Button]:
+        """Get buttons in navigation order.
+
+        Returns:
+            List of buttons in left-to-right order.
+        """
+        return [
+            self.query_one("#stdout-button", Button),
+            self.query_one("#stderr-button", Button),
+            self.query_one("#close-button", Button),
+        ]
+
+    def _get_focused_button_index(self, buttons: list[Button]) -> int | None:
+        """Get the index of the currently focused button.
+
+        Args:
+            buttons: List of buttons to search.
+
+        Returns:
+            Index of focused button, or None if no button is focused.
+        """
+        focused = self.focused
+        for idx, btn in enumerate(buttons):
+            if btn is focused:
+                return idx
+        return None
+
+    def action_focus_next_button(self) -> None:
+        """Focus the next button (right arrow)."""
+        buttons = self._get_button_order()
+        current_idx = self._get_focused_button_index(buttons)
+
+        if current_idx is None:
+            # If no button focused, focus the first enabled one
+            for btn in buttons:
+                if not btn.disabled:
+                    btn.focus()
+                    return
+            return
+
+        # Find next enabled button
+        for i in range(1, len(buttons)):
+            next_idx = (current_idx + i) % len(buttons)
+            if not buttons[next_idx].disabled:
+                buttons[next_idx].focus()
+                return
+
+    def action_focus_previous_button(self) -> None:
+        """Focus the previous button (left arrow)."""
+        buttons = self._get_button_order()
+        current_idx = self._get_focused_button_index(buttons)
+
+        if current_idx is None:
+            # If no button focused, focus the last enabled one
+            for btn in reversed(buttons):
+                if not btn.disabled:
+                    btn.focus()
+                    return
+            return
+
+        # Find previous enabled button
+        for i in range(1, len(buttons)):
+            prev_idx = (current_idx - i) % len(buttons)
+            if not buttons[prev_idx].disabled:
+                buttons[prev_idx].focus()
+                return
+
+    def _open_log(self, path: str | None, log_type: str) -> None:
+        """Open the log viewer screen for a log file.
+
+        Args:
+            path: Path to the log file.
+            log_type: Type of log (stdout or stderr).
+        """
+        if not path:
+            self.app.notify(f"No {log_type} path available", severity="warning")
+            return
+
+        logger.info(f"Viewing {log_type} log: {path}")
+        self.app.push_screen(LogViewerScreen(path, log_type))
+
+    def action_open_stdout(self) -> None:
+        """Open the stdout log file."""
+        self._open_log(self.stdout_path, "stdout")
+
+    def action_open_stderr(self) -> None:
+        """Open the stderr log file."""
+        self._open_log(self.stderr_path, "stderr")
 
     def action_close(self) -> None:
         """Close the modal."""

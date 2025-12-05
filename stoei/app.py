@@ -10,7 +10,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
 
 from stoei.logging import get_logger
-from stoei.slurm.commands import get_job_history, get_job_info, get_running_jobs
+from stoei.slurm.commands import get_job_history, get_job_info, get_job_log_paths, get_running_jobs
 from stoei.widgets.job_stats import JobStats
 from stoei.widgets.screens import JobInfoScreen, JobInputScreen
 
@@ -121,7 +121,8 @@ class SlurmMonitor(App[None]):
             if job_id:
                 logger.info(f"Looking up job info for {job_id}")
                 job_info, error = get_job_info(job_id)
-                self.push_screen(JobInfoScreen(job_id, job_info, error))
+                stdout_path, stderr_path, _ = get_job_log_paths(job_id)
+                self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
 
         self.push_screen(JobInputScreen(), handle_job_id)
 
@@ -145,7 +146,8 @@ class SlurmMonitor(App[None]):
             job_id = str(row_data[0]).strip()
             logger.info(f"Showing info for selected job {job_id}")
             job_info, error = get_job_info(job_id)
-            self.push_screen(JobInfoScreen(job_id, job_info, error))
+            stdout_path, stderr_path, _ = get_job_log_paths(job_id)
+            self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
         except (IndexError, KeyError) as exc:
             logger.error(f"Could not get job ID from row {row_key}: {exc}")
             self.notify("Could not get job ID from selected row", severity="error")
@@ -180,7 +182,8 @@ class SlurmMonitor(App[None]):
             job_id = str(row_key[0]).strip()
             logger.info(f"Showing info for selected job {job_id}")
             job_info, error = get_job_info(job_id)
-            self.push_screen(JobInfoScreen(job_id, job_info, error))
+            stdout_path, stderr_path, _ = get_job_log_paths(job_id)
+            self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
         except (IndexError, KeyError):
             logger.error(f"Could not get job ID from row {cursor_row}")
             self.notify("Could not get job ID from selected row", severity="error")
