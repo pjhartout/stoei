@@ -2,8 +2,6 @@
 
 A TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track of your HPC cluster jobs with an intuitive, auto-refreshing interface.
 
-> **What's in a name?** *Stoei* is a Dutch verb meaning "wrestle" — because managing SLURM jobs can feel like a struggle! It's also an alternative spelling for **S**lurm**TUI**.
-
 [![GitHub release](https://img.shields.io/github/v/tag/pjhartout/stoei?label=version)](https://github.com/pjhartout/stoei/releases)
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/github/license/pjhartout/stoei)](https://github.com/pjhartout/stoei/blob/main/LICENSE)
@@ -171,3 +169,5 @@ Contributions are welcome! Please ensure:
 2. Code is formatted (`uv run ruff format .`)
 3. No linting errors (`uv run ruff check .`)
 4. Type hints are correct (`uv run ty check stoei/`)
+
+> **What's in a name?** *Stoei* is a Dutch verb meaning "wrestle" — because managing SLURM jobs can feel like a struggle! It's also an alternative spelling for **S**lurm**TUI**.
