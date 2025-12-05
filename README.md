@@ -1,6 +1,6 @@
 # Stoei
 
-A beautiful TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track of your HPC cluster jobs with an intuitive, auto-refreshing interface.
+A TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track of your HPC cluster jobs with an intuitive, auto-refreshing interface.
 
 > **What's in a name?** *Stoei* is a Dutch verb meaning "wrestle" — because managing SLURM jobs can feel like a struggle! It's also an alternative spelling for **S**lurm**TUI**.
 
