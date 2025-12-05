@@ -4,9 +4,9 @@ A beautiful TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track 
 
 > **What's in a name?** *Stoei* is a Dutch verb meaning "wrestle" — because managing SLURM jobs can feel like a struggle! It's also an alternative spelling for **S**lurm**TUI**.
 
-[![PyPI version](https://img.shields.io/pypi/v/stoei.svg)](https://pypi.org/project/stoei/)
-[![Python Version](https://img.shields.io/pypi/pyversions/stoei.svg)](https://pypi.org/project/stoei/)
-[![License](https://img.shields.io/pypi/l/stoei.svg)](https://github.com/pjhartout/stoei/blob/main/LICENSE)
+[![GitHub release](https://img.shields.io/github/v/tag/pjhartout/stoei?label=version)](https://github.com/pjhartout/stoei/releases)
+[![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/github/license/pjhartout/stoei)](https://github.com/pjhartout/stoei/blob/main/LICENSE)
 
 ## Features
 
