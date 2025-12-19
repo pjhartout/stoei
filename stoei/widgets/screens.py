@@ -1,11 +1,11 @@
-"""Modal screens for job information display."""
+"""Full-screen screens for job information display."""
 
 from pathlib import Path
 from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical, VerticalScroll
-from textual.screen import ModalScreen
+from textual.screen import Screen
 from textual.widgets import Button, Input, Static
 
 from stoei.editor import open_in_editor
@@ -14,13 +14,16 @@ from stoei.logging import get_logger
 logger = get_logger(__name__)
 
 
-class LogViewerScreen(ModalScreen[None]):
+class LogViewerScreen(Screen[None]):
     """Modal screen to display log file contents."""
 
     BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("escape", "close", "Close"),
         ("q", "close", "Close"),
         ("e", "open_in_editor", "Open in $EDITOR"),
+        ("g", "scroll_top", "Go to top"),
+        ("G", "scroll_bottom", "Go to bottom"),
+        ("r", "reload", "Reload file"),
     )
 
     def __init__(self, filepath: str, log_type: str) -> None:
@@ -65,7 +68,7 @@ class LogViewerScreen(ModalScreen[None]):
 
             with Container(id="log-viewer-footer"):
                 yield Static(
-                    "[bold]E[/bold] Open in $EDITOR | [bold]↑↓[/bold] Scroll | [bold]Esc/Q[/bold] Close",
+                    "[bold]g/G[/bold] Top/Bottom | [bold]r[/bold] Reload | [bold]e[/bold] Editor | [bold]Esc/q[/bold] Close",
                     id="log-hint-text",
                 )
                 yield Button("📝 Open in $EDITOR", variant="primary", id="editor-button")
@@ -98,13 +101,23 @@ class LogViewerScreen(ModalScreen[None]):
             logger.warning(self.load_error)
 
     def on_mount(self) -> None:
-        """Focus the scroll area for keyboard navigation."""
+        """Focus the scroll area and scroll to bottom for keyboard navigation."""
         try:
             scroll = self.query_one("#log-content-scroll", VerticalScroll)
             scroll.focus()
+            # Scroll to bottom to show latest log entries
+            self.call_after_refresh(self._scroll_to_bottom)
         except Exception:
             # If no scroll area (error case), focus the close button
             self.query_one("#log-close-button", Button).focus()
+
+    def _scroll_to_bottom(self) -> None:
+        """Scroll the content to the bottom."""
+        try:
+            scroll = self.query_one("#log-content-scroll", VerticalScroll)
+            scroll.scroll_end(animate=False)
+        except Exception:
+            pass
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press.
@@ -132,12 +145,38 @@ class LogViewerScreen(ModalScreen[None]):
         else:
             self.app.notify(f"Failed: {message}", severity="error")
 
+    def action_scroll_top(self) -> None:
+        """Scroll to the top of the log content."""
+        try:
+            scroll = self.query_one("#log-content-scroll", VerticalScroll)
+            scroll.scroll_home(animate=False)
+        except Exception:
+            pass
+
+    def action_scroll_bottom(self) -> None:
+        """Scroll to the bottom of the log content."""
+        self._scroll_to_bottom()
+
+    def action_reload(self) -> None:
+        """Reload the file contents."""
+        self._load_file()
+        try:
+            content_widget = self.query_one("#log-content-text", Static)
+            if self.load_error:
+                content_widget.update(f"⚠️  {self.load_error}")
+            else:
+                content_widget.update(self.file_contents)
+            self.app.notify("File reloaded")
+            logger.info(f"Reloaded log file: {self.filepath}")
+        except Exception as exc:
+            logger.warning(f"Failed to update content after reload: {exc}")
+
     def action_close(self) -> None:
         """Close the modal."""
         self.dismiss(None)
 
 
-class JobInputScreen(ModalScreen[str | None]):
+class JobInputScreen(Screen[str | None]):
     """Modal screen to input a job ID."""
 
     BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (("escape", "cancel", "Cancel"),)
@@ -188,7 +227,7 @@ class JobInputScreen(ModalScreen[str | None]):
         self.dismiss(None)
 
 
-class JobInfoScreen(ModalScreen[None]):
+class JobInfoScreen(Screen[None]):
     """Modal screen to display job information."""
 
     BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
@@ -415,7 +454,7 @@ class JobInfoScreen(ModalScreen[None]):
         self.dismiss(None)
 
 
-class CancelConfirmScreen(ModalScreen[bool]):
+class CancelConfirmScreen(Screen[bool]):
     """Modal screen to confirm job cancellation."""
 
     BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
