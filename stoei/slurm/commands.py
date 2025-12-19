@@ -281,51 +281,6 @@ def get_job_log_paths(job_id: str) -> tuple[str | None, str | None, str | None]:
     return stdout, stderr, None
 
 
-def cancel_job(job_id: str) -> tuple[bool, str | None]:
-    """Cancel a SLURM job using scancel.
-
-    Args:
-        job_id: The SLURM job ID to cancel.
-
-    Returns:
-        Tuple of (success boolean, optional error message).
-    """
-    try:
-        validate_job_id(job_id)
-    except ValidationError as exc:
-        return False, str(exc)
-
-    try:
-        scancel = resolve_executable("scancel")
-        command = [scancel, job_id]
-        logger.debug(f"Running command: {' '.join(command)}")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        logger.error(f"scancel not found: {exc}")
-        return False, f"scancel not found: {exc}"
-    except subprocess.TimeoutExpired:
-        logger.error(f"Timeout cancelling job {job_id}")
-        return False, "Command timed out"
-    except subprocess.SubprocessError as exc:
-        logger.error(f"Error running scancel: {exc}")
-        return False, f"Error running scancel: {exc}"
-
-    if result.returncode != 0:
-        error_msg = result.stderr.strip() or "Failed to cancel job"
-        logger.warning(f"scancel returned error for job {job_id}: {error_msg}")
-        return False, f"scancel error: {error_msg}"
-
-    logger.info(f"Successfully cancelled job {job_id}")
-    return True, None
-
-
 def get_running_jobs() -> list[tuple[str, ...]]:
     """Return running/pending jobs from squeue.
 
@@ -415,3 +370,48 @@ def get_job_history() -> tuple[list[tuple[str, ...]], int, int, int]:
     jobs, total_jobs, total_requeues, max_requeues = parse_sacct_output(result.stdout)
     logger.debug(f"Found {total_jobs} jobs in history with {total_requeues} total requeues")
     return jobs, total_jobs, total_requeues, max_requeues
+
+
+def cancel_job(job_id: str) -> tuple[bool, str | None]:
+    """Cancel a SLURM job.
+
+    Args:
+        job_id: The SLURM job ID to cancel.
+
+    Returns:
+        Tuple of (success, optional error message).
+    """
+    try:
+        validate_job_id(job_id)
+    except ValidationError as exc:
+        return False, str(exc)
+
+    try:
+        scancel = resolve_executable("scancel")
+        command = [scancel, job_id]
+        logger.debug(f"Running command: {' '.join(command)}")
+
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        logger.error(f"scancel not found: {exc}")
+        return False, f"scancel not found: {exc}"
+    except subprocess.TimeoutExpired:
+        logger.error(f"Timeout cancelling job {job_id}")
+        return False, "Command timed out"
+    except subprocess.SubprocessError as exc:
+        logger.error(f"Error running scancel: {exc}")
+        return False, f"Error running scancel: {exc}"
+
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() or "Failed to cancel job"
+        logger.warning(f"scancel returned error for job {job_id}: {error_msg}")
+        return False, f"scancel error: {error_msg}"
+
+    logger.info(f"Successfully cancelled job {job_id}")
+    return True, None
