@@ -50,7 +50,7 @@ class TestJobStats:
         rendered = job_stats._render_stats()
 
         assert "Total Jobs" in rendered
-        assert "Running/Pending" in rendered
+        assert "Active" in rendered
         assert "Total Requeues" in rendered
         assert "Max Requeues" in rendered
 
@@ -58,4 +58,4 @@ class TestJobStats:
         rendered = job_stats._render_stats()
 
         assert "Statistics" in rendered
-        assert "24h" in rendered
+        assert "30 Days" in rendered

@@ -4,20 +4,26 @@ from pathlib import Path
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, Horizontal, Vertical, VerticalScroll
 from textual.timer import Timer
 from textual.widgets import Button, DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
+from textual.worker import Worker, WorkerState
 
-from stoei.logging import get_logger
-from stoei.slurm.commands import cancel_job, get_job_history, get_job_info, get_job_log_paths, get_running_jobs
+from stoei.logging import add_tui_sink, get_logger, remove_tui_sink
+from stoei.slurm.cache import JobCache, JobState
+from stoei.slurm.commands import cancel_job, get_job_info, get_job_log_paths
 from stoei.widgets.job_stats import JobStats
+from stoei.widgets.log_pane import LogPane
 from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen
 
 logger = get_logger(__name__)
 
 # Path to styles directory
 STYLES_DIR = Path(__file__).parent / "styles"
+
+# Refresh interval in seconds (increased for better performance)
+REFRESH_INTERVAL = 5.0
 
 
 class SlurmMonitor(App[None]):
@@ -34,15 +40,17 @@ class SlurmMonitor(App[None]):
         ("i", "show_job_info", "Job Info"),
         ("enter", "show_selected_job_info", "View Selected Job"),
         ("c", "cancel_job", "Cancel Job"),
-        ("1", "focus_running", "Running Jobs"),
-        ("2", "focus_history", "History"),
     )
 
     def __init__(self) -> None:
         """Initialize the SLURM monitor app."""
         super().__init__()
-        self.refresh_interval: float = 2.0
+        self.refresh_interval: float = REFRESH_INTERVAL
         self.auto_refresh_timer: Timer | None = None
+        self._job_cache: JobCache = JobCache()
+        self._refresh_worker: Worker[None] | None = None
+        self._initial_load_complete: bool = False
+        self._log_sink_id: int | None = None
         logger.info("Initializing SlurmMonitor app")
 
     def compose(self) -> ComposeResult:
@@ -56,84 +64,127 @@ class SlurmMonitor(App[None]):
         with Container(id="stats-container"):
             yield JobStats()
 
-        with VerticalScroll(id="running-table"):
-            with Horizontal(id="running-header"):
-                yield Static("[bold]🏃 Currently Running/Pending Jobs[/bold]", id="running-title")
-                yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
-            yield DataTable(id="running_jobs_table")
+        with Horizontal(id="main-content"):
+            with VerticalScroll(id="jobs-panel"):
+                with Horizontal(id="jobs-header"):
+                    yield Static("[bold]📋 All Jobs[/bold]", id="jobs-title")
+                    yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
+                yield DataTable(id="jobs_table")
 
-        with VerticalScroll(id="history-table"):
-            yield Static("[bold]📜 Job History (Last 30 Days)[/bold]")
-            yield DataTable(id="history_jobs_table")
+            with Vertical(id="log-panel"):
+                yield Static("[bold]📝 Logs[/bold]", id="log-title")
+                yield LogPane(id="log_pane")
 
         yield Footer()
 
     def on_mount(self) -> None:
-        """Initialize tables and start auto-refresh."""
+        """Initialize table and start data loading."""
+        # Set up log pane as a loguru sink
+        log_pane = self.query_one("#log_pane", LogPane)
+        self._log_sink_id = add_tui_sink(log_pane.sink, level="DEBUG")
+
         logger.info("Mounting application")
 
-        running_table = self.query_one("#running_jobs_table", DataTable)
-        running_table.cursor_type = "row"
-        running_table.add_columns("JobID", "JobName", "State", "Time", "Nodes", "NodeList")
+        jobs_table = self.query_one("#jobs_table", DataTable)
+        jobs_table.cursor_type = "row"
+        jobs_table.add_columns("JobID", "Name", "State", "Time", "Nodes", "NodeList")
 
-        history_table = self.query_one("#history_jobs_table", DataTable)
-        history_table.cursor_type = "row"
-        history_table.add_columns("JobID", "JobName", "State", "Restarts", "Elapsed", "ExitCode", "Node")
+        # Show loading message
+        self.notify("Loading job data...", timeout=2)
 
-        self.refresh_data()
-        self.auto_refresh_timer = self.set_interval(self.refresh_interval, self.refresh_data)
-        logger.info(f"Auto-refresh started with interval {self.refresh_interval}s")
+        # Initial data load in background worker
+        self._start_refresh_worker()
 
-        # Focus the running jobs table by default
-        running_table.focus()
+    def _start_refresh_worker(self) -> None:
+        """Start background worker for data refresh."""
+        if self._refresh_worker is not None and self._refresh_worker.state == WorkerState.RUNNING:
+            logger.debug("Refresh worker already running, skipping")
+            return
 
-    def refresh_data(self) -> None:
-        """Refresh tables and summary statistics."""
-        logger.debug("Refreshing data")
+        self._refresh_worker = self.run_worker(
+            self._refresh_data_async,
+            name="refresh_data",
+            exclusive=True,
+            thread=True,
+        )
 
-        # Get running jobs
-        running_jobs = get_running_jobs()
-        running_table = self.query_one("#running_jobs_table", DataTable)
+    def _refresh_data_async(self) -> None:
+        """Refresh data from SLURM (runs in background worker thread)."""
+        logger.debug("Background refresh starting")
 
-        # Save cursor position before clearing
-        running_cursor_row = running_table.cursor_row
+        # Workers run in a separate thread, so blocking calls are safe
+        self._job_cache.refresh()
 
-        running_table.clear()
+        # Schedule UI update on main thread
+        self.call_from_thread(self._update_ui_from_cache)
 
-        for job in running_jobs:
-            running_table.add_row(*job)
-
-        # Restore cursor position if possible
-        if running_cursor_row is not None and running_table.row_count > 0:
-            new_row = min(running_cursor_row, running_table.row_count - 1)
-            running_table.move_cursor(row=new_row)
-
-        # Get job history
-        history_jobs, total_jobs, total_requeues, max_requeues = get_job_history()
-        history_table = self.query_one("#history_jobs_table", DataTable)
+    def _update_ui_from_cache(self) -> None:
+        """Update UI components from cached data (must run on main thread)."""
+        jobs_table = self.query_one("#jobs_table", DataTable)
 
         # Save cursor position before clearing
-        history_cursor_row = history_table.cursor_row
+        cursor_row = jobs_table.cursor_row
 
-        history_table.clear()
+        jobs_table.clear()
 
-        for job in history_jobs:
-            history_table.add_row(*job)
+        # Add jobs from cache with state-based styling
+        jobs = self._job_cache.jobs
+        for job in jobs:
+            # Apply state-based row styling using Rich markup
+            state_display = self._format_state(job.state, job.state_category)
+            jobs_table.add_row(
+                job.job_id,
+                job.name,
+                state_display,
+                job.time,
+                job.nodes,
+                job.node_list,
+            )
 
         # Restore cursor position if possible
-        if history_cursor_row is not None and history_table.row_count > 0:
-            new_row = min(history_cursor_row, history_table.row_count - 1)
-            history_table.move_cursor(row=new_row)
+        if cursor_row is not None and jobs_table.row_count > 0:
+            new_row = min(cursor_row, jobs_table.row_count - 1)
+            jobs_table.move_cursor(row=new_row)
 
         # Update statistics
+        total_jobs, total_requeues, max_requeues, running, pending = self._job_cache.stats
         stats_widget = self.query_one(JobStats)
-        stats_widget.update_stats(total_jobs, total_requeues, max_requeues, len(running_jobs))
+        stats_widget.update_stats(total_jobs, total_requeues, max_requeues, running + pending)
+
+        # Start auto-refresh timer after initial load
+        if not self._initial_load_complete:
+            self._initial_load_complete = True
+            self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
+            logger.info(f"Auto-refresh started with interval {self.refresh_interval}s")
+
+            # Focus the table
+            jobs_table.focus()
+
+    def _format_state(self, state: str, category: JobState) -> str:
+        """Format job state with color coding.
+
+        Args:
+            state: Raw state string.
+            category: Categorized state.
+
+        Returns:
+            Rich-formatted state string.
+        """
+        state_formats = {
+            JobState.RUNNING: f"[bold green]{state}[/bold green]",
+            JobState.PENDING: f"[bold yellow]{state}[/bold yellow]",
+            JobState.COMPLETED: f"[green]{state}[/green]",
+            JobState.FAILED: f"[bold red]{state}[/bold red]",
+            JobState.CANCELLED: f"[dim]{state}[/dim]",
+            JobState.TIMEOUT: f"[red]{state}[/red]",
+        }
+        return state_formats.get(category, state)
 
     def action_refresh(self) -> None:
         """Manual refresh action."""
         logger.info("Manual refresh triggered")
-        self.refresh_data()
-        self.notify("Data refreshed!")
+        self.notify("Refreshing...")
+        self._start_refresh_worker()
 
     def action_show_job_info(self) -> None:
         """Show job info dialog."""
@@ -174,33 +225,21 @@ class SlurmMonitor(App[None]):
             self.notify("Could not get job ID from selected row", severity="error")
 
     def action_show_selected_job_info(self) -> None:
-        """Show job info for the currently selected row in either table."""
-        running_table = self.query_one("#running_jobs_table", DataTable)
-        history_table = self.query_one("#history_jobs_table", DataTable)
+        """Show job info for the currently selected row."""
+        jobs_table = self.query_one("#jobs_table", DataTable)
 
-        # Check which table has focus
-        focused = self.focused
-        if focused is running_table and running_table.row_count > 0:
-            table = running_table
-        elif focused is history_table and history_table.row_count > 0:
-            table = history_table
-        elif running_table.row_count > 0:
-            table = running_table
-        elif history_table.row_count > 0:
-            table = history_table
-        else:
+        if jobs_table.row_count == 0:
             self.notify("No jobs to display", severity="warning")
             return
 
-        # Get the job ID from the first column of the selected row
-        cursor_row = table.cursor_row
+        cursor_row = jobs_table.cursor_row
         if cursor_row is None or cursor_row < 0:
             self.notify("No row selected", severity="warning")
             return
 
         try:
-            row_key = table.get_row_at(cursor_row)
-            job_id = str(row_key[0]).strip()
+            row_data = jobs_table.get_row_at(cursor_row)
+            job_id = str(row_data[0]).strip()
             logger.info(f"Showing info for selected job {job_id}")
             job_info, error = get_job_info(job_id)
             stdout_path, stderr_path, _ = get_job_log_paths(job_id)
@@ -211,27 +250,27 @@ class SlurmMonitor(App[None]):
 
     def action_cancel_job(self) -> None:
         """Cancel the selected job after confirmation."""
-        running_table = self.query_one("#running_jobs_table", DataTable)
+        jobs_table = self.query_one("#jobs_table", DataTable)
 
-        # Only allow cancellation from running jobs table
-        focused = self.focused
-        if focused is not running_table:
-            self.notify("Select a job from Running Jobs to cancel", severity="warning")
-            return
-
-        if running_table.row_count == 0:
+        if jobs_table.row_count == 0:
             self.notify("No jobs to cancel", severity="warning")
             return
 
-        cursor_row = running_table.cursor_row
+        cursor_row = jobs_table.cursor_row
         if cursor_row is None or cursor_row < 0:
             self.notify("No job selected", severity="warning")
             return
 
         try:
-            row_data = running_table.get_row_at(cursor_row)
+            row_data = jobs_table.get_row_at(cursor_row)
             job_id = str(row_data[0]).strip()
             job_name = str(row_data[1]).strip() if len(row_data) > 1 else None
+
+            # Check if job is active (can be cancelled)
+            cached_job = self._job_cache.get_job_by_id(job_id)
+            if cached_job and not cached_job.is_active:
+                self.notify("Cannot cancel completed job", severity="warning")
+                return
 
             def handle_confirmation(confirmed: bool | None) -> None:
                 if confirmed is True:
@@ -239,7 +278,7 @@ class SlurmMonitor(App[None]):
                     if success:
                         logger.info(f"Successfully cancelled job {job_id}")
                         self.notify(f"Job {job_id} cancelled", severity="information")
-                        self.refresh_data()
+                        self._start_refresh_worker()  # Refresh to update state
                     else:
                         logger.error(f"Failed to cancel job {job_id}: {error}")
                         self.notify(f"Failed to cancel: {error}", severity="error")
@@ -257,58 +296,17 @@ class SlurmMonitor(App[None]):
             event: The button press event.
         """
         if event.button.id == "cancel-job-btn":
-            self._cancel_selected_job()
-
-    def _cancel_selected_job(self) -> None:
-        """Cancel the selected job from the running jobs table."""
-        running_table = self.query_one("#running_jobs_table", DataTable)
-
-        if running_table.row_count == 0:
-            self.notify("No jobs to cancel", severity="warning")
-            return
-
-        cursor_row = running_table.cursor_row
-        if cursor_row is None or cursor_row < 0:
-            self.notify("No job selected - select a job first", severity="warning")
-            return
-
-        try:
-            row_data = running_table.get_row_at(cursor_row)
-            job_id = str(row_data[0]).strip()
-            job_name = str(row_data[1]).strip() if len(row_data) > 1 else None
-
-            def handle_confirmation(confirmed: bool | None) -> None:
-                if confirmed is True:
-                    success, error = cancel_job(job_id)
-                    if success:
-                        logger.info(f"Successfully cancelled job {job_id}")
-                        self.notify(f"Job {job_id} cancelled", severity="information")
-                        self.refresh_data()
-                    else:
-                        logger.error(f"Failed to cancel job {job_id}: {error}")
-                        self.notify(f"Failed to cancel: {error}", severity="error")
-
-            self.push_screen(CancelConfirmScreen(job_id, job_name), handle_confirmation)
-
-        except (IndexError, KeyError) as exc:
-            logger.error(f"Could not get job ID from row {cursor_row}: {exc}")
-            self.notify("Could not get job ID from selected row", severity="error")
-
-    def action_focus_running(self) -> None:
-        """Focus the running jobs table."""
-        logger.debug("Focusing running jobs table")
-        self.query_one("#running_jobs_table", DataTable).focus()
-
-    def action_focus_history(self) -> None:
-        """Focus the history jobs table."""
-        logger.debug("Focusing history jobs table")
-        self.query_one("#history_jobs_table", DataTable).focus()
+            self.action_cancel_job()
 
     async def action_quit(self) -> None:
         """Quit the application."""
         logger.info("Quitting application")
         if self.auto_refresh_timer:
             self.auto_refresh_timer.stop()
+        # Clean up log sink
+        if self._log_sink_id is not None:
+            remove_tui_sink(self._log_sink_id)
+            self._log_sink_id = None
         self.exit()
 
 

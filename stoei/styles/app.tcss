@@ -54,36 +54,32 @@ JobStats {
     color: $foreground;
 }
 
-/* Job tables */
-#running-table {
+/* Main content area with jobs and logs side by side */
+#main-content {
     height: 1fr;
+    width: 100%;
+}
+
+/* Unified jobs panel */
+#jobs-panel {
+    width: 3fr;
+    height: 100%;
     border: heavy ansi_blue;
-    margin-bottom: 1;
     background: $background;
 }
 
-#running-table:focus-within {
+#jobs-panel:focus-within {
     border: heavy ansi_cyan;
 }
 
-#history-table {
-    height: 2fr;
-    border: heavy ansi_bright_black;
-    background: $background;
-}
-
-#history-table:focus-within {
-    border: heavy ansi_cyan;
-}
-
-#running-header {
+#jobs-header {
     width: 100%;
     height: auto;
     background: ansi_black;
     padding: 0 1;
 }
 
-#running-title {
+#jobs-title {
     width: 1fr;
     color: ansi_cyan;
     background: ansi_black;
@@ -103,12 +99,6 @@ JobStats {
 
 #cancel-job-btn:focus {
     border: tall ansi_bright_cyan;
-}
-
-#history-table Static {
-    color: ansi_cyan;
-    background: ansi_black;
-    padding: 0 1;
 }
 
 /* DataTable styling */
@@ -141,6 +131,37 @@ DataTable > .datatable--odd-row {
     background: ansi_black;
 }
 
+/* Log panel */
+#log-panel {
+    width: 1fr;
+    height: 100%;
+    border: heavy ansi_magenta;
+    background: $background;
+    margin-left: 1;
+}
+
+#log-panel:focus-within {
+    border: heavy ansi_bright_magenta;
+}
+
+#log-title {
+    width: 100%;
+    height: auto;
+    background: ansi_black;
+    color: ansi_magenta;
+    padding: 0 1;
+}
+
+LogPane {
+    height: 1fr;
+    width: 100%;
+    background: $background;
+    scrollbar-background: ansi_black;
+    scrollbar-color: ansi_bright_black;
+    scrollbar-color-hover: ansi_bright_magenta;
+    scrollbar-color-active: ansi_magenta;
+}
+
 /* Scrollbar styling */
 VerticalScroll {
     scrollbar-background: ansi_black;
@@ -148,4 +169,3 @@ VerticalScroll {
     scrollbar-color-hover: ansi_bright_blue;
     scrollbar-color-active: ansi_cyan;
 }
-

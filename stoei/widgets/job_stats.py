@@ -42,9 +42,9 @@ class JobStats(Static):
             Formatted statistics string with Rich markup.
         """
         return (
-            f"[bold]📊 Statistics (Last 24h)[/bold]\n"
+            f"[bold]📊 Statistics (Last 30 Days)[/bold]\n"
             f"  Total Jobs: {self.total_jobs}  |  "
-            f"Running/Pending: {self.running_jobs}  |  "
+            f"Active: {self.running_jobs}  |  "
             f"Total Requeues: {self.total_requeues}  |  "
             f"Max Requeues: {self.max_requeues}"
         )
