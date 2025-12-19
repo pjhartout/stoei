@@ -26,7 +26,10 @@ def main() -> None:
     base_job_id = job_id.split("_")[0]
 
     if base_job_id in FAILED_JOBS:
-        print(f"scancel: error: Kill job error on job id {job_id}: Job/step already completing or completed", file=sys.stderr)
+        print(
+            f"scancel: error: Kill job error on job id {job_id}: Job/step already completing or completed",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     # Success - scancel produces no output on success
