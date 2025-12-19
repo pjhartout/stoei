@@ -4,9 +4,9 @@ from pathlib import Path
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, VerticalScroll
+from textual.containers import Container, Horizontal, VerticalScroll
 from textual.timer import Timer
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import Button, DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
 
 from stoei.logging import get_logger
@@ -32,8 +32,8 @@ class SlurmMonitor(App[None]):
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh Now"),
         ("i", "show_job_info", "Job Info"),
-        ("c", "cancel_selected_job", "Cancel Job"),
         ("enter", "show_selected_job_info", "View Selected Job"),
+        ("c", "cancel_job", "Cancel Job"),
         ("1", "focus_running", "Running Jobs"),
         ("2", "focus_history", "History"),
     )
@@ -57,7 +57,9 @@ class SlurmMonitor(App[None]):
             yield JobStats()
 
         with VerticalScroll(id="running-table"):
-            yield Static("[bold]🏃 Currently Running/Pending Jobs[/bold]")
+            with Horizontal(id="running-header"):
+                yield Static("[bold]🏃 Currently Running/Pending Jobs[/bold]", id="running-title")
+                yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
             yield DataTable(id="running_jobs_table")
 
         with VerticalScroll(id="history-table"):
@@ -207,56 +209,90 @@ class SlurmMonitor(App[None]):
             logger.error(f"Could not get job ID from row {cursor_row}")
             self.notify("Could not get job ID from selected row", severity="error")
 
-    def _get_selected_job_id(self) -> str | None:
-        """Get the job ID from the currently selected row.
-
-        Returns:
-            The job ID string, or None if no valid selection.
-        """
+    def action_cancel_job(self) -> None:
+        """Cancel the selected job after confirmation."""
         running_table = self.query_one("#running_jobs_table", DataTable)
-        history_table = self.query_one("#history_jobs_table", DataTable)
 
-        # Check which table has focus
+        # Only allow cancellation from running jobs table
         focused = self.focused
-        if focused is running_table and running_table.row_count > 0:
-            table = running_table
-        elif focused is history_table and history_table.row_count > 0:
-            table = history_table
-        elif running_table.row_count > 0:
-            table = running_table
-        elif history_table.row_count > 0:
-            table = history_table
-        else:
-            return None
+        if focused is not running_table:
+            self.notify("Select a job from Running Jobs to cancel", severity="warning")
+            return
 
-        cursor_row = table.cursor_row
+        if running_table.row_count == 0:
+            self.notify("No jobs to cancel", severity="warning")
+            return
+
+        cursor_row = running_table.cursor_row
         if cursor_row is None or cursor_row < 0:
-            return None
-
-        try:
-            row_data = table.get_row_at(cursor_row)
-            return str(row_data[0]).strip()
-        except (IndexError, KeyError):
-            return None
-
-    def action_cancel_selected_job(self) -> None:
-        """Cancel the currently selected job after confirmation."""
-        job_id = self._get_selected_job_id()
-        if not job_id:
             self.notify("No job selected", severity="warning")
             return
 
-        def handle_cancel_confirm(confirmed: bool) -> None:
-            if confirmed:
-                logger.info(f"Cancelling job {job_id}")
-                success, error = cancel_job(job_id)
-                if success:
-                    self.notify(f"Job {job_id} cancelled", severity="information")
-                    self.refresh_data()
-                else:
-                    self.notify(f"Failed to cancel job: {error}", severity="error")
+        try:
+            row_data = running_table.get_row_at(cursor_row)
+            job_id = str(row_data[0]).strip()
+            job_name = str(row_data[1]).strip() if len(row_data) > 1 else None
 
-        self.push_screen(CancelConfirmScreen(job_id), handle_cancel_confirm)
+            def handle_confirmation(confirmed: bool | None) -> None:
+                if confirmed is True:
+                    success, error = cancel_job(job_id)
+                    if success:
+                        logger.info(f"Successfully cancelled job {job_id}")
+                        self.notify(f"Job {job_id} cancelled", severity="information")
+                        self.refresh_data()
+                    else:
+                        logger.error(f"Failed to cancel job {job_id}: {error}")
+                        self.notify(f"Failed to cancel: {error}", severity="error")
+
+            self.push_screen(CancelConfirmScreen(job_id, job_name), handle_confirmation)
+
+        except (IndexError, KeyError) as exc:
+            logger.error(f"Could not get job ID from row {cursor_row}: {exc}")
+            self.notify("Could not get job ID from selected row", severity="error")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button press events.
+
+        Args:
+            event: The button press event.
+        """
+        if event.button.id == "cancel-job-btn":
+            self._cancel_selected_job()
+
+    def _cancel_selected_job(self) -> None:
+        """Cancel the selected job from the running jobs table."""
+        running_table = self.query_one("#running_jobs_table", DataTable)
+
+        if running_table.row_count == 0:
+            self.notify("No jobs to cancel", severity="warning")
+            return
+
+        cursor_row = running_table.cursor_row
+        if cursor_row is None or cursor_row < 0:
+            self.notify("No job selected - select a job first", severity="warning")
+            return
+
+        try:
+            row_data = running_table.get_row_at(cursor_row)
+            job_id = str(row_data[0]).strip()
+            job_name = str(row_data[1]).strip() if len(row_data) > 1 else None
+
+            def handle_confirmation(confirmed: bool | None) -> None:
+                if confirmed is True:
+                    success, error = cancel_job(job_id)
+                    if success:
+                        logger.info(f"Successfully cancelled job {job_id}")
+                        self.notify(f"Job {job_id} cancelled", severity="information")
+                        self.refresh_data()
+                    else:
+                        logger.error(f"Failed to cancel job {job_id}: {error}")
+                        self.notify(f"Failed to cancel: {error}", severity="error")
+
+            self.push_screen(CancelConfirmScreen(job_id, job_name), handle_confirmation)
+
+        except (IndexError, KeyError) as exc:
+            logger.error(f"Could not get job ID from row {cursor_row}: {exc}")
+            self.notify("Could not get job ID from selected row", severity="error")
 
     def action_focus_running(self) -> None:
         """Focus the running jobs table."""
