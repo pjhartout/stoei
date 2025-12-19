@@ -110,3 +110,57 @@ class TestGetJobInfo:
         assert info == ""
         assert error is not None
         assert "Invalid job ID" in error
+
+
+class TestCancelJob:
+    """Tests for cancel_job with mock scancel."""
+
+    def test_cancel_running_job_success(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import cancel_job
+
+        success, error = cancel_job("12345")
+
+        assert success is True
+        assert error is None
+
+    def test_cancel_pending_job_success(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import cancel_job
+
+        success, error = cancel_job("12347")
+
+        assert success is True
+        assert error is None
+
+    def test_cancel_completed_job_fails(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import cancel_job
+
+        success, error = cancel_job("12344")
+
+        assert success is False
+        assert error is not None
+        assert "error" in error.lower()
+
+    def test_cancel_invalid_job_id_fails(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import cancel_job
+
+        success, error = cancel_job("invalid")
+
+        assert success is False
+        assert error is not None
+        assert "Invalid job ID" in error
+
+    def test_cancel_empty_job_id_fails(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import cancel_job
+
+        success, error = cancel_job("")
+
+        assert success is False
+        assert error is not None
+
+    def test_cancel_array_job(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import cancel_job
+
+        success, error = cancel_job("12345_0")
+
+        assert success is True
+        assert error is None

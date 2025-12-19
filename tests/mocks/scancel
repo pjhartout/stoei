@@ -1,0 +1,38 @@
+#!/usr/bin/env python3
+"""Mock scancel command for testing."""
+
+import sys
+
+# Jobs that can be cancelled (simulating running/pending jobs)
+CANCELLABLE_JOBS = {"12345", "12346", "12347", "12348", "12349"}
+
+# Jobs that will fail cancellation (e.g., already completed)
+FAILED_JOBS = {"12340", "12341", "12342", "12343", "12344"}
+
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("scancel: error: No job id specified", file=sys.stderr)
+        sys.exit(1)
+
+    job_id = sys.argv[1]
+
+    # Validate job ID format
+    if not job_id.replace("_", "").isdigit():
+        print(f"scancel: error: Invalid job id: {job_id}", file=sys.stderr)
+        sys.exit(1)
+
+    # Simulate cancellation
+    base_job_id = job_id.split("_")[0]
+
+    if base_job_id in FAILED_JOBS:
+        print(f"scancel: error: Kill job error on job id {job_id}: Job/step already completing or completed", file=sys.stderr)
+        sys.exit(1)
+
+    # Success - scancel produces no output on success
+    # If the job doesn't exist or is already done, scancel still returns 0
+    # but may print a message (we simulate silent success for known jobs)
+
+
+if __name__ == "__main__":
+    main()
