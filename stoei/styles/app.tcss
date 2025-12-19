@@ -76,7 +76,35 @@ JobStats {
     border: heavy ansi_cyan;
 }
 
-#running-table Static,
+#running-header {
+    width: 100%;
+    height: auto;
+    background: ansi_black;
+    padding: 0 1;
+}
+
+#running-title {
+    width: 1fr;
+    color: ansi_cyan;
+    background: ansi_black;
+}
+
+#cancel-job-btn {
+    width: auto;
+    min-width: 16;
+    background: ansi_red;
+    color: ansi_bright_white;
+    border: none;
+}
+
+#cancel-job-btn:hover {
+    background: ansi_bright_red;
+}
+
+#cancel-job-btn:focus {
+    border: tall ansi_bright_cyan;
+}
+
 #history-table Static {
     color: ansi_cyan;
     background: ansi_black;

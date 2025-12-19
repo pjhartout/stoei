@@ -298,3 +298,65 @@ LogViewerScreen #log-close-button:focus {
 LogViewerScreen #log-content-scroll:focus {
     border: tall ansi_green;
 }
+
+/* Cancel Confirmation Modal */
+CancelConfirmScreen {
+    align: center middle;
+    background: rgba(0, 0, 0, 0.8);
+}
+
+CancelConfirmScreen #cancel-confirm-container {
+    width: 60;
+    height: auto;
+    padding: 2 3;
+    background: ansi_black;
+    border: double ansi_red;
+}
+
+CancelConfirmScreen #cancel-title {
+    width: 100%;
+    content-align: center middle;
+    padding: 1;
+    color: ansi_red;
+    text-style: bold;
+    border-bottom: solid ansi_bright_black;
+    margin-bottom: 1;
+}
+
+CancelConfirmScreen #cancel-job-info {
+    width: 100%;
+    content-align: center middle;
+    padding: 1;
+}
+
+CancelConfirmScreen #cancel-warning {
+    width: 100%;
+    content-align: center middle;
+    color: ansi_bright_black;
+    margin: 1 0;
+}
+
+CancelConfirmScreen #cancel-button-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    margin-top: 1;
+}
+
+CancelConfirmScreen Button {
+    width: 1fr;
+    margin: 0 1;
+}
+
+CancelConfirmScreen #confirm-cancel-btn {
+    background: ansi_red;
+}
+
+CancelConfirmScreen #abort-cancel-btn {
+    background: ansi_bright_black;
+}
+
+CancelConfirmScreen #confirm-cancel-btn:focus,
+CancelConfirmScreen #abort-cancel-btn:focus {
+    border: tall ansi_bright_cyan;
+}
