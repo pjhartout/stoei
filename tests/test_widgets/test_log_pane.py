@@ -164,8 +164,8 @@ class TestLogPaneSink:
     def test_sink_extracts_timestamp(self) -> None:
         """Test sink extracts and converts timestamp."""
         from datetime import datetime
-        from unittest.mock import MagicMock
         from typing import cast
+        from unittest.mock import MagicMock
 
         # Create a specific timestamp
         test_time = datetime(2024, 1, 15, 10, 30, 45, tzinfo=UTC)

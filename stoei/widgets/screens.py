@@ -72,7 +72,7 @@ class LogViewerScreen(Screen[None]):
 
             with Container(id="log-viewer-footer"):
                 yield Static(
-                    "[bold]g/G[/bold] Top/Bottom | [bold]r[/bold] Reload | [bold]e[/bold] Editor | [bold]Esc/q[/bold] Close",
+                    "[bold]g/G[/bold] Top/Bottom  [bold]r[/bold] Reload  [bold]e[/bold] Editor  [bold]Esc[/bold] Close",
                     id="log-hint-text",
                 )
                 yield Button("📝 Open in $EDITOR", variant="primary", id="editor-button")
@@ -161,7 +161,8 @@ class LogViewerScreen(Screen[None]):
             scroll = self.query_one("#log-content-scroll", VerticalScroll)
             scroll.scroll_end(animate=False)
         except Exception:
-            pass
+            # Scroll area may not exist in error state
+            logger.debug("Could not scroll to bottom - scroll area not found")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press.
@@ -195,7 +196,8 @@ class LogViewerScreen(Screen[None]):
             scroll = self.query_one("#log-content-scroll", VerticalScroll)
             scroll.scroll_home(animate=False)
         except Exception:
-            pass
+            # Scroll area may not exist in error state
+            logger.debug("Could not scroll to top - scroll area not found")
 
     def action_scroll_bottom(self) -> None:
         """Scroll to the bottom of the log content."""
