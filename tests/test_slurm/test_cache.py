@@ -1,5 +1,7 @@
 """Tests for the JobCache module."""
 
+from pathlib import Path
+
 import pytest
 from stoei.slurm.cache import Job, JobCache, JobState
 
@@ -182,3 +184,165 @@ class TestJobCache:
         JobCache.reset()
         cache2 = JobCache()
         assert cache1 is not cache2
+
+
+class TestJobCacheRefresh:
+    """Tests for JobCache.refresh() method."""
+
+    @pytest.fixture(autouse=True)
+    def reset_cache(self) -> None:
+        """Reset the singleton cache before each test."""
+        JobCache.reset()
+
+    def test_refresh_with_mock_data(self, mock_slurm_path: Path) -> None:
+        """Test refresh populates cache with mock data."""
+        cache = JobCache()
+        cache.refresh()
+
+        # Should have jobs from both squeue and sacct
+        assert len(cache.jobs) > 0
+
+    def test_refresh_updates_stats(self, mock_slurm_path: Path) -> None:
+        """Test refresh updates statistics."""
+        cache = JobCache()
+        cache.refresh()
+
+        total_jobs, _total_requeues, _max_requeues, _running, _pending = cache.stats
+        assert total_jobs > 0
+
+    def test_refresh_running_jobs_first(self, mock_slurm_path: Path) -> None:
+        """Test that running/pending jobs appear before history jobs."""
+        cache = JobCache()
+        cache.refresh()
+
+        jobs = cache.jobs
+        # Active jobs should come before inactive jobs
+        active_seen = False
+        inactive_seen = False
+        active_after_inactive = False
+
+        for job in jobs:
+            if job.is_active:
+                active_seen = True
+                if inactive_seen:
+                    active_after_inactive = True
+            else:
+                inactive_seen = True
+
+        # If we have both active and inactive jobs, active should come first
+        if active_seen and inactive_seen:
+            assert not active_after_inactive
+
+    def test_refresh_deduplicates_jobs(self, mock_slurm_path: Path) -> None:
+        """Test that jobs appearing in both squeue and sacct are not duplicated."""
+        cache = JobCache()
+        cache.refresh()
+
+        job_ids = [job.job_id for job in cache.jobs]
+        # Check for duplicates
+        assert len(job_ids) == len(set(job_ids))
+
+    def test_refresh_marks_active_jobs(self, mock_slurm_path: Path) -> None:
+        """Test that running/pending jobs are marked as active."""
+        cache = JobCache()
+        cache.refresh()
+
+        active_jobs = cache.get_active_jobs()
+        for job in active_jobs:
+            assert job.is_active
+            assert job.state_category in (JobState.RUNNING, JobState.PENDING)
+
+
+class TestJobCacheProperties:
+    """Tests for JobCache property accessors."""
+
+    @pytest.fixture(autouse=True)
+    def reset_cache(self) -> None:
+        """Reset the singleton cache before each test."""
+        JobCache.reset()
+
+    def test_jobs_property_returns_copy(self) -> None:
+        """Test that jobs property returns a copy, not the original list."""
+        cache = JobCache()
+
+        jobs1 = cache.jobs
+        jobs2 = cache.jobs
+
+        # Should be equal but not the same object
+        assert jobs1 == jobs2
+        assert jobs1 is not jobs2
+
+    def test_running_count_property(self, mock_slurm_path: Path) -> None:
+        """Test running_count property after refresh."""
+        cache = JobCache()
+        cache.refresh()
+
+        running_count = cache.running_count
+        assert isinstance(running_count, int)
+        assert running_count >= 0
+
+    def test_pending_count_property(self, mock_slurm_path: Path) -> None:
+        """Test pending_count property after refresh."""
+        cache = JobCache()
+        cache.refresh()
+
+        pending_count = cache.pending_count
+        assert isinstance(pending_count, int)
+        assert pending_count >= 0
+
+    def test_active_count_equals_running_plus_pending(self, mock_slurm_path: Path) -> None:
+        """Test that active_count equals running + pending."""
+        cache = JobCache()
+        cache.refresh()
+
+        assert cache.active_count == cache.running_count + cache.pending_count
+
+
+class TestJobCacheJobLookup:
+    """Tests for JobCache job lookup methods."""
+
+    @pytest.fixture(autouse=True)
+    def reset_cache(self) -> None:
+        """Reset the singleton cache before each test."""
+        JobCache.reset()
+
+    def test_get_job_by_id_found(self, mock_slurm_path: Path) -> None:
+        """Test get_job_by_id returns job when found."""
+        cache = JobCache()
+        cache.refresh()
+
+        # Get first job and look it up by ID
+        if cache.jobs:
+            first_job = cache.jobs[0]
+            found_job = cache.get_job_by_id(first_job.job_id)
+            assert found_job is not None
+            assert found_job.job_id == first_job.job_id
+
+    def test_get_active_jobs_filter(self, mock_slurm_path: Path) -> None:
+        """Test get_active_jobs returns only active jobs."""
+        cache = JobCache()
+        cache.refresh()
+
+        active_jobs = cache.get_active_jobs()
+        for job in active_jobs:
+            assert job.is_active is True
+
+
+class TestJobCacheThreadSafety:
+    """Tests for JobCache thread safety."""
+
+    @pytest.fixture(autouse=True)
+    def reset_cache(self) -> None:
+        """Reset the singleton cache before each test."""
+        JobCache.reset()
+
+    def test_singleton_with_lock(self) -> None:
+        """Test that singleton creation is thread-safe."""
+        JobCache()  # Initialize singleton
+        assert hasattr(JobCache, "_lock")
+        assert hasattr(JobCache, "_instance")
+
+    def test_data_access_with_lock(self) -> None:
+        """Test that data access uses a lock."""
+        cache = JobCache()
+        assert hasattr(cache, "_data_lock")

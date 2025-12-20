@@ -1,6 +1,6 @@
 """Tests for SLURM output formatters."""
 
-from stoei.slurm.formatters import format_job_info, format_value
+from stoei.slurm.formatters import format_job_info, format_sacct_job_info, format_value
 
 
 class TestFormatValue:
@@ -99,3 +99,220 @@ class TestFormatJobInfo:
 
         assert "FAILED" in result
         assert "1:0" in result
+
+    def test_format_includes_other_category(self) -> None:
+        """Test that uncategorized fields go to 'Other' category."""
+        # Create output with a field that's not in any category
+        raw_output = "JobId=12345 JobName=test CustomField=custom_value"
+        result = format_job_info(raw_output)
+
+        # CustomField should be in "Other" section
+        assert "Other" in result or "CustomField" in result
+
+
+class TestFormatSacctJobInfo:
+    """Tests for format_sacct_job_info function."""
+
+    def test_format_basic_sacct_info(self) -> None:
+        """Test formatting basic sacct job info."""
+        parsed = {
+            "JobID": "12345",
+            "JobName": "test_job",
+            "State": "COMPLETED",
+            "ExitCode": "0:0",
+        }
+
+        result = format_sacct_job_info(parsed)
+
+        assert "12345" in result
+        assert "test_job" in result
+        assert "COMPLETED" in result
+        assert "sacct" in result.lower() or "historical" in result.lower()
+
+    def test_format_empty_sacct_info(self) -> None:
+        """Test formatting empty sacct info."""
+        result = format_sacct_job_info({})
+
+        assert "No job information" in result
+
+    def test_format_includes_categories(self) -> None:
+        """Test that sacct info includes category headers."""
+        parsed = {
+            "JobID": "12345",
+            "JobName": "test_job",
+            "User": "testuser",
+            "State": "COMPLETED",
+            "Start": "2024-01-15T10:00:00",
+            "End": "2024-01-15T11:00:00",
+            "Elapsed": "01:00:00",
+            "WorkDir": "/home/testuser/project",
+        }
+
+        result = format_sacct_job_info(parsed)
+
+        assert "Identity" in result
+        assert "Status" in result
+        assert "Timing" in result
+        assert "Paths" in result
+
+    def test_format_includes_resources(self) -> None:
+        """Test that resource fields are formatted."""
+        parsed = {
+            "JobID": "12345",
+            "NNodes": "4",
+            "NCPUS": "16",
+            "ReqMem": "64G",
+            "Partition": "gpu",
+        }
+
+        result = format_sacct_job_info(parsed)
+
+        assert "4" in result
+        assert "16" in result
+        assert "Resources" in result
+
+    def test_format_state_colors(self) -> None:
+        """Test that state values are colored."""
+        parsed = {
+            "JobID": "12345",
+            "State": "FAILED",
+            "ExitCode": "1:0",
+        }
+
+        result = format_sacct_job_info(parsed)
+
+        assert "red" in result
+        assert "FAILED" in result
+
+    def test_format_remaining_fields(self) -> None:
+        """Test that uncategorized fields go to 'Other' section."""
+        parsed = {
+            "JobID": "12345",
+            "CustomField": "custom_value",
+        }
+
+        result = format_sacct_job_info(parsed)
+
+        # Either in Other section or directly included
+        assert "custom_value" in result or "CustomField" in result
+
+
+class TestFormatValueEdgeCases:
+    """Additional edge case tests for format_value."""
+
+    def test_na_value(self) -> None:
+        """Test N/A value formatting."""
+        result = format_value("TestKey", "N/A")
+        assert "not set" in result
+
+    def test_none_value(self) -> None:
+        """Test None string value formatting."""
+        result = format_value("TestKey", "None")
+        assert "not set" in result
+
+    def test_state_with_extra_info(self) -> None:
+        """Test state value with additional info."""
+        result = format_value("JobState", "RUNNING by 12345")
+        assert "green" in result
+        assert "RUNNING" in result
+
+    def test_derived_exit_code(self) -> None:
+        """Test DerivedExitCode formatting."""
+        result = format_value("DerivedExitCode", "1:0")
+        assert "red" in result
+
+    def test_stdin_path(self) -> None:
+        """Test StdIn path formatting."""
+        result = format_value("StdIn", "/dev/null")
+        assert "cyan" in result
+
+    def test_command_formatting(self) -> None:
+        """Test Command path formatting."""
+        result = format_value("Command", "/path/to/script.sh")
+        assert "cyan" in result
+
+    def test_time_with_na(self) -> None:
+        """Test time value with N/A."""
+        result = format_value("RunTime", "N/A")
+        assert "not set" in result
+
+    def test_num_nodes_formatting(self) -> None:
+        """Test NumNodes formatting."""
+        result = format_value("NumNodes", "4")
+        assert "bold" in result
+
+    def test_num_cpus_formatting(self) -> None:
+        """Test NumCPUs formatting."""
+        result = format_value("NumCPUs", "16")
+        assert "bold" in result
+
+    def test_priority_formatting(self) -> None:
+        """Test Priority formatting."""
+        result = format_value("Priority", "4294901730")
+        assert "bold" in result
+
+    def test_restarts_formatting(self) -> None:
+        """Test Restarts formatting."""
+        result = format_value("Restarts", "2")
+        assert "bold" in result
+
+    def test_gres_formatting(self) -> None:
+        """Test Gres formatting."""
+        result = format_value("Gres", "gpu:1")
+        assert "magenta" in result
+
+    def test_req_tres_formatting(self) -> None:
+        """Test ReqTRES formatting."""
+        result = format_value("ReqTRES", "cpu=4,mem=16G")
+        assert "magenta" in result
+
+    def test_batch_host_formatting(self) -> None:
+        """Test BatchHost is returned as-is (no special formatting)."""
+        result = format_value("BatchHost", "gpu-node-01")
+        # BatchHost doesn't contain "Node" so it's not formatted as a node list
+        assert result == "gpu-node-01"
+
+    def test_req_node_list_formatting(self) -> None:
+        """Test ReqNodeList node formatting."""
+        result = format_value("ReqNodeList", "gpu-node-[01-04]")
+        assert "blue" in result
+
+    def test_regular_value(self) -> None:
+        """Test regular value without special formatting."""
+        result = format_value("Account", "default")
+        assert result == "default"
+
+    def test_cancelled_state(self) -> None:
+        """Test CANCELLED state formatting."""
+        result = format_value("JobState", "CANCELLED")
+        assert "magenta" in result
+
+    def test_timeout_state(self) -> None:
+        """Test TIMEOUT state formatting."""
+        result = format_value("JobState", "TIMEOUT")
+        assert "red" in result
+
+    def test_node_fail_state(self) -> None:
+        """Test NODE_FAIL state formatting."""
+        result = format_value("JobState", "NODE_FAIL")
+        assert "red" in result
+
+    def test_preempted_state(self) -> None:
+        """Test PREEMPTED state formatting."""
+        result = format_value("JobState", "PREEMPTED")
+        assert "yellow" in result
+
+    def test_suspended_state(self) -> None:
+        """Test SUSPENDED state formatting."""
+        result = format_value("JobState", "SUSPENDED")
+        assert "yellow" in result
+
+    def test_completing_state(self) -> None:
+        """Test COMPLETING state formatting."""
+        result = format_value("JobState", "COMPLETING")
+        assert "green" in result
+
+    def test_unknown_state_uses_white(self) -> None:
+        """Test unknown state uses white color."""
+        result = format_value("JobState", "CUSTOMSTATE")
+        assert "white" in result

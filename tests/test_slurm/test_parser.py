@@ -1,6 +1,7 @@
 """Tests for SLURM output parsers."""
 
 from stoei.slurm.parser import (
+    parse_sacct_job_output,
     parse_sacct_output,
     parse_scontrol_output,
     parse_squeue_output,
@@ -123,3 +124,118 @@ class TestParseSacctOutput:
 
         assert jobs == []
         assert total == 0
+
+    def test_parse_invalid_restart_count(self) -> None:
+        """Test handling of non-numeric restart counts."""
+        output = """JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList
+12345|test_job|RUNNING|invalid|01:00:00|0:0|node01"""
+        jobs, _total, requeues, max_req = parse_sacct_output(output)
+
+        # Should handle the invalid value gracefully
+        assert len(jobs) == 1
+        assert requeues == 0
+        assert max_req == 0
+
+    def test_sort_handles_non_numeric_job_id(self) -> None:
+        """Test sorting with non-numeric job IDs."""
+        output = """JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList
+abc123|test1|RUNNING|0|01:00:00|0:0|node01
+12345|test2|RUNNING|0|01:00:00|0:0|node02"""
+        jobs, _, _, _ = parse_sacct_output(output)
+
+        # Should not crash, order may vary
+        assert len(jobs) == 2
+
+
+class TestParseSacctJobOutput:
+    """Tests for parse_sacct_job_output function."""
+
+    def test_parse_basic_output(self) -> None:
+        """Test parsing basic sacct job output."""
+        fields = ["JobID", "JobName", "State", "ExitCode"]
+        raw_output = "12345|test_job|COMPLETED|0:0"
+
+        result = parse_sacct_job_output(raw_output, fields)
+
+        assert result["JobID"] == "12345"
+        assert result["JobName"] == "test_job"
+        assert result["State"] == "COMPLETED"
+        assert result["ExitCode"] == "0:0"
+
+    def test_parse_empty_output(self) -> None:
+        """Test parsing empty output."""
+        fields = ["JobID", "JobName", "State"]
+        raw_output = ""
+
+        result = parse_sacct_job_output(raw_output, fields)
+
+        assert result == {}
+
+    def test_skips_sub_steps(self) -> None:
+        """Test that sub-steps (like .batch, .extern) are skipped."""
+        fields = ["JobID", "JobName", "State"]
+        raw_output = """12345|main_job|COMPLETED
+12345.batch|main_job|COMPLETED
+12345.extern|main_job|COMPLETED"""
+
+        result = parse_sacct_job_output(raw_output, fields)
+
+        assert result["JobID"] == "12345"
+
+    def test_skips_numeric_sub_steps(self) -> None:
+        """Test that numeric sub-steps (like .0, .1) are skipped."""
+        fields = ["JobID", "JobName", "State"]
+        raw_output = """12345.0|step_job|COMPLETED
+12345|main_job|COMPLETED"""
+
+        result = parse_sacct_job_output(raw_output, fields)
+
+        assert result["JobID"] == "12345"
+
+    def test_fallback_to_first_line(self) -> None:
+        """Test fallback when no main job found."""
+        fields = ["JobID", "JobName", "State"]
+        raw_output = "12345.batch|batch_job|COMPLETED"
+
+        result = parse_sacct_job_output(raw_output, fields)
+
+        # Should use the first line as fallback
+        assert "12345.batch" in result.get("JobID", "")
+
+    def test_handles_empty_values(self) -> None:
+        """Test handling of empty values in output."""
+        fields = ["JobID", "JobName", "State", "ExitCode"]
+        raw_output = "12345|test_job||0:0"
+
+        result = parse_sacct_job_output(raw_output, fields)
+
+        assert result["JobID"] == "12345"
+        assert "State" not in result  # Empty value should be skipped
+        assert result["ExitCode"] == "0:0"
+
+    def test_handles_fewer_values_than_fields(self) -> None:
+        """Test handling when output has fewer values than expected fields."""
+        fields = ["JobID", "JobName", "State", "ExitCode", "NodeList"]
+        raw_output = "12345|test_job|COMPLETED"
+
+        result = parse_sacct_job_output(raw_output, fields)
+
+        assert result["JobID"] == "12345"
+        assert result["JobName"] == "test_job"
+        assert result["State"] == "COMPLETED"
+        assert "ExitCode" not in result
+        assert "NodeList" not in result
+
+    def test_handles_multiline_with_substeps(self) -> None:
+        """Test handling multiple lines including substeps."""
+        fields = ["JobID", "JobName", "State", "Elapsed"]
+        raw_output = """12345.extern|test_job|COMPLETED|00:01:00
+12345.0|test_job|COMPLETED|00:30:00
+12345|test_job|COMPLETED|00:31:00
+12345.batch|test_job|COMPLETED|00:30:00"""
+
+        result = parse_sacct_job_output(raw_output, fields)
+
+        # Should pick the main job (12345 without dot suffix)
+        assert result["JobID"] == "12345"
+        assert result["Elapsed"] == "00:31:00"

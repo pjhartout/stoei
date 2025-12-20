@@ -1,6 +1,7 @@
 """Tests for SLURM command execution with mock executables."""
 
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 
 class TestGetRunningJobs:
@@ -164,3 +165,316 @@ class TestCancelJob:
 
         assert success is True
         assert error is None
+
+
+class TestGetJobLogPaths:
+    """Tests for get_job_log_paths function."""
+
+    def test_returns_paths_for_running_job(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import get_job_log_paths
+
+        stdout_path, stderr_path, error = get_job_log_paths("12345")
+
+        assert error is None
+        assert stdout_path is not None
+        assert stderr_path is not None
+
+    def test_returns_error_for_invalid_job(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import get_job_log_paths
+
+        _stdout_path, _stderr_path, error = get_job_log_paths("invalid")
+
+        assert error is not None
+        assert "Invalid job ID" in error
+
+    def test_expands_placeholders_in_paths(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import get_job_log_paths
+
+        stdout_path, _stderr_path, _error = get_job_log_paths("12345")
+
+        # Paths should not contain unexpanded placeholders
+        if stdout_path:
+            assert "%j" not in stdout_path
+            assert "%J" not in stdout_path
+
+
+class TestExpandLogPath:
+    """Tests for _expand_log_path function."""
+
+    def test_expands_job_id_placeholder(self) -> None:
+        from stoei.slurm.commands import _expand_log_path
+
+        job_info = {"UserId": "testuser", "JobName": "myjob"}
+        result = _expand_log_path("/logs/job_%j.out", "12345", job_info)
+
+        assert result == "/logs/job_12345.out"
+
+    def test_expands_full_job_id_placeholder(self) -> None:
+        from stoei.slurm.commands import _expand_log_path
+
+        job_info = {"UserId": "testuser", "JobName": "myjob"}
+        result = _expand_log_path("/logs/job_%J.out", "12345_0", job_info)
+
+        assert result == "/logs/job_12345_0.out"
+
+    def test_expands_array_job_placeholders(self) -> None:
+        from stoei.slurm.commands import _expand_log_path
+
+        job_info = {"UserId": "testuser", "JobName": "myjob"}
+        result = _expand_log_path("/logs/job_%A_%a.out", "12345_42", job_info)
+
+        assert result == "/logs/job_12345_42.out"
+
+    def test_expands_username_placeholder(self) -> None:
+        from stoei.slurm.commands import _expand_log_path
+
+        job_info = {"UserId": "testuser(1000)", "JobName": "myjob"}
+        result = _expand_log_path("/home/%u/logs/job.out", "12345", job_info)
+
+        assert result == "/home/testuser/logs/job.out"
+
+    def test_expands_job_name_placeholder(self) -> None:
+        from stoei.slurm.commands import _expand_log_path
+
+        job_info = {"UserId": "testuser", "JobName": "train_model"}
+        result = _expand_log_path("/logs/%x.out", "12345", job_info)
+
+        assert result == "/logs/train_model.out"
+
+    def test_expands_node_placeholder(self) -> None:
+        from stoei.slurm.commands import _expand_log_path
+
+        job_info = {"UserId": "testuser", "JobName": "myjob", "NodeList": "gpu-node-01"}
+        result = _expand_log_path("/logs/job_%N.out", "12345", job_info)
+
+        assert result == "/logs/job_gpu-node-01.out"
+
+    def test_multiple_placeholders(self) -> None:
+        from stoei.slurm.commands import _expand_log_path
+
+        job_info = {"UserId": "testuser(1000)", "JobName": "train", "NodeList": "node01"}
+        result = _expand_log_path("/home/%u/logs/%x_%j.out", "12345", job_info)
+
+        assert result == "/home/testuser/logs/train_12345.out"
+
+    def test_handles_missing_user_info(self) -> None:
+        from stoei.slurm.commands import _expand_log_path
+
+        job_info = {}
+        result = _expand_log_path("/logs/job_%j.out", "12345", job_info)
+
+        assert result == "/logs/job_12345.out"
+
+
+class TestGetJobInfoParsed:
+    """Tests for get_job_info_parsed function."""
+
+    def test_returns_dict_for_running_job(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import get_job_info_parsed
+
+        info, error = get_job_info_parsed("12345")
+
+        assert error is None
+        assert isinstance(info, dict)
+        assert "JobId" in info or "JobID" in info
+
+    def test_returns_error_for_invalid_job(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import get_job_info_parsed
+
+        info, error = get_job_info_parsed("invalid")
+
+        assert error is not None
+        assert info == {}
+
+
+class TestRunScontrolForJob:
+    """Tests for _run_scontrol_for_job function."""
+
+    def test_returns_raw_output(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import _run_scontrol_for_job
+
+        output, error = _run_scontrol_for_job("12345")
+
+        assert error is None
+        assert "JobId" in output or "RUNNING" in output
+
+    def test_returns_error_for_invalid_job_id(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import _run_scontrol_for_job
+
+        output, error = _run_scontrol_for_job("invalid_id")
+
+        assert error is not None
+        assert output == ""
+
+
+class TestRunSacctForJob:
+    """Tests for _run_sacct_for_job function."""
+
+    def test_returns_raw_output(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import _run_sacct_for_job
+
+        output, error = _run_sacct_for_job("12345")
+
+        # May succeed or fail depending on mock, but should return proper types
+        assert isinstance(output, str)
+        assert error is None or isinstance(error, str)
+
+    def test_returns_error_for_invalid_job_id(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import _run_sacct_for_job
+
+        output, error = _run_sacct_for_job("invalid_id")
+
+        assert error is not None
+        assert output == ""
+
+
+class TestCommandErrorPaths:
+    """Tests for error handling in commands."""
+
+    def test_get_running_jobs_handles_missing_squeue(self) -> None:
+        from stoei.slurm.commands import get_running_jobs
+
+        with patch("stoei.slurm.commands.resolve_executable", side_effect=FileNotFoundError):
+            jobs = get_running_jobs()
+            assert jobs == []
+
+    def test_get_job_history_handles_missing_sacct(self) -> None:
+        from stoei.slurm.commands import get_job_history
+
+        with patch("stoei.slurm.commands.resolve_executable", side_effect=FileNotFoundError):
+            jobs, total, _requeues, _max_req = get_job_history()
+            assert jobs == []
+            assert total == 0
+
+    def test_cancel_job_handles_missing_scancel(self) -> None:
+        from stoei.slurm.commands import cancel_job
+
+        with patch("stoei.slurm.commands.resolve_executable", side_effect=FileNotFoundError):
+            success, error = cancel_job("12345")
+            assert success is False
+            assert error is not None
+
+    def test_get_job_info_handles_timeout(self, mock_slurm_path: Path) -> None:
+        import subprocess
+
+        from stoei.slurm.commands import get_job_info
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 10)):
+            _info, error = get_job_info("12345")
+            assert error is not None
+            assert "timed out" in error.lower()
+
+    def test_cancel_job_handles_timeout(self, mock_slurm_path: Path) -> None:
+        import subprocess
+
+        from stoei.slurm.commands import cancel_job
+
+        with patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 10)):
+            success, error = cancel_job("12345")
+            assert success is False
+            assert error is not None
+
+    def test_get_running_jobs_handles_subprocess_error(self) -> None:
+        """Test handling of SubprocessError in get_running_jobs."""
+        import subprocess
+
+        from stoei.slurm.commands import get_running_jobs
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/squeue"),
+            patch("stoei.slurm.commands.get_current_username", return_value="testuser"),
+            patch("subprocess.run", side_effect=subprocess.SubprocessError("Error")),
+        ):
+            jobs = get_running_jobs()
+            assert jobs == []
+
+    def test_get_job_history_handles_subprocess_error(self) -> None:
+        """Test handling of SubprocessError in get_job_history."""
+        import subprocess
+
+        from stoei.slurm.commands import get_job_history
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/sacct"),
+            patch("stoei.slurm.commands.get_current_username", return_value="testuser"),
+            patch("subprocess.run", side_effect=subprocess.SubprocessError("Error")),
+        ):
+            jobs, total, _requeues, _max_req = get_job_history()
+            assert jobs == []
+            assert total == 0
+
+    def test_cancel_job_handles_subprocess_error(self) -> None:
+        """Test handling of SubprocessError in cancel_job."""
+        import subprocess
+
+        from stoei.slurm.commands import cancel_job
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/scancel"),
+            patch("subprocess.run", side_effect=subprocess.SubprocessError("Error")),
+        ):
+            success, error = cancel_job("12345")
+            assert success is False
+            assert error is not None
+
+    def test_get_running_jobs_handles_timeout(self) -> None:
+        """Test handling of timeout in get_running_jobs."""
+        import subprocess
+
+        from stoei.slurm.commands import get_running_jobs
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/squeue"),
+            patch("stoei.slurm.commands.get_current_username", return_value="testuser"),
+            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)),
+        ):
+            jobs = get_running_jobs()
+            assert jobs == []
+
+    def test_get_job_history_handles_timeout(self) -> None:
+        """Test handling of timeout in get_job_history."""
+        import subprocess
+
+        from stoei.slurm.commands import get_job_history
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/sacct"),
+            patch("stoei.slurm.commands.get_current_username", return_value="testuser"),
+            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)),
+        ):
+            jobs, _total, _requeues, _max_req = get_job_history()
+            assert jobs == []
+
+    def test_scontrol_handles_nonzero_exit_code(self) -> None:
+        """Test handling of non-zero exit code from scontrol."""
+        from stoei.slurm.commands import _run_scontrol_for_job
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "Job not found"
+        mock_result.stdout = ""
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/scontrol"),
+            patch("subprocess.run", return_value=mock_result),
+        ):
+            output, error = _run_scontrol_for_job("99999")
+            assert output == ""
+            assert error is not None
+
+    def test_sacct_handles_nonzero_exit_code(self) -> None:
+        """Test handling of non-zero exit code from sacct."""
+        from stoei.slurm.commands import _run_sacct_for_job
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "Database error"
+        mock_result.stdout = ""
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/sacct"),
+            patch("subprocess.run", return_value=mock_result),
+        ):
+            output, error = _run_sacct_for_job("99999")
+            assert output == ""
+            assert error is not None
