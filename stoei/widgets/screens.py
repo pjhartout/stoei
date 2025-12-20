@@ -26,6 +26,9 @@ class LogViewerScreen(Screen[None]):
         ("r", "reload", "Reload file"),
     )
 
+    # Maximum file size to load (in bytes) - larger files are truncated from the start
+    MAX_FILE_SIZE: ClassVar[int] = 512 * 1024  # 512 KB
+
     def __init__(self, filepath: str, log_type: str) -> None:
         """Initialize the log viewer screen.
 
@@ -38,6 +41,7 @@ class LogViewerScreen(Screen[None]):
         self.log_type = log_type
         self.file_contents: str = ""
         self.load_error: str | None = None
+        self.truncated: bool = False
 
     def compose(self) -> ComposeResult:
         """Create the log viewer layout.
@@ -75,8 +79,13 @@ class LogViewerScreen(Screen[None]):
                 yield Button("✕ Close", variant="default", id="log-close-button")
 
     def _load_file(self) -> None:
-        """Load the file contents."""
+        """Load the file contents.
+
+        For large files, only the last MAX_FILE_SIZE bytes are loaded
+        to maintain UI responsiveness.
+        """
         path = Path(self.filepath)
+        self.truncated = False
 
         if not path.exists():
             self.load_error = f"File does not exist: {self.filepath}"
@@ -89,9 +98,44 @@ class LogViewerScreen(Screen[None]):
             return
 
         try:
-            self.file_contents = path.read_text()
-            if not self.file_contents:
+            file_size = path.stat().st_size
+
+            if file_size == 0:
                 self.file_contents = "[dim](empty file)[/dim]"
+                logger.info(f"Loaded log file: {self.filepath}")
+                return
+
+            if file_size <= self.MAX_FILE_SIZE:
+                # Small file - read entirely
+                self.file_contents = path.read_text()
+            else:
+                # Large file - read only the tail for performance
+                self.truncated = True
+                with path.open("rb") as f:
+                    # Seek to position near end, leaving room for MAX_FILE_SIZE bytes
+                    f.seek(file_size - self.MAX_FILE_SIZE)
+                    # Read from that position to end
+                    tail_bytes = f.read()
+
+                # Decode and skip the first partial line (may be cut off)
+                tail_text = tail_bytes.decode("utf-8", errors="replace")
+                first_newline = tail_text.find("\n")
+                if first_newline != -1:
+                    tail_text = tail_text[first_newline + 1 :]
+
+                truncated_size_mb = file_size / (1024 * 1024)
+                self.file_contents = (
+                    f"[bold yellow]⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
+                    f"of {truncated_size_mb:.1f} MB)[/bold yellow]\n"
+                    f"[dim]{'─' * 60}[/dim]\n\n"
+                    f"{tail_text}"
+                )
+                logger.info(
+                    f"Loaded log file (truncated): {self.filepath} "
+                    f"({file_size} bytes, showing last {self.MAX_FILE_SIZE} bytes)"
+                )
+                return
+
             logger.info(f"Loaded log file: {self.filepath}")
         except PermissionError:
             self.load_error = f"Permission denied: {self.filepath}"
