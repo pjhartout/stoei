@@ -3,8 +3,7 @@
 from pathlib import Path
 
 import pytest
-
-from stoei.widgets.screens import JobInfoScreen, LogViewerScreen
+from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen, LogViewerScreen
 
 
 class TestJobInfoScreen:
@@ -87,6 +86,11 @@ class TestLogViewerScreen:
         screen = LogViewerScreen("/path/to/log.out", "stdout")
         assert screen.load_error is None
 
+    def test_init_not_truncated(self) -> None:
+        """Test that truncated is False initially."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert screen.truncated is False
+
     def test_bindings_defined(self) -> None:
         """Test that bindings are defined."""
         assert len(LogViewerScreen.BINDINGS) > 0
@@ -148,3 +152,246 @@ class TestLogViewerFileLoading:
         screen._load_file()
         assert screen.load_error is not None
         assert "Not a regular file" in screen.load_error
+
+    def test_load_file_large_truncates(self, tmp_path: Path) -> None:
+        """Test _load_file truncates large files to the tail."""
+        log_file = tmp_path / "large.log"
+        # Create a file larger than MAX_FILE_SIZE (512 KB)
+        # Write 600 KB of content
+        line = "This is a test line with some content for the log file.\n"
+        num_lines = (600 * 1024) // len(line) + 1
+        content = line * num_lines
+        log_file.write_text(content)
+
+        screen = LogViewerScreen(str(log_file), "stdout")
+        screen._load_file()
+
+        assert screen.load_error is None
+        assert screen.truncated is True
+        assert "File truncated" in screen.file_contents
+        # Should contain lines from the end
+        assert "This is a test line" in screen.file_contents
+        # Content should be significantly smaller than original
+        assert len(screen.file_contents) < len(content)
+
+    def test_load_file_small_not_truncated(self, temp_log_file: Path) -> None:
+        """Test _load_file does not truncate small files."""
+        screen = LogViewerScreen(str(temp_log_file), "stdout")
+        screen._load_file()
+        assert screen.load_error is None
+        assert screen.truncated is False
+        assert "File truncated" not in screen.file_contents
+
+    def test_load_file_permission_denied(self, tmp_path: Path) -> None:
+        """Test _load_file handles permission errors."""
+        log_file = tmp_path / "protected.log"
+        log_file.write_text("Secret content")
+        # Make file unreadable
+        log_file.chmod(0o000)
+
+        try:
+            screen = LogViewerScreen(str(log_file), "stdout")
+            screen._load_file()
+            # Should have an error or be empty
+            # (Behavior may vary based on environment)
+            assert screen.load_error is not None or screen.file_contents == ""
+        finally:
+            # Restore permissions for cleanup
+            log_file.chmod(0o644)
+
+
+class TestCancelConfirmScreen:
+    """Tests for CancelConfirmScreen."""
+
+    def test_init_stores_job_id(self) -> None:
+        """Test that job_id is stored on initialization."""
+        screen = CancelConfirmScreen("12345")
+        assert screen.job_id == "12345"
+
+    def test_init_stores_job_name(self) -> None:
+        """Test that job_name is stored on initialization."""
+        screen = CancelConfirmScreen("12345", "test_job")
+        assert screen.job_name == "test_job"
+
+    def test_init_job_name_optional(self) -> None:
+        """Test that job_name is optional."""
+        screen = CancelConfirmScreen("12345")
+        assert screen.job_name is None
+
+    def test_bindings_defined(self) -> None:
+        """Test that bindings are defined."""
+        assert len(CancelConfirmScreen.BINDINGS) > 0
+
+    def test_bindings_include_escape(self) -> None:
+        """Test that escape binding exists."""
+        binding_keys = [b[0] for b in CancelConfirmScreen.BINDINGS]
+        assert "escape" in binding_keys
+
+    def test_bindings_include_enter(self) -> None:
+        """Test that enter binding exists."""
+        binding_keys = [b[0] for b in CancelConfirmScreen.BINDINGS]
+        assert "enter" in binding_keys
+
+
+class TestJobInputScreen:
+    """Tests for JobInputScreen."""
+
+    def test_bindings_defined(self) -> None:
+        """Test that bindings are defined."""
+        assert len(JobInputScreen.BINDINGS) > 0
+
+    def test_bindings_include_escape(self) -> None:
+        """Test that escape binding exists."""
+        binding_keys = [b[0] for b in JobInputScreen.BINDINGS]
+        assert "escape" in binding_keys
+
+
+class TestJobInfoScreenNavigation:
+    """Tests for JobInfoScreen navigation helpers."""
+
+    def test_get_button_order_returns_list(self) -> None:
+        """Test _get_button_order method signature."""
+        screen = JobInfoScreen("12345", "Job info content")
+        # This method requires the screen to be composed, so we just verify it exists
+        assert hasattr(screen, "_get_button_order")
+        assert callable(screen._get_button_order)
+
+    def test_is_button_focused_method_exists(self) -> None:
+        """Test _is_button_focused method exists."""
+        screen = JobInfoScreen("12345", "Job info content")
+        assert hasattr(screen, "_is_button_focused")
+        assert callable(screen._is_button_focused)
+
+    def test_focus_first_button_method_exists(self) -> None:
+        """Test _focus_first_button method exists."""
+        screen = JobInfoScreen("12345", "Job info content")
+        assert hasattr(screen, "_focus_first_button")
+        assert callable(screen._focus_first_button)
+
+    def test_get_focused_button_index_method_exists(self) -> None:
+        """Test _get_focused_button_index method exists."""
+        screen = JobInfoScreen("12345", "Job info content")
+        assert hasattr(screen, "_get_focused_button_index")
+        assert callable(screen._get_focused_button_index)
+
+
+class TestLogViewerScreenMethods:
+    """Tests for LogViewerScreen methods."""
+
+    def test_scroll_to_bottom_method_exists(self) -> None:
+        """Test _scroll_to_bottom method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "_scroll_to_bottom")
+        assert callable(screen._scroll_to_bottom)
+
+    def test_open_in_editor_method_exists(self) -> None:
+        """Test _open_in_editor method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "_open_in_editor")
+        assert callable(screen._open_in_editor)
+
+
+class TestJobInfoScreenActions:
+    """Tests for JobInfoScreen action methods."""
+
+    def test_action_close_method_exists(self) -> None:
+        """Test action_close method exists."""
+        screen = JobInfoScreen("12345", "Job info")
+        assert hasattr(screen, "action_close")
+        assert callable(screen.action_close)
+
+    def test_action_open_stdout_method_exists(self) -> None:
+        """Test action_open_stdout method exists."""
+        screen = JobInfoScreen("12345", "Job info")
+        assert hasattr(screen, "action_open_stdout")
+        assert callable(screen.action_open_stdout)
+
+    def test_action_open_stderr_method_exists(self) -> None:
+        """Test action_open_stderr method exists."""
+        screen = JobInfoScreen("12345", "Job info")
+        assert hasattr(screen, "action_open_stderr")
+        assert callable(screen.action_open_stderr)
+
+    def test_action_focus_content_method_exists(self) -> None:
+        """Test action_focus_content method exists."""
+        screen = JobInfoScreen("12345", "Job info")
+        assert hasattr(screen, "action_focus_content")
+        assert callable(screen.action_focus_content)
+
+    def test_action_focus_buttons_method_exists(self) -> None:
+        """Test action_focus_buttons method exists."""
+        screen = JobInfoScreen("12345", "Job info")
+        assert hasattr(screen, "action_focus_buttons")
+        assert callable(screen.action_focus_buttons)
+
+    def test_action_focus_next_method_exists(self) -> None:
+        """Test action_focus_next method exists."""
+        screen = JobInfoScreen("12345", "Job info")
+        assert hasattr(screen, "action_focus_next")
+        assert callable(screen.action_focus_next)
+
+    def test_action_focus_previous_method_exists(self) -> None:
+        """Test action_focus_previous method exists."""
+        screen = JobInfoScreen("12345", "Job info")
+        assert hasattr(screen, "action_focus_previous")
+        assert callable(screen.action_focus_previous)
+
+
+class TestLogViewerScreenActions:
+    """Tests for LogViewerScreen action methods."""
+
+    def test_action_close_method_exists(self) -> None:
+        """Test action_close method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_close")
+        assert callable(screen.action_close)
+
+    def test_action_open_in_editor_method_exists(self) -> None:
+        """Test action_open_in_editor method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_open_in_editor")
+        assert callable(screen.action_open_in_editor)
+
+    def test_action_scroll_top_method_exists(self) -> None:
+        """Test action_scroll_top method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_scroll_top")
+        assert callable(screen.action_scroll_top)
+
+    def test_action_scroll_bottom_method_exists(self) -> None:
+        """Test action_scroll_bottom method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_scroll_bottom")
+        assert callable(screen.action_scroll_bottom)
+
+    def test_action_reload_method_exists(self) -> None:
+        """Test action_reload method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_reload")
+        assert callable(screen.action_reload)
+
+
+class TestCancelConfirmScreenActions:
+    """Tests for CancelConfirmScreen action methods."""
+
+    def test_action_cancel_method_exists(self) -> None:
+        """Test action_cancel method exists."""
+        screen = CancelConfirmScreen("12345")
+        assert hasattr(screen, "action_cancel")
+        assert callable(screen.action_cancel)
+
+    def test_action_confirm_method_exists(self) -> None:
+        """Test action_confirm method exists."""
+        screen = CancelConfirmScreen("12345")
+        assert hasattr(screen, "action_confirm")
+        assert callable(screen.action_confirm)
+
+
+class TestJobInputScreenActions:
+    """Tests for JobInputScreen action methods."""
+
+    def test_action_cancel_method_exists(self) -> None:
+        """Test action_cancel method exists."""
+        screen = JobInputScreen()
+        assert hasattr(screen, "action_cancel")
+        assert callable(screen.action_cancel)
