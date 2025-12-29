@@ -64,16 +64,15 @@ class SlurmMonitor(App[None]):
         with Container(id="stats-container"):
             yield JobStats()
 
-        with Horizontal(id="main-content"):
-            with VerticalScroll(id="jobs-panel"):
-                with Horizontal(id="jobs-header"):
-                    yield Static("[bold]📋 All Jobs[/bold]", id="jobs-title")
-                    yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
-                yield DataTable(id="jobs_table")
+        with VerticalScroll(id="jobs-panel"):
+            with Horizontal(id="jobs-header"):
+                yield Static("[bold]📋 All Jobs[/bold]", id="jobs-title")
+                yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
+            yield DataTable(id="jobs_table")
 
-            with Vertical(id="log-panel"):
-                yield Static("[bold]📝 Logs[/bold]", id="log-title")
-                yield LogPane(id="log_pane")
+        with Container(id="log-panel"):
+            yield Static("[bold]📝 Logs[/bold]", id="log-title")
+            yield LogPane(id="log_pane")
 
         yield Footer()
 
