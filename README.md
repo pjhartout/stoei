@@ -8,7 +8,7 @@ A Slurm TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track of y
 
 ## Features
 
-- 🏃 **Real-time monitoring** - Auto-refreshes every 2 seconds
+- 🏃 **Real-time monitoring** - Auto-refreshes every 5 seconds
 - 📊 **Job statistics** - View total jobs, requeues, and running/pending counts at a glance
 - 📜 **Job history** - See your job history from the last 24 hours
 - 🔍 **Detailed job info** - Press Enter or 'i' to view comprehensive job details
@@ -134,6 +134,7 @@ stoei/
 │   ├── __init__.py
 │   ├── __main__.py          # Entry point
 │   ├── app.py                # Main Textual application
+│   ├── editor.py             # External editor integration
 │   ├── logging.py            # Loguru configuration
 │   ├── slurm/
 │   │   ├── commands.py       # SLURM command execution
@@ -141,9 +142,12 @@ stoei/
 │   │   ├── parser.py         # Output parsing
 │   │   └── validation.py     # Input validation
 │   ├── styles/
-│   │   └── theme.py          # CSS styling
+│   │   ├── app.tcss          # Main app styles
+│   │   ├── modals.tcss       # Modal screen styles
+│   │   └── theme.py          # Theme configuration
 │   └── widgets/
 │       ├── job_stats.py      # Statistics widget
+│       ├── log_pane.py       # Log display widget
 │       └── screens.py        # Modal screens
 ├── tests/
 │   ├── conftest.py           # Shared fixtures
