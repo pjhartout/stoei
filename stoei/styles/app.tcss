@@ -54,16 +54,10 @@ JobStats {
     color: $foreground;
 }
 
-/* Main content area with jobs and logs side by side */
-#main-content {
-    height: 1fr;
-    width: 100%;
-}
-
 /* Unified jobs panel */
 #jobs-panel {
-    width: 3fr;
-    height: 100%;
+    width: 100%;
+    height: 1fr;
     border: heavy ansi_blue;
     background: $background;
 }
@@ -131,13 +125,13 @@ DataTable > .datatable--odd-row {
     background: ansi_black;
 }
 
-/* Log panel */
+/* Log panel - pinned to bottom */
 #log-panel {
-    width: 1fr;
-    height: 100%;
+    width: 100%;
+    height: auto;
     border: heavy ansi_magenta;
     background: $background;
-    margin-left: 1;
+    margin-top: 1;
 }
 
 #log-panel:focus-within {
@@ -153,7 +147,7 @@ DataTable > .datatable--odd-row {
 }
 
 LogPane {
-    height: 1fr;
+    height: 4;
     width: 100%;
     background: $background;
     scrollbar-background: ansi_black;

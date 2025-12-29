@@ -12,7 +12,7 @@ class LogPane(RichLog):
 
     DEFAULT_CSS: ClassVar[str] = """
     LogPane {
-        height: 100%;
+        height: auto;
         width: 100%;
         scrollbar-size: 1 1;
     }
@@ -30,7 +30,7 @@ class LogPane(RichLog):
 
     def __init__(
         self,
-        max_lines: int = 500,
+        max_lines: int = 4,
         *,
         name: str | None = None,
         id: str | None = None,
