@@ -1,5 +1,5 @@
 [project]
-name = "stoeier"
+name = "stoei"
 version = "0.2.3"
 description = "A TUI app for monitoring SLURM jobs"
 readme = "README.md"
