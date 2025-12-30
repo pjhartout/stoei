@@ -1,6 +1,10 @@
 """Parsers for SLURM command output."""
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
 
 
 def parse_scontrol_output(raw_output: str) -> dict[str, str]:
@@ -163,22 +167,19 @@ def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
             current_node = {}
 
         # Parse key=value pairs
-        # Handle continuation lines (starting with spaces) - these continue the previous value
-        if line.startswith(" ") or line.startswith("\t"):
-            # Continuation of previous line - append to last value
-            if current_node and current_node:
-                # Get the last key and append this line to its value
-                last_key = list(current_node.keys())[-1] if current_node else None
-                if last_key:
-                    current_node[last_key] += " " + line.strip()
-        else:
-            # New key=value pair
-            if "=" in line:
-                parts = line.split("=", 1)
-                if len(parts) == 2:
-                    key = parts[0].strip()
-                    value = parts[1].strip()
-                    current_node[key] = value
+        # Both first line and continuation lines can have multiple key=value pairs
+        # Continuation lines start with spaces/tabs
+        line_stripped = line.strip()
+        
+        # Parse all key=value pairs on this line using regex
+        # Pattern matches: Key=Value where Key is alphanumeric with possible slashes/colons
+        # and Value is everything until the next Key= or end of line
+        pattern = r"(\w+(?:[/:]\w+)*)=([^\s=]+(?:\s+[^\s=]+)*?)(?=\s+\w+(?:[/:]\w+)*=|$)"
+        matches = re.finditer(pattern, line_stripped)
+        for match in matches:
+            key = match.group(1)
+            value = match.group(2).strip()
+            current_node[key] = value
 
     # Add last node if exists
     if current_node:

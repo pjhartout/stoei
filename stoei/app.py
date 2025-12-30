@@ -160,9 +160,15 @@ class SlurmMonitor(App[None]):
         self._job_cache.refresh()
 
         # Also refresh cluster nodes and all users jobs
-        nodes, _ = get_cluster_nodes()
+        nodes, error = get_cluster_nodes()
+        if error:
+            logger.warning(f"Failed to get cluster nodes: {error}")
+        else:
+            logger.debug(f"Fetched {len(nodes)} cluster nodes")
+        self._cluster_nodes = nodes if not error else []
+
         all_jobs = get_all_users_jobs()
-        self._cluster_nodes = nodes
+        logger.debug(f"Fetched {len(all_jobs)} jobs from all users")
         self._all_users_jobs = all_jobs
 
         # Schedule UI update on main thread
@@ -244,8 +250,9 @@ class SlurmMonitor(App[None]):
             sidebar = self.query_one("#cluster-sidebar", ClusterSidebar)
             stats = self._calculate_cluster_stats()
             sidebar.update_stats(stats)
+            logger.debug(f"Updated cluster sidebar: {stats.total_nodes} nodes, {stats.total_cpus} CPUs")
         except Exception as exc:
-            logger.warning(f"Failed to update cluster sidebar: {exc}")
+            logger.error(f"Failed to update cluster sidebar: {exc}", exc_info=True)
 
     def _calculate_cluster_stats(self) -> ClusterStats:
         """Calculate cluster statistics from node data.
@@ -254,6 +261,10 @@ class SlurmMonitor(App[None]):
             ClusterStats object with aggregated statistics.
         """
         stats = ClusterStats()
+
+        if not self._cluster_nodes:
+            logger.debug("No cluster nodes available for stats calculation")
+            return stats
 
         for node_data in self._cluster_nodes:
             # Parse node information
@@ -313,9 +324,10 @@ class SlurmMonitor(App[None]):
         try:
             node_tab = self.query_one("#node-overview", NodeOverviewTab)
             node_infos = self._parse_node_infos()
+            logger.debug(f"Updating node overview with {len(node_infos)} nodes")
             node_tab.update_nodes(node_infos)
         except Exception as exc:
-            logger.warning(f"Failed to update node overview: {exc}")
+            logger.error(f"Failed to update node overview: {exc}", exc_info=True)
 
     def _parse_node_infos(self) -> list[NodeInfo]:
         """Parse cluster node data into NodeInfo objects.
@@ -377,9 +389,10 @@ class SlurmMonitor(App[None]):
         try:
             user_tab = self.query_one("#user-overview", UserOverviewTab)
             user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
+            logger.debug(f"Updating user overview with {len(user_stats)} users from {len(self._all_users_jobs)} jobs")
             user_tab.update_users(user_stats)
         except Exception as exc:
-            logger.warning(f"Failed to update user overview: {exc}")
+            logger.error(f"Failed to update user overview: {exc}", exc_info=True)
 
     def on_tab_switched(self, event: TabSwitched) -> None:
         """Handle tab switching events.
@@ -401,10 +414,12 @@ class SlurmMonitor(App[None]):
             active_tab = self.query_one(f"#{active_tab_id}", Container)
             active_tab.display = True
 
-            # Update the tab content if needed
+            # Update the tab content if needed (always update when switching to ensure data is shown)
             if event.tab_name == "nodes":
+                # Always update when switching to nodes tab
                 self._update_node_overview()
             elif event.tab_name == "users":
+                # Always update when switching to users tab
                 self._update_user_overview()
         except Exception as exc:
             logger.warning(f"Failed to switch to tab {event.tab_name}: {exc}")

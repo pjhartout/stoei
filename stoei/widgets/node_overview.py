@@ -93,6 +93,9 @@ class NodeOverviewTab(VerticalScroll):
             "GPU%",
             "Partitions",
         )
+        # If we already have nodes data, update the table
+        if self.nodes:
+            self.update_nodes(self.nodes)
 
     def update_nodes(self, nodes: list[NodeInfo]) -> None:
         """Update the node data table.
@@ -101,7 +104,11 @@ class NodeOverviewTab(VerticalScroll):
             nodes: List of node information to display.
         """
         self.nodes = nodes
-        nodes_table = self.query_one("#nodes_table", DataTable)
+        try:
+            nodes_table = self.query_one("#nodes_table", DataTable)
+        except Exception:
+            # Table might not be mounted yet, store nodes for later
+            return
 
         # Save cursor position
         cursor_row = nodes_table.cursor_row

@@ -73,7 +73,12 @@ class UserOverviewTab(VerticalScroll):
         Args:
             users: List of user statistics to display.
         """
-        users_table = self.query_one("#users_table", DataTable)
+        try:
+            users_table = self.query_one("#users_table", DataTable)
+        except Exception:
+            # Table might not be mounted yet, store users for later
+            self.users = users
+            return
 
         # Save cursor position
         cursor_row = users_table.cursor_row

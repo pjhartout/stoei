@@ -78,8 +78,14 @@ class ClusterSidebar(Static):
             classes: The CSS classes for the widget.
             disabled: Whether the widget is disabled.
         """
-        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
+        super().__init__("[bold]🖥️  Cluster Load[/bold]\n\n[dim]Loading cluster data...[/dim]", name=name, id=id, classes=classes, disabled=disabled)
         self.stats: ClusterStats = ClusterStats()
+        self._data_loaded: bool = False
+
+    def on_mount(self) -> None:
+        """Initialize the widget with initial content."""
+        # Render initial empty stats
+        self.update(self._render_stats())
 
     def update_stats(self, stats: ClusterStats) -> None:
         """Update the cluster statistics display.
@@ -88,6 +94,7 @@ class ClusterSidebar(Static):
             stats: Cluster statistics to display.
         """
         self.stats = stats
+        self._data_loaded = True
         self.update(self._render_stats())
 
     def _render_stats(self) -> str:
@@ -113,6 +120,10 @@ class ClusterSidebar(Static):
                 return f"[yellow]{pct:.1f}%[/yellow]"
             else:
                 return f"[red]{pct:.1f}%[/red]"
+
+        # Handle case where data hasn't been loaded yet
+        if not self._data_loaded:
+            return "[bold]🖥️  Cluster Load[/bold]\n\n[dim]Loading cluster data...[/dim]"
 
         lines = [
             "[bold]🖥️  Cluster Load[/bold]",
