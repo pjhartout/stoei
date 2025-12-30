@@ -66,6 +66,9 @@ class UserOverviewTab(VerticalScroll):
             "GPUs",
             "Nodes",
         )
+        # If we already have users data, update the table
+        if self.users:
+            self.update_users(self.users)
 
     def update_users(self, users: list[UserStats]) -> None:
         """Update the user data table.

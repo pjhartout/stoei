@@ -55,7 +55,6 @@ class ClusterSidebar(Static):
     DEFAULT_CSS: ClassVar[str] = """
     ClusterSidebar {
         width: 30;
-        height: 100%;
         border: heavy ansi_blue;
         background: ansi_black;
         padding: 1;
@@ -78,14 +77,16 @@ class ClusterSidebar(Static):
             classes: The CSS classes for the widget.
             disabled: Whether the widget is disabled.
         """
-        super().__init__("[bold]🖥️  Cluster Load[/bold]\n\n[dim]Loading cluster data...[/dim]", name=name, id=id, classes=classes, disabled=disabled)
+        # Initialize with empty content, will be set in on_mount
+        super().__init__("", name=name, id=id, classes=classes, disabled=disabled)
         self.stats: ClusterStats = ClusterStats()
         self._data_loaded: bool = False
 
     def on_mount(self) -> None:
         """Initialize the widget with initial content."""
-        # Render initial empty stats
-        self.update(self._render_stats())
+        # Set initial loading message
+        loading_msg = "[bold]🖥️  Cluster Load[/bold]\n\n[dim]Loading cluster data...[/dim]"
+        self.update(loading_msg)
 
     def update_stats(self, stats: ClusterStats) -> None:
         """Update the cluster statistics display.
@@ -141,7 +142,7 @@ class ClusterSidebar(Static):
             f"  {stats.total_memory_gb - stats.allocated_memory_gb:.1f}/{stats.total_memory_gb:.1f} GB",
         ]
 
-        if stats.total_gpus > 0:
+        if stats.total_gpus > 0 and gpus_pct is not None:
             lines.extend(
                 [
                     "",
