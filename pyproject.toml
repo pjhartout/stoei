@@ -1,6 +1,6 @@
 [project]
-name = "stoei"
-version = "0.2.1"
+name = "stoeier"
+version = "0.2.2"
 description = "A TUI app for monitoring SLURM jobs"
 readme = "README.md"
 requires-python = ">=3.11"
