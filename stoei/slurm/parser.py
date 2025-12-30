@@ -132,3 +132,59 @@ def parse_sacct_job_output(raw_output: str, fields: list[str]) -> dict[str, str]
                 result[field] = value
 
     return result
+
+
+def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
+    """Parse scontrol show nodes output into a list of node dictionaries.
+
+    Args:
+        raw_output: Raw output from 'scontrol show nodes' command.
+
+    Returns:
+        List of dictionaries, each containing node information.
+    """
+    nodes: list[dict[str, str]] = []
+    current_node: dict[str, str] = {}
+
+    # Split by double newlines (node separator) or single newline with NodeName
+    lines = raw_output.split("\n")
+    for line in lines:
+        line = line.strip()
+        if not line:
+            if current_node:
+                nodes.append(current_node)
+                current_node = {}
+            continue
+
+        # Check if this is a new node entry (starts with NodeName=)
+        if line.startswith("NodeName="):
+            if current_node:
+                nodes.append(current_node)
+            current_node = {}
+
+        # Parse key=value pairs
+        # Handle continuation lines (starting with spaces)
+        if line.startswith(" ") or line.startswith("\t"):
+            # Continuation of previous line
+            if current_node:
+                # Try to parse as key=value
+                if "=" in line:
+                    parts = line.split("=", 1)
+                    if len(parts) == 2:
+                        key = parts[0].strip()
+                        value = parts[1].strip()
+                        current_node[key] = value
+        else:
+            # New key=value pair
+            if "=" in line:
+                parts = line.split("=", 1)
+                if len(parts) == 2:
+                    key = parts[0].strip()
+                    value = parts[1].strip()
+                    current_node[key] = value
+
+    # Add last node if exists
+    if current_node:
+        nodes.append(current_node)
+
+    return nodes

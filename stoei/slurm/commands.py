@@ -7,6 +7,7 @@ from stoei.slurm.formatters import format_job_info, format_sacct_job_info
 from stoei.slurm.parser import (
     parse_sacct_job_output,
     parse_sacct_output,
+    parse_scontrol_nodes_output,
     parse_scontrol_output,
     parse_squeue_output,
 )
@@ -426,3 +427,89 @@ def cancel_job(job_id: str) -> tuple[bool, str | None]:
 
     logger.info(f"Successfully cancelled job {job_id}")
     return True, None
+
+
+def get_cluster_nodes() -> tuple[list[dict[str, str]], str | None]:
+    """Get information about all cluster nodes.
+
+    Returns:
+        Tuple of (list of node info dictionaries, optional error message).
+    """
+    try:
+        scontrol = resolve_executable("scontrol")
+        command = [scontrol, "show", "nodes"]
+        logger.debug(f"Running command: {' '.join(command)}")
+
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=15,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        logger.error(f"scontrol not found: {exc}")
+        return [], f"scontrol not found: {exc}"
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout getting cluster nodes")
+        return [], "Command timed out"
+    except subprocess.SubprocessError as exc:
+        logger.error(f"Error running scontrol: {exc}")
+        return [], f"Error running scontrol: {exc}"
+
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() or "Failed to get cluster nodes"
+        logger.warning(f"scontrol returned error: {error_msg}")
+        return [], f"scontrol error: {error_msg}"
+
+    raw_output = result.stdout.strip()
+    if not raw_output:
+        return [], "No node information available"
+
+    from stoei.slurm.parser import parse_scontrol_nodes_output
+
+    nodes = parse_scontrol_nodes_output(raw_output)
+    logger.debug(f"Found {len(nodes)} cluster nodes")
+    return nodes, None
+
+
+def get_all_users_jobs() -> list[tuple[str, ...]]:
+    """Return all running/pending jobs from squeue (all users).
+
+    Returns:
+        List of tuples containing job information (JobID, Name, User, State, Time, Nodes, NodeList).
+    """
+    try:
+        squeue = resolve_executable("squeue")
+        command = [
+            squeue,
+            "-o",
+            "%.10i|%.15j|%.8u|%.8T|%.10M|%.4D|%.12R",
+            "-a",  # Show all partitions
+        ]
+        logger.debug("Running squeue command for all users")
+
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError as exc:
+        logger.error(f"Error setting up squeue command: {exc}")
+        return []
+    except subprocess.TimeoutExpired:
+        logger.error("Timeout getting all users jobs")
+        return []
+    except subprocess.SubprocessError as exc:
+        logger.error(f"Error getting all users jobs: {exc}")
+        return []
+
+    if result.returncode != 0:
+        logger.warning(f"squeue returned non-zero exit code: {result.returncode}")
+        return []
+
+    jobs = parse_squeue_output(result.stdout)
+    logger.debug(f"Found {len(jobs)} running/pending jobs (all users)")
+    return jobs
