@@ -83,3 +83,28 @@ def resolve_executable(executable: str) -> str:
     if resolved is None:
         raise FileNotFoundError(f"Executable {executable!r} was not found on PATH")
     return resolved
+
+
+def check_slurm_available() -> tuple[bool, str | None]:
+    """Check if SLURM controller commands are available on the system.
+
+    Checks for the presence of key SLURM commands (squeue, scontrol, sacct)
+    that are required for stoei to function.
+
+    Returns:
+        Tuple of (is_available, error_message).
+        is_available: True if SLURM commands are found, False otherwise.
+        error_message: None if available, otherwise a descriptive error message.
+    """
+    required_commands = ["squeue", "scontrol", "sacct"]
+    missing_commands = []
+
+    for cmd in required_commands:
+        if shutil.which(cmd) is None:
+            missing_commands.append(cmd)
+
+    if missing_commands:
+        missing_str = ", ".join(missing_commands)
+        return False, f"SLURM commands not found: {missing_str}. Please ensure SLURM is installed and accessible."
+
+    return True, None

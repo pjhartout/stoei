@@ -13,9 +13,11 @@ from textual.worker import Worker, WorkerState
 from stoei.logging import add_tui_sink, get_logger, remove_tui_sink
 from stoei.slurm.cache import JobCache, JobState
 from stoei.slurm.commands import cancel_job, get_job_info, get_job_log_paths
+from stoei.slurm.validation import check_slurm_available
 from stoei.widgets.job_stats import JobStats
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen
+from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
 
 logger = get_logger(__name__)
 
@@ -78,6 +80,13 @@ class SlurmMonitor(App[None]):
 
     def on_mount(self) -> None:
         """Initialize table and start data loading."""
+        # Check SLURM availability first
+        is_available, error_msg = check_slurm_available()
+        if not is_available:
+            logger.error(f"SLURM not available: {error_msg}")
+            self.push_screen(SlurmUnavailableScreen())
+            return
+
         # Set up log pane as a loguru sink
         log_pane = self.query_one("#log_pane", LogPane)
         self._log_sink_id = add_tui_sink(log_pane.sink, level="DEBUG")
