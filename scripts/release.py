@@ -229,7 +229,7 @@ def perform_release(current_version: str, new_version: str) -> None:
     create_github_release(new_version)
 
     print(f"\n✅ Release {new_version} completed successfully!")
-    print("\nNote: The publish workflow will automatically build and publish to PyPI.")
+    print("\nNote: The release workflow will automatically create a GitHub release.")
 
 
 def main() -> None:

@@ -16,16 +16,24 @@ A Slurm TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track of y
 
 ## Installation
 
-### Using uvx (Recommended)
+### Using pip from GitHub (Recommended)
+
+Install the latest release:
 
 ```bash
-uvx stoei
+pip install git+https://github.com/pjhartout/stoei.git
 ```
 
-### Using pip
+Or install a specific version:
 
 ```bash
-pip install stoei
+pip install git+https://github.com/pjhartout/stoei.git@v0.2.3
+```
+
+### Using uv
+
+```bash
+uv tool install git+https://github.com/pjhartout/stoei.git
 ```
 
 ### From source
