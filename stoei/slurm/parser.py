@@ -163,17 +163,14 @@ def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
             current_node = {}
 
         # Parse key=value pairs
-        # Handle continuation lines (starting with spaces)
+        # Handle continuation lines (starting with spaces) - these continue the previous value
         if line.startswith(" ") or line.startswith("\t"):
-            # Continuation of previous line
-            if current_node:
-                # Try to parse as key=value
-                if "=" in line:
-                    parts = line.split("=", 1)
-                    if len(parts) == 2:
-                        key = parts[0].strip()
-                        value = parts[1].strip()
-                        current_node[key] = value
+            # Continuation of previous line - append to last value
+            if current_node and current_node:
+                # Get the last key and append this line to its value
+                last_key = list(current_node.keys())[-1] if current_node else None
+                if last_key:
+                    current_node[last_key] += " " + line.strip()
         else:
             # New key=value pair
             if "=" in line:

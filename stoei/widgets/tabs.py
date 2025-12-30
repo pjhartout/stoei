@@ -13,14 +13,13 @@ from stoei.widgets.user_overview import UserOverviewTab
 class TabSwitched(events.Message):
     """Message sent when a tab is switched."""
 
-    def __init__(self, sender: Container, tab_name: str) -> None:
+    def __init__(self, tab_name: str) -> None:
         """Initialize the TabSwitched message.
 
         Args:
-            sender: The widget sending the message.
             tab_name: Name of the tab that was switched to.
         """
-        super().__init__(sender)
+        super().__init__()
         self.tab_name = tab_name
 
 
@@ -134,7 +133,7 @@ class TabContainer(Container):
             pass
 
         # Post message for app to handle additional updates
-        self.post_message(TabSwitched(self, tab_name))
+        self.post_message(TabSwitched(tab_name))
 
     @property
     def active_tab(self) -> str:

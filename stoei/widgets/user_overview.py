@@ -30,9 +30,23 @@ class UserOverviewTab(VerticalScroll):
     }
     """
 
-    def __init__(self) -> None:
-        """Initialize the UserOverviewTab widget."""
-        super().__init__()
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+        disabled: bool = False,
+    ) -> None:
+        """Initialize the UserOverviewTab widget.
+
+        Args:
+            name: The name of the widget.
+            id: The ID of the widget in the DOM.
+            classes: The CSS classes for the widget.
+            disabled: Whether the widget is disabled.
+        """
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.users: list[UserStats] = []
 
     def compose(self) -> None:
@@ -59,7 +73,6 @@ class UserOverviewTab(VerticalScroll):
         Args:
             users: List of user statistics to display.
         """
-        self.users = users
         users_table = self.query_one("#users_table", DataTable)
 
         # Save cursor position
@@ -69,6 +82,7 @@ class UserOverviewTab(VerticalScroll):
 
         # Sort by total CPUs (descending) to show heaviest users first
         sorted_users = sorted(users, key=lambda u: u.total_cpus, reverse=True)
+        self.users = sorted_users
 
         for user in sorted_users:
             users_table.add_row(

@@ -62,9 +62,23 @@ class ClusterSidebar(Static):
     }
     """
 
-    def __init__(self) -> None:
-        """Initialize the ClusterSidebar widget."""
-        super().__init__()
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+        disabled: bool = False,
+    ) -> None:
+        """Initialize the ClusterSidebar widget.
+
+        Args:
+            name: The name of the widget.
+            id: The ID of the widget in the DOM.
+            classes: The CSS classes for the widget.
+            disabled: Whether the widget is disabled.
+        """
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.stats: ClusterStats = ClusterStats()
 
     def update_stats(self, stats: ClusterStats) -> None:

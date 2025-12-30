@@ -76,9 +76,6 @@ class SlurmMonitor(App[None]):
         yield Header(show_clock=True)
 
         with Horizontal(id="main-container"):
-            # Sidebar with cluster load
-            yield ClusterSidebar(id="cluster-sidebar")
-
             # Main content area with tabs
             with Container(id="content-area"):
                 yield TabContainer(id="tab-container")
@@ -92,12 +89,15 @@ class SlurmMonitor(App[None]):
                         yield DataTable(id="jobs_table")
 
                 # Nodes tab
-                with Container(id="tab-nodes-content", classes="tab-content", display=False):
+                with Container(id="tab-nodes-content", classes="tab-content"):
                     yield NodeOverviewTab(id="node-overview")
 
                 # Users tab
-                with Container(id="tab-users-content", classes="tab-content", display=False):
+                with Container(id="tab-users-content", classes="tab-content"):
                     yield UserOverviewTab(id="user-overview")
+
+            # Sidebar with cluster load (on the right)
+            yield ClusterSidebar(id="cluster-sidebar")
 
         with Container(id="log-panel"):
             yield Static("[bold]📝 Logs[/bold]", id="log-title")
@@ -119,6 +119,15 @@ class SlurmMonitor(App[None]):
         self._log_sink_id = add_tui_sink(log_pane.sink, level="DEBUG")
 
         logger.info("Mounting application")
+
+        # Hide non-default tabs initially
+        try:
+            nodes_tab = self.query_one("#tab-nodes-content", Container)
+            nodes_tab.display = False
+            users_tab = self.query_one("#tab-users-content", Container)
+            users_tab.display = False
+        except Exception as exc:
+            logger.warning(f"Failed to hide tabs: {exc}")
 
         jobs_table = self.query_one("#jobs_table", DataTable)
         jobs_table.cursor_type = "row"

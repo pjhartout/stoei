@@ -54,9 +54,23 @@ class NodeOverviewTab(VerticalScroll):
     }
     """
 
-    def __init__(self) -> None:
-        """Initialize the NodeOverviewTab widget."""
-        super().__init__()
+    def __init__(
+        self,
+        *,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+        disabled: bool = False,
+    ) -> None:
+        """Initialize the NodeOverviewTab widget.
+
+        Args:
+            name: The name of the widget.
+            id: The ID of the widget in the DOM.
+            classes: The CSS classes for the widget.
+            disabled: Whether the widget is disabled.
+        """
+        super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.nodes: list[NodeInfo] = []
 
     def compose(self) -> None:
