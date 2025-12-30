@@ -51,22 +51,24 @@ def open_in_editor(filepath: str | None) -> tuple[bool, str]:  # noqa: PLR0911
         logger.warning(error_msg)
         return False, error_msg
 
-    path = Path(filepath)
+    # Resolve the path to handle relative paths and symlinks
+    path = Path(filepath).expanduser().resolve()
 
     # Check if file exists
     if not path.exists():
-        error_msg = f"File does not exist: {filepath}"
+        error_msg = f"File does not exist: {path}"
         logger.warning(error_msg)
         return False, error_msg
 
     # Check if file is readable
     if not path.is_file():
-        error_msg = f"Not a regular file: {filepath}"
+        error_msg = f"Not a regular file: {path}"
         logger.warning(error_msg)
         return False, error_msg
 
-    if not os.access(filepath, os.R_OK):
-        error_msg = f"File is not readable: {filepath}"
+    # Check read permissions using the resolved path
+    if not os.access(str(path), os.R_OK):
+        error_msg = f"File is not readable: {path}"
         logger.warning(error_msg)
         return False, error_msg
 
@@ -77,12 +79,13 @@ def open_in_editor(filepath: str | None) -> tuple[bool, str]:  # noqa: PLR0911
         logger.error(error_msg)
         return False, error_msg
 
-    # Open file in editor
+    # Open file in editor using the resolved absolute path
+    resolved_path = str(path)
     try:
-        logger.info(f"Opening {filepath} in {editor}")
+        logger.info(f"Opening {resolved_path} in {editor}")
         # Run editor and wait for it to complete
         result = subprocess.run(  # noqa: S603
-            [editor, filepath],
+            [editor, resolved_path],
             check=False,
         )
         if result.returncode != 0:
@@ -102,4 +105,4 @@ def open_in_editor(filepath: str | None) -> tuple[bool, str]:  # noqa: PLR0911
         logger.exception(error_msg)
         return False, error_msg
     else:
-        return True, f"Opened {filepath} in {editor}"
+        return True, f"Opened {resolved_path} in {editor}"

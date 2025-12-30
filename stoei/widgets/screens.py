@@ -181,6 +181,16 @@ class LogViewerScreen(Screen[None]):
 
     def _open_in_editor(self) -> None:
         """Open the file in the user's editor."""
+        # Don't allow opening if there was a load error
+        if self.load_error:
+            self.app.notify(f"Cannot open file: {self.load_error}", severity="error")
+            return
+
+        # Validate filepath before attempting to open
+        if not self.filepath or not self.filepath.strip():
+            self.app.notify("No file path available", severity="error")
+            return
+
         logger.info(f"Opening {self.filepath} in external editor")
         with self.app.suspend():
             success, message = open_in_editor(self.filepath)
@@ -480,7 +490,8 @@ class JobInfoScreen(Screen[None]):
             path: Path to the log file.
             log_type: Type of log (stdout or stderr).
         """
-        if not path:
+        # Check if path is None, empty, or whitespace-only
+        if not path or (isinstance(path, str) and not path.strip()):
             self.app.notify(f"No {log_type} path available", severity="warning")
             return
 
