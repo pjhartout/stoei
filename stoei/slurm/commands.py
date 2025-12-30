@@ -274,8 +274,19 @@ def get_job_log_paths(job_id: str) -> tuple[str | None, str | None, str | None]:
     # Expand placeholders using job info
     if stdout:
         stdout = _expand_log_path(stdout, job_id, parsed)
+        # Normalize empty/whitespace paths to None
+        if not stdout or not stdout.strip():
+            stdout = None
+    else:
+        stdout = None
+
     if stderr:
         stderr = _expand_log_path(stderr, job_id, parsed)
+        # Normalize empty/whitespace paths to None
+        if not stderr or not stderr.strip():
+            stderr = None
+    else:
+        stderr = None
 
     logger.debug(f"Log paths for job {job_id}: stdout={stdout}, stderr={stderr}")
     return stdout, stderr, None
