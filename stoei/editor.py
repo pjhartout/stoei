@@ -5,7 +5,7 @@ import shutil
 import subprocess
 from pathlib import Path
 
-from stoei.logging import get_logger
+from stoei.logger import get_logger
 
 logger = get_logger(__name__)
 

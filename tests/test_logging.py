@@ -5,13 +5,13 @@ class TestGetLogger:
     """Tests for get_logger function."""
 
     def test_returns_logger_instance(self) -> None:
-        from stoei.logging import get_logger
+        from stoei.logger import get_logger
 
         logger = get_logger("test_module")
         assert logger is not None
 
     def test_logger_has_bind_context(self) -> None:
-        from stoei.logging import get_logger
+        from stoei.logger import get_logger
 
         logger = get_logger("test_module")
         # Logger should be bound with the name
@@ -25,7 +25,7 @@ class TestAddTuiSink:
     """Tests for add_tui_sink function."""
 
     def test_returns_sink_id(self) -> None:
-        from stoei.logging import add_tui_sink, remove_tui_sink
+        from stoei.logger import add_tui_sink, remove_tui_sink
 
         # Use a real callable instead of MagicMock to avoid loguru
         # treating it as a file path (MagicMock has __fspath__ and write attrs)
@@ -40,7 +40,7 @@ class TestAddTuiSink:
         remove_tui_sink(sink_id)
 
     def test_adds_sink_to_logger(self) -> None:
-        from stoei.logging import add_tui_sink, remove_tui_sink
+        from stoei.logger import add_tui_sink, remove_tui_sink
 
         messages_received: list[str] = []
 
@@ -65,7 +65,7 @@ class TestRemoveTuiSink:
     """Tests for remove_tui_sink function."""
 
     def test_removes_sink_from_logger(self) -> None:
-        from stoei.logging import add_tui_sink, remove_tui_sink
+        from stoei.logger import add_tui_sink, remove_tui_sink
 
         messages_after_remove: list[str] = []
 
@@ -85,7 +85,7 @@ class TestRemoveTuiSink:
         assert len(messages_after_remove) == initial_count
 
     def test_restores_stdout_handler(self) -> None:
-        from stoei.logging import _state, add_tui_sink, remove_tui_sink
+        from stoei.logger import _state, add_tui_sink, remove_tui_sink
 
         # Use a real callable instead of MagicMock to avoid loguru
         # treating it as a file path (MagicMock has __fspath__ and write attrs)
@@ -109,7 +109,7 @@ class TestLoggingState:
     """Tests for _LoggingState class."""
 
     def test_initial_stdout_handler(self) -> None:
-        from stoei.logging import _state
+        from stoei.logger import _state
 
         # State should have stdout handler (or it may have been removed by tests)
         # The important thing is that the state object exists

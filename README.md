@@ -16,7 +16,73 @@ A Slurm TUI (Terminal User Interface) for monitoring SLURM jobs. Keep track of y
 
 ## Installation
 
-### Using pip from GitHub (Recommended)
+### Using uvx (Recommended - No Installation Required)
+
+`uvx` allows you to run `stoei` without installing it. This is perfect for trying out the tool or running it on systems where you don't want to install packages globally.
+
+**Prerequisites:**
+- Install `uv` first: [Installation instructions](https://github.com/astral-sh/uv#installation)
+
+**Run the latest version:**
+```bash
+uvx git+https://github.com/pjhartout/stoei.git
+```
+
+**Run a specific version:**
+```bash
+uvx git+https://github.com/pjhartout/stoei.git@v0.2.3
+```
+
+**Benefits of using `uvx`:**
+- ✅ No installation required - runs in an isolated environment
+- ✅ Always uses the latest version (or specified version)
+- ✅ No conflicts with system Python packages
+- ✅ Works from any directory
+- ✅ Automatic dependency management
+
+**How it works:**
+`uvx` creates a temporary virtual environment, installs `stoei` and its dependencies, runs the command, and cleans up afterward. The first run may take a moment to download dependencies, but subsequent runs are faster due to caching.
+
+**Creating an alias (optional):**
+If you use `uvx` frequently, you can create a shell alias:
+```bash
+# Add to your ~/.bashrc or ~/.zshrc
+alias stoei='uvx git+https://github.com/pjhartout/stoei.git'
+```
+
+### Using uv tool install (Permanent Installation)
+
+Install `stoei` as a global tool that's available in your PATH:
+
+```bash
+uv tool install git+https://github.com/pjhartout/stoei.git
+```
+
+After installation, you can run `stoei` from anywhere:
+```bash
+stoei
+```
+
+**Install a specific version:**
+```bash
+uv tool install git+https://github.com/pjhartout/stoei.git@v0.2.3
+```
+
+**Update to the latest version:**
+```bash
+uv tool install --upgrade git+https://github.com/pjhartout/stoei.git
+```
+
+**Uninstall:**
+```bash
+uv tool uninstall stoei
+```
+
+**Where is it installed?**
+- The `stoei` command is installed to `~/.local/bin/stoei` (or `$HOME/.local/bin/stoei`)
+- Make sure `~/.local/bin` is in your `PATH` environment variable
+
+### Using pip from GitHub
 
 Install the latest release:
 
@@ -30,18 +96,17 @@ Or install a specific version (see [releases](https://github.com/pjhartout/stoei
 pip install git+https://github.com/pjhartout/stoei.git@v0.2.3
 ```
 
-### Using uv
+### Using uv in a project
 
-Install as a tool:
-
-```bash
-uv tool install git+https://github.com/pjhartout/stoei.git
-```
-
-Or add to your project:
+Add `stoei` as a dependency to your project:
 
 ```bash
 uv add git+https://github.com/pjhartout/stoei.git
+```
+
+Then run it with:
+```bash
+uv run stoei
 ```
 
 ### From source
@@ -55,8 +120,17 @@ uv run stoei
 
 ## Usage
 
-Simply run:
+**If installed via `uv tool install` or `pip`:**
+```bash
+stoei
+```
 
+**If using `uvx` (no installation):**
+```bash
+uvx git+https://github.com/pjhartout/stoei.git
+```
+
+Or with an alias (if you set one up):
 ```bash
 stoei
 ```
@@ -76,6 +150,7 @@ stoei
 
 - Python 3.11+
 - Access to a SLURM cluster (with `squeue`, `sacct`, and `scontrol` commands available)
+- For `uvx` installation method: [uv](https://github.com/astral-sh/uv) must be installed
 
 ## Development
 

@@ -358,3 +358,64 @@ CancelConfirmScreen #confirm-cancel-btn:focus,
 CancelConfirmScreen #abort-cancel-btn:focus {
     border: tall ansi_bright_cyan;
 }
+
+/* SLURM Unavailable Error Screen */
+SlurmUnavailableScreen {
+    layout: vertical;
+    align: center middle;
+    background: $background;
+}
+
+SlurmUnavailableScreen #slurm-error-container {
+    width: 80;
+    height: auto;
+    padding: 2 3;
+    background: ansi_black;
+    border: double ansi_red;
+}
+
+SlurmUnavailableScreen #slurm-error-header {
+    width: 100%;
+    height: auto;
+    padding: 1;
+    margin-bottom: 2;
+    border-bottom: solid ansi_bright_black;
+}
+
+SlurmUnavailableScreen #error-title {
+    width: 100%;
+    content-align: center middle;
+    color: ansi_red;
+    text-style: bold;
+}
+
+SlurmUnavailableScreen #slurm-error-content {
+    width: 100%;
+    height: auto;
+    padding: 1;
+    margin-bottom: 2;
+}
+
+SlurmUnavailableScreen #error-message {
+    width: 100%;
+    content-align: left middle;
+    color: $foreground;
+}
+
+SlurmUnavailableScreen #slurm-error-footer {
+    width: 100%;
+    height: auto;
+    padding: 1;
+    layout: horizontal;
+    align: center middle;
+}
+
+SlurmUnavailableScreen #quit-button {
+    width: auto;
+    min-width: 16;
+    background: ansi_bright_black;
+}
+
+SlurmUnavailableScreen #quit-button:focus {
+    border: tall ansi_bright_cyan;
+}

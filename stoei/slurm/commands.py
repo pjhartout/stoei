@@ -2,7 +2,7 @@
 
 import subprocess
 
-from stoei.logging import get_logger
+from stoei.logger import get_logger
 from stoei.slurm.formatters import format_job_info, format_sacct_job_info
 from stoei.slurm.parser import (
     parse_sacct_job_output,
