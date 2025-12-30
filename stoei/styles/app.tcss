@@ -41,17 +41,28 @@ Footer > .footer--description {
     color: $foreground;
 }
 
-/* Statistics container */
-#stats-container {
-    height: auto;
-    padding: 1;
-    border: heavy ansi_bright_black;
-    margin-bottom: 1;
-    background: ansi_black;
+/* Main container with sidebar and content */
+#main-container {
+    height: 1fr;
+    width: 100%;
+    layout: horizontal;
 }
 
-JobStats {
-    color: $foreground;
+#cluster-sidebar {
+    width: 30;
+    height: 100%;
+}
+
+#content-area {
+    width: 1fr;
+    height: 100%;
+    layout: vertical;
+}
+
+/* Tab content containers */
+.tab-content {
+    width: 100%;
+    height: 1fr;
 }
 
 /* Unified jobs panel */

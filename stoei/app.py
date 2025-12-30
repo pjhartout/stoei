@@ -1,5 +1,6 @@
 """Main Textual TUI application for stoei."""
 
+import re
 from pathlib import Path
 from typing import ClassVar
 
@@ -12,12 +13,21 @@ from textual.worker import Worker, WorkerState
 
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
 from stoei.slurm.cache import JobCache, JobState
-from stoei.slurm.commands import cancel_job, get_job_info, get_job_log_paths
+from stoei.slurm.commands import (
+    cancel_job,
+    get_all_users_jobs,
+    get_cluster_nodes,
+    get_job_info,
+    get_job_log_paths,
+)
 from stoei.slurm.validation import check_slurm_available
-from stoei.widgets.job_stats import JobStats
+from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
 from stoei.widgets.log_pane import LogPane
+from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen
 from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
+from stoei.widgets.tabs import TabContainer, TabSwitched
+from stoei.widgets.user_overview import UserOverviewTab, UserStats
 
 logger = get_logger(__name__)
 
@@ -53,6 +63,8 @@ class SlurmMonitor(App[None]):
         self._refresh_worker: Worker[None] | None = None
         self._initial_load_complete: bool = False
         self._log_sink_id: int | None = None
+        self._cluster_nodes: list[dict[str, str]] = []
+        self._all_users_jobs: list[tuple[str, ...]] = []
         logger.info("Initializing SlurmMonitor app")
 
     def compose(self) -> ComposeResult:
@@ -63,14 +75,29 @@ class SlurmMonitor(App[None]):
         """
         yield Header(show_clock=True)
 
-        with Container(id="stats-container"):
-            yield JobStats()
+        with Horizontal(id="main-container"):
+            # Sidebar with cluster load
+            yield ClusterSidebar(id="cluster-sidebar")
 
-        with VerticalScroll(id="jobs-panel"):
-            with Horizontal(id="jobs-header"):
-                yield Static("[bold]📋 All Jobs[/bold]", id="jobs-title")
-                yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
-            yield DataTable(id="jobs_table")
+            # Main content area with tabs
+            with Container(id="content-area"):
+                yield TabContainer(id="tab-container")
+
+                # Jobs tab (default)
+                with Container(id="tab-jobs-content", classes="tab-content"):
+                    with VerticalScroll(id="jobs-panel"):
+                        with Horizontal(id="jobs-header"):
+                            yield Static("[bold]📋 My Jobs[/bold]", id="jobs-title")
+                            yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
+                        yield DataTable(id="jobs_table")
+
+                # Nodes tab
+                with Container(id="tab-nodes-content", classes="tab-content", display=False):
+                    yield NodeOverviewTab(id="node-overview")
+
+                # Users tab
+                with Container(id="tab-users-content", classes="tab-content", display=False):
+                    yield UserOverviewTab(id="user-overview")
 
         with Container(id="log-panel"):
             yield Static("[bold]📝 Logs[/bold]", id="log-title")
@@ -123,6 +150,12 @@ class SlurmMonitor(App[None]):
         # Workers run in a separate thread, so blocking calls are safe
         self._job_cache.refresh()
 
+        # Also refresh cluster nodes and all users jobs
+        nodes, _ = get_cluster_nodes()
+        all_jobs = get_all_users_jobs()
+        self._cluster_nodes = nodes
+        self._all_users_jobs = all_jobs
+
         # Schedule UI update on main thread
         self.call_from_thread(self._update_ui_from_cache)
 
@@ -154,10 +187,18 @@ class SlurmMonitor(App[None]):
             new_row = min(cursor_row, jobs_table.row_count - 1)
             jobs_table.move_cursor(row=new_row)
 
-        # Update statistics
-        total_jobs, total_requeues, max_requeues, running, pending = self._job_cache.stats
-        stats_widget = self.query_one(JobStats)
-        stats_widget.update_stats(total_jobs, total_requeues, max_requeues, running + pending)
+        # Update cluster sidebar
+        self._update_cluster_sidebar()
+
+        # Update node and user overview if those tabs are active
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            if tab_container.active_tab == "nodes":
+                self._update_node_overview()
+            elif tab_container.active_tab == "users":
+                self._update_user_overview()
+        except Exception:
+            pass
 
         # Start auto-refresh timer after initial load
         if not self._initial_load_complete:
@@ -187,6 +228,177 @@ class SlurmMonitor(App[None]):
             JobState.TIMEOUT: f"[red]{state}[/red]",
         }
         return state_formats.get(category, state)
+
+    def _update_cluster_sidebar(self) -> None:
+        """Update the cluster sidebar with current statistics."""
+        try:
+            sidebar = self.query_one("#cluster-sidebar", ClusterSidebar)
+            stats = self._calculate_cluster_stats()
+            sidebar.update_stats(stats)
+        except Exception as exc:
+            logger.warning(f"Failed to update cluster sidebar: {exc}")
+
+    def _calculate_cluster_stats(self) -> ClusterStats:
+        """Calculate cluster statistics from node data.
+
+        Returns:
+            ClusterStats object with aggregated statistics.
+        """
+        stats = ClusterStats()
+
+        for node_data in self._cluster_nodes:
+            # Parse node information
+            node_name = node_data.get("NodeName", "")
+            state = node_data.get("State", "").upper()
+
+            # Count nodes
+            stats.total_nodes += 1
+            if "IDLE" in state or "ALLOCATED" in state or "MIXED" in state:
+                if "IDLE" in state:
+                    stats.free_nodes += 1
+                else:
+                    stats.allocated_nodes += 1
+
+            # Parse CPUs
+            cpus_total_str = node_data.get("CPUTot", "0")
+            cpus_alloc_str = node_data.get("CPUAlloc", "0")
+            try:
+                cpus_total = int(cpus_total_str)
+                cpus_alloc = int(cpus_alloc_str)
+                stats.total_cpus += cpus_total
+                stats.allocated_cpus += cpus_alloc
+            except ValueError:
+                pass
+
+            # Parse memory (in MB, convert to GB)
+            mem_total_str = node_data.get("RealMemory", "0")
+            mem_alloc_str = node_data.get("AllocMem", "0")
+            try:
+                mem_total_mb = int(mem_total_str)
+                mem_alloc_mb = int(mem_alloc_str)
+                stats.total_memory_gb += mem_total_mb / 1024.0
+                stats.allocated_memory_gb += mem_alloc_mb / 1024.0
+            except ValueError:
+                pass
+
+            # Parse GPUs (if available)
+            gres = node_data.get("Gres", "")
+            if "gpu:" in gres.lower():
+                # Try to extract GPU count from Gres field
+                # Format is usually like "gpu:4" or "gpu:a100:4"
+                gpu_match = re.search(r"gpu[^:]*:(\d+)", gres)
+                if gpu_match:
+                    try:
+                        gpu_count = int(gpu_match.group(1))
+                        stats.total_gpus += gpu_count
+                        # Estimate allocated GPUs (rough)
+                        if "ALLOCATED" in state or "MIXED" in state:
+                            stats.allocated_gpus += gpu_count
+                    except ValueError:
+                        pass
+
+        return stats
+
+    def _update_node_overview(self) -> None:
+        """Update the node overview tab."""
+        try:
+            node_tab = self.query_one("#node-overview", NodeOverviewTab)
+            node_infos = self._parse_node_infos()
+            node_tab.update_nodes(node_infos)
+        except Exception as exc:
+            logger.warning(f"Failed to update node overview: {exc}")
+
+    def _parse_node_infos(self) -> list[NodeInfo]:
+        """Parse cluster node data into NodeInfo objects.
+
+        Returns:
+            List of NodeInfo objects.
+        """
+        node_infos: list[NodeInfo] = []
+
+        for node_data in self._cluster_nodes:
+            node_name = node_data.get("NodeName", "")
+            state = node_data.get("State", "")
+            partitions = node_data.get("Partitions", "")
+            reason = node_data.get("Reason", "")
+
+            # Parse CPUs
+            cpus_total = int(node_data.get("CPUTot", "0") or "0")
+            cpus_alloc = int(node_data.get("CPUAlloc", "0") or "0")
+
+            # Parse memory (MB to GB)
+            mem_total_mb = int(node_data.get("RealMemory", "0") or "0")
+            mem_alloc_mb = int(node_data.get("AllocMem", "0") or "0")
+            mem_total_gb = mem_total_mb / 1024.0
+            mem_alloc_gb = mem_alloc_mb / 1024.0
+
+            # Parse GPUs
+            gpus_total = 0
+            gpus_alloc = 0
+            gres = node_data.get("Gres", "")
+            if "gpu:" in gres.lower():
+                gpu_match = re.search(r"gpu[^:]*:(\d+)", gres)
+                if gpu_match:
+                    try:
+                        gpus_total = int(gpu_match.group(1))
+                        if "ALLOCATED" in state.upper() or "MIXED" in state.upper():
+                            gpus_alloc = gpus_total
+                    except ValueError:
+                        pass
+
+            node_infos.append(
+                NodeInfo(
+                    name=node_name,
+                    state=state,
+                    cpus_alloc=cpus_alloc,
+                    cpus_total=cpus_total,
+                    memory_alloc_gb=mem_alloc_gb,
+                    memory_total_gb=mem_total_gb,
+                    gpus_alloc=gpus_alloc,
+                    gpus_total=gpus_total,
+                    partitions=partitions,
+                    reason=reason,
+                )
+            )
+
+        return node_infos
+
+    def _update_user_overview(self) -> None:
+        """Update the user overview tab."""
+        try:
+            user_tab = self.query_one("#user-overview", UserOverviewTab)
+            user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
+            user_tab.update_users(user_stats)
+        except Exception as exc:
+            logger.warning(f"Failed to update user overview: {exc}")
+
+    def on_tab_switched(self, event: TabSwitched) -> None:
+        """Handle tab switching events.
+
+        Args:
+            event: The TabSwitched event.
+        """
+        # Hide all tab contents
+        for tab_id in ["tab-jobs-content", "tab-nodes-content", "tab-users-content"]:
+            try:
+                tab_content = self.query_one(f"#{tab_id}", Container)
+                tab_content.display = False
+            except Exception:
+                pass
+
+        # Show the active tab content
+        active_tab_id = f"tab-{event.tab_name}-content"
+        try:
+            active_tab = self.query_one(f"#{active_tab_id}", Container)
+            active_tab.display = True
+
+            # Update the tab content if needed
+            if event.tab_name == "nodes":
+                self._update_node_overview()
+            elif event.tab_name == "users":
+                self._update_user_overview()
+        except Exception as exc:
+            logger.warning(f"Failed to switch to tab {event.tab_name}: {exc}")
 
     def action_refresh(self) -> None:
         """Manual refresh action."""
