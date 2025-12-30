@@ -72,6 +72,110 @@ DEFAULT_JOB = """JobId={job_id} JobName=unknown_job
    NodeList=(null)"""
 
 
+# Real node data from current cluster
+MOCK_NODES_OUTPUT = """NodeName=daisg101 Arch=x86_64 CoresPerSocket=48 
+   CPUAlloc=144 CPUEfctv=192 CPUTot=192 CPULoad=23.90
+   AvailableFeatures=emeraldrapids,mem2T,gpu
+   ActiveFeatures=emeraldrapids,mem2T,gpu
+   Gres=gpu:h200:8(S:0-1)
+   NodeAddr=daisg101 NodeHostName=daisg101 Version=24.11.6
+   OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75) 
+   RealMemory=2000000 AllocMem=650000 FreeMem=1982929 Sockets=2 Boards=1
+   State=MIXED+PLANNED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
+   Partitions=gpu,gpu1,rvs 
+   BootTime=2025-09-26T13:21:42 SlurmdStartTime=2025-11-26T10:29:37
+   LastBusyTime=2025-12-29T06:47:17 ResumeAfterTime=None
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8,gres/gpu:h200=8
+   AllocTRES=cpu=144,mem=650000M,gres/gpu=6,gres/gpu:h200=6
+   CurrentWatts=0 AveWatts=0
+   
+
+NodeName=daisg102 Arch=x86_64 CoresPerSocket=48 
+   CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=16.45
+   AvailableFeatures=emeraldrapids,mem2T,gpu
+   ActiveFeatures=emeraldrapids,mem2T,gpu
+   Gres=gpu:h200:8(S:0-1)
+   NodeAddr=daisg102 NodeHostName=daisg102 Version=24.11.6
+   OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75) 
+   RealMemory=2000000 AllocMem=1050000 FreeMem=1903607 Sockets=2 Boards=1
+   State=ALLOCATED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
+   Partitions=gpu,gpu1,rvs 
+   BootTime=2025-09-26T13:19:04 SlurmdStartTime=2025-11-26T10:29:37
+   LastBusyTime=2025-12-23T12:06:19 ResumeAfterTime=None
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8,gres/gpu:h200=8
+   AllocTRES=cpu=192,mem=1050000M,gres/gpu=8,gres/gpu:h200=8
+   CurrentWatts=0 AveWatts=0
+   
+
+NodeName=daisg103 Arch=x86_64 CoresPerSocket=48 
+   CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=6.39
+   AvailableFeatures=emeraldrapids,mem2T,gpu
+   ActiveFeatures=emeraldrapids,mem2T,gpu
+   Gres=gpu:h200:8(S:0-1)
+   NodeAddr=daisg103 NodeHostName=daisg103 Version=24.11.6
+   OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75) 
+   RealMemory=2000000 AllocMem=500000 FreeMem=1989378 Sockets=2 Boards=1
+   State=ALLOCATED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
+   Partitions=gpu,gpu1,rvs 
+   BootTime=2025-09-26T13:22:13 SlurmdStartTime=2025-11-26T10:29:37
+   LastBusyTime=2025-12-30T22:07:46 ResumeAfterTime=None
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8,gres/gpu:h200=8
+   AllocTRES=cpu=192,mem=500000M,gres/gpu=8,gres/gpu:h200=8
+   CurrentWatts=0 AveWatts=0
+   
+
+NodeName=daisg104 Arch=x86_64 CoresPerSocket=48 
+   CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=16.62
+   AvailableFeatures=emeraldrapids,mem2T,gpu
+   ActiveFeatures=emeraldrapids,mem2T,gpu
+   Gres=gpu:h200:8(S:0-1)
+   NodeAddr=daisg104 NodeHostName=daisg104 Version=24.11.6
+   OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75) 
+   RealMemory=2000000 AllocMem=2000000 FreeMem=1916923 Sockets=2 Boards=1
+   State=ALLOCATED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
+   Partitions=gpu,gpu1,rvs 
+   BootTime=2025-09-26T13:22:34 SlurmdStartTime=2025-11-26T10:29:37
+   LastBusyTime=2025-12-30T22:44:15 ResumeAfterTime=None
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8,gres/gpu:h200=8
+   AllocTRES=cpu=192,mem=2000000M,gres/gpu=8,gres/gpu:h200=8
+   CurrentWatts=0 AveWatts=0
+   
+
+NodeName=daisg105 Arch=x86_64 CoresPerSocket=48 
+   CPUAlloc=144 CPUEfctv=192 CPUTot=192 CPULoad=15.01
+   AvailableFeatures=emeraldrapids,mem2T,gpu
+   ActiveFeatures=emeraldrapids,mem2T,gpu
+   Gres=gpu:h200:8(S:0-1)
+   NodeAddr=daisg105 NodeHostName=daisg105 Version=24.11.6
+   OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75) 
+   RealMemory=2000000 AllocMem=482768 FreeMem=1882824 Sockets=2 Boards=1
+   State=MIXED+PLANNED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
+   Partitions=gpu,gpu1,rvs 
+   BootTime=2025-11-04T08:05:50 SlurmdStartTime=2025-11-26T10:29:37
+   LastBusyTime=2025-12-30T03:25:52 ResumeAfterTime=None
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8,gres/gpu:h200=8
+   AllocTRES=cpu=144,mem=482768M,gres/gpu=6,gres/gpu:h200=6
+   CurrentWatts=0 AveWatts=0
+   
+
+NodeName=daisg106 Arch=x86_64 CoresPerSocket=48 
+   CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=3.14
+   AvailableFeatures=emeraldrapids,mem2T,gpu
+   ActiveFeatures=emeraldrapids,mem2T,gpu
+   Gres=gpu:h200:8(S:0-1)
+   NodeAddr=daisg106 NodeHostName=daisg106 Version=24.11.6
+   OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75) 
+   RealMemory=2000000 AllocMem=2000000 FreeMem=1222744 Sockets=2 Boards=1
+   State=ALLOCATED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
+   Partitions=gpu,gpu1,rvs 
+   BootTime=2025-09-26T13:22:04 SlurmdStartTime=2025-11-26T10:29:37
+   LastBusyTime=2025-12-30T17:47:46 ResumeAfterTime=None
+   CfgTRES=cpu=192,mem=2000000M,billing=192,gres/gpu=8,gres/gpu:h200=8
+   AllocTRES=cpu=192,mem=2000000M,gres/gpu=8,gres/gpu:h200=8
+   CurrentWatts=0 AveWatts=0
+"""
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("command", nargs="?", default="show")
@@ -88,8 +192,11 @@ def main() -> None:
         else:
             print("slurm_load_jobs error: Invalid job id specified", file=sys.stderr)
             sys.exit(1)
+    elif args.command == "show" and args.subcommand == "nodes":
+        # Return real node data from current cluster
+        print(MOCK_NODES_OUTPUT, end="")
     else:
-        print("Usage: scontrol show jobid <jobid>", file=sys.stderr)
+        print("Usage: scontrol show <jobid|nodes> [<id>]", file=sys.stderr)
         sys.exit(1)
 
 
