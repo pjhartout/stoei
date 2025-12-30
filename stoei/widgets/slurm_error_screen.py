@@ -7,7 +7,7 @@ from textual.containers import Container, Vertical
 from textual.screen import Screen
 from textual.widgets import Button, Static
 
-from stoei.logging import get_logger
+from stoei.logger import get_logger
 
 logger = get_logger(__name__)
 

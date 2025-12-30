@@ -8,7 +8,7 @@ from enum import Enum
 from threading import Lock
 from typing import ClassVar
 
-from stoei.logging import get_logger
+from stoei.logger import get_logger
 from stoei.slurm.commands import get_job_history, get_running_jobs
 
 logger = get_logger(__name__)

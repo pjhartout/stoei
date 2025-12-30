@@ -9,7 +9,7 @@ from textual.screen import Screen
 from textual.widgets import Button, Input, Static
 
 from stoei.editor import open_in_editor
-from stoei.logging import get_logger
+from stoei.logger import get_logger
 
 logger = get_logger(__name__)
 

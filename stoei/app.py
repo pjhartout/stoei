@@ -10,7 +10,7 @@ from textual.widgets import Button, DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
 from textual.worker import Worker, WorkerState
 
-from stoei.logging import add_tui_sink, get_logger, remove_tui_sink
+from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
 from stoei.slurm.cache import JobCache, JobState
 from stoei.slurm.commands import cancel_job, get_job_info, get_job_log_paths
 from stoei.slurm.validation import check_slurm_available
