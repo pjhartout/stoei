@@ -24,7 +24,7 @@ Install the latest release:
 pip install git+https://github.com/pjhartout/stoei.git
 ```
 
-Or install a specific version:
+Or install a specific version (see [releases](https://github.com/pjhartout/stoei/releases) for available versions):
 
 ```bash
 pip install git+https://github.com/pjhartout/stoei.git@v0.2.3
@@ -32,8 +32,16 @@ pip install git+https://github.com/pjhartout/stoei.git@v0.2.3
 
 ### Using uv
 
+Install as a tool:
+
 ```bash
 uv tool install git+https://github.com/pjhartout/stoei.git
+```
+
+Or add to your project:
+
+```bash
+uv add git+https://github.com/pjhartout/stoei.git
 ```
 
 ### From source
@@ -168,6 +176,16 @@ stoei/
 ## Logging
 
 Logs are stored in `~/.stoei/logs/` and kept for 1 week. Each day gets a new log file which is compressed after rotation.
+
+## Releases
+
+New releases are created automatically when tags are pushed to the repository. You can install any release version by specifying the tag:
+
+```bash
+pip install git+https://github.com/pjhartout/stoei.git@v0.2.3
+```
+
+See all available releases on the [releases page](https://github.com/pjhartout/stoei/releases).
 
 ## License
 
