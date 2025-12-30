@@ -127,7 +127,14 @@ def create_tag(version: str) -> None:
     if tag_name in result.stdout:
         raise TagExistsError(tag_name)
 
-    run_command(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"])
+    # Check if GPG signing is configured
+    result = run_command(["git", "config", "--get", "user.signingkey"], check=False)
+    use_signing = result.returncode == 0
+
+    if use_signing:
+        run_command(["git", "tag", "-a", tag_name, "-m", f"Release {tag_name}"])
+    else:
+        run_command(["git", "tag", "--no-sign", tag_name, "-m", f"Release {tag_name}"])
     print(f"✓ Created tag {tag_name}")
 
 
@@ -175,7 +182,7 @@ def determine_new_version(version_arg: str, current_version: str) -> str:
     sys.exit(1)
 
 
-def confirm_release(current_version: str, new_version: str) -> bool:
+def confirm_release(current_version: str, new_version: str, skip_prompt: bool = False) -> bool:
     """Ask user to confirm the release."""
     print("\nThis will:")
     print(f"  1. Update version from {current_version} to {new_version}")
@@ -183,6 +190,9 @@ def confirm_release(current_version: str, new_version: str) -> bool:
     print(f"  3. Create tag v{new_version}")
     print("  4. Push commits and tag to origin")
     print("  5. Create GitHub release (if gh CLI is available)")
+
+    if skip_prompt:
+        return True
 
     response = input("\nProceed? [y/N]: ").strip().lower()
     return response == "y"
@@ -229,6 +239,8 @@ def main() -> None:
         sys.exit(1)
 
     version_arg = sys.argv[1].lower()
+    skip_prompt = "--yes" in sys.argv or "-y" in sys.argv
+
     current_version = get_current_version()
     new_version = determine_new_version(version_arg, current_version)
 
@@ -236,7 +248,7 @@ def main() -> None:
         print(f"Version is already {current_version}")
         sys.exit(1)
 
-    if not confirm_release(current_version, new_version):
+    if not confirm_release(current_version, new_version, skip_prompt=skip_prompt):
         print("Aborted.")
         sys.exit(0)
 
