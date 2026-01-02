@@ -365,21 +365,76 @@ class SlurmMonitor(App[None]):
             except ValueError:
                 pass
 
-            # Parse GPUs (if available)
-            gres = node_data.get("Gres", "")
-            if "gpu:" in gres.lower():
-                # Try to extract GPU count from Gres field
-                # Format is usually like "gpu:4" or "gpu:a100:4"
-                gpu_match = re.search(r"gpu[^:]*:(\d+)", gres)
-                if gpu_match:
-                    try:
-                        gpu_count = int(gpu_match.group(1))
-                        stats.total_gpus += gpu_count
-                        # Estimate allocated GPUs (rough)
-                        if "ALLOCATED" in state or "MIXED" in state:
-                            stats.allocated_gpus += gpu_count
-                    except ValueError:
-                        pass
+            # Parse GPUs by type from CfgTRES and AllocTRES
+            cfg_tres = node_data.get("CfgTRES", "")
+            alloc_tres = node_data.get("AllocTRES", "")
+
+            # Parse CfgTRES for total GPUs by type
+            # Format: "gres/gpu=8,gres/gpu:h200=8" or "gres/gpu:a100:4"
+            # Note: If both generic (gres/gpu=8) and specific (gres/gpu:h200=8) exist,
+            # they represent the same GPUs, so we only count specific types to avoid double-counting
+            gpu_total_pattern = re.compile(r"gres/gpu(?::([^=,]+))?=(\d+)", re.IGNORECASE)
+            gpu_entries: list[tuple[str, int]] = []
+            for match in gpu_total_pattern.finditer(cfg_tres):
+                gpu_type = match.group(1) if match.group(1) else "gpu"
+                try:
+                    gpu_count = int(match.group(2))
+                    gpu_entries.append((gpu_type, gpu_count))
+                except ValueError:
+                    pass
+
+            # Check if we have specific types (non-generic)
+            has_specific_types = any(gpu_type != "gpu" for gpu_type, _ in gpu_entries)
+
+            # Process entries: only count specific types if they exist, otherwise count generic
+            for gpu_type, gpu_count in gpu_entries:
+                if has_specific_types and gpu_type == "gpu":
+                    # Skip generic if we have specific types
+                    continue
+                current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
+                stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
+                stats.total_gpus += gpu_count
+
+            # Parse AllocTRES for allocated GPUs by type
+            alloc_entries: list[tuple[str, int]] = []
+            for match in gpu_total_pattern.finditer(alloc_tres):
+                gpu_type = match.group(1) if match.group(1) else "gpu"
+                try:
+                    gpu_count = int(match.group(2))
+                    alloc_entries.append((gpu_type, gpu_count))
+                except ValueError:
+                    pass
+
+            # Process allocated entries with same logic
+            for gpu_type, gpu_count in alloc_entries:
+                if has_specific_types and gpu_type == "gpu":
+                    # Skip generic if we have specific types
+                    continue
+                current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
+                stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
+                stats.allocated_gpus += gpu_count
+
+            # Fallback: if no TRES data, try parsing Gres field
+            if not cfg_tres and not alloc_tres:
+                gres = node_data.get("Gres", "")
+                if "gpu:" in gres.lower():
+                    # Try to extract GPU count and type from Gres field
+                    # Format is usually like "gpu:4" or "gpu:a100:4"
+                    gpu_match = re.search(r"gpu(?::([^:,]+))?:(\d+)", gres, re.IGNORECASE)
+                    if gpu_match:
+                        try:
+                            gpu_type = gpu_match.group(1) if gpu_match.group(1) else "gpu"
+                            gpu_count = int(gpu_match.group(2))
+                            current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
+                            stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
+                            stats.total_gpus += gpu_count
+                            # Estimate allocated GPUs (rough)
+                            if "ALLOCATED" in state or "MIXED" in state:
+                                current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
+                                stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
+                                stats.allocated_gpus += gpu_count
+                        except ValueError:
+                            pass
 
         return stats
 
@@ -422,7 +477,7 @@ class SlurmMonitor(App[None]):
             gpus_alloc = 0
             gres = node_data.get("Gres", "")
             if "gpu:" in gres.lower():
-                gpu_match = re.search(r"gpu[^:]*:(\d+)", gres)
+                gpu_match = re.search(r"gpu(?::[^:,]+)*:(\d+)", gres, re.IGNORECASE)
                 if gpu_match:
                     try:
                         gpus_total = int(gpu_match.group(1))
