@@ -466,8 +466,6 @@ def get_cluster_nodes() -> tuple[list[dict[str, str]], str | None]:
     if not raw_output:
         return [], "No node information available"
 
-    from stoei.slurm.parser import parse_scontrol_nodes_output
-
     nodes = parse_scontrol_nodes_output(raw_output)
     logger.debug(f"Found {len(nodes)} cluster nodes")
     return nodes, None
@@ -477,14 +475,14 @@ def get_all_users_jobs() -> list[tuple[str, ...]]:
     """Return all running/pending jobs from squeue (all users).
 
     Returns:
-        List of tuples containing job information (JobID, Name, User, State, Time, Nodes, NodeList).
+        List of tuples containing job information (JobID, Name, User, State, Time, Nodes, NodeList, TRES).
     """
     try:
         squeue = resolve_executable("squeue")
         command = [
             squeue,
             "-o",
-            "%.10i|%.15j|%.8u|%.8T|%.10M|%.4D|%.12R",
+            "%.10i|%.15j|%.8u|%.8T|%.10M|%.4D|%.12R|%t",
             "-a",  # Show all partitions
         ]
         logger.debug("Running squeue command for all users")

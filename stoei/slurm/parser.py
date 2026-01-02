@@ -170,7 +170,7 @@ def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
         # Both first line and continuation lines can have multiple key=value pairs
         # Continuation lines start with spaces/tabs
         line_stripped = line.strip()
-        
+
         # Parse all key=value pairs on this line using regex
         # Pattern matches: Key=Value where Key is alphanumeric with possible slashes/colons
         # and Value is everything until the next Key= or end of line
