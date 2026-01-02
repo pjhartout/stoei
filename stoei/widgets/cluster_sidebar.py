@@ -1,6 +1,6 @@
 """Cluster load sidebar widget."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import ClassVar
 
 from textual.widgets import Static
@@ -19,6 +19,7 @@ class ClusterStats:
     allocated_memory_gb: float = 0.0
     total_gpus: int = 0
     allocated_gpus: int = 0
+    gpus_by_type: dict[str, tuple[int, int]] = field(default_factory=dict)
 
     @property
     def free_nodes_pct(self) -> float:
@@ -48,6 +49,22 @@ class ClusterStats:
             return 0.0
         return ((self.total_gpus - self.allocated_gpus) / self.total_gpus) * 100.0
 
+    def get_gpu_type_free_pct(self, gpu_type: str) -> float:
+        """Calculate percentage of free GPUs for a specific type.
+
+        Args:
+            gpu_type: The GPU type (e.g., 'h200', 'a100', 'gpu').
+
+        Returns:
+            Percentage of free GPUs for this type.
+        """
+        if gpu_type not in self.gpus_by_type:
+            return 0.0
+        total, allocated = self.gpus_by_type[gpu_type]
+        if total == 0:
+            return 0.0
+        return ((total - allocated) / total) * 100.0
+
 
 class ClusterSidebar(Static):
     """Widget to display cluster load statistics in a sidebar."""
@@ -55,8 +72,8 @@ class ClusterSidebar(Static):
     DEFAULT_CSS: ClassVar[str] = """
     ClusterSidebar {
         width: 30;
-        border: heavy ansi_blue;
-        background: ansi_black;
+        border: heavy ansi_cyan;
+        background: #000000;
         padding: 1;
     }
     """
@@ -77,16 +94,11 @@ class ClusterSidebar(Static):
             classes: The CSS classes for the widget.
             disabled: Whether the widget is disabled.
         """
-        # Initialize with empty content, will be set in on_mount
-        super().__init__("", name=name, id=id, classes=classes, disabled=disabled)
+        # Initialize with loading message (use bright_black instead of dim for better compatibility)
+        loading_msg = "[bold]Cluster Load[/bold]\n\n[bright_black]Loading cluster data...[/bright_black]"
+        super().__init__(loading_msg, name=name, id=id, classes=classes, disabled=disabled)
         self.stats: ClusterStats = ClusterStats()
         self._data_loaded: bool = False
-
-    def on_mount(self) -> None:
-        """Initialize the widget with initial content."""
-        # Set initial loading message
-        loading_msg = "[bold]🖥️  Cluster Load[/bold]\n\n[dim]Loading cluster data...[/dim]"
-        self.update(loading_msg)
 
     def update_stats(self, stats: ClusterStats) -> None:
         """Update the cluster statistics display.
@@ -124,10 +136,10 @@ class ClusterSidebar(Static):
 
         # Handle case where data hasn't been loaded yet
         if not self._data_loaded:
-            return "[bold]🖥️  Cluster Load[/bold]\n\n[dim]Loading cluster data...[/dim]"
+            return "[bold]Cluster Load[/bold]\n\n[bright_black]Loading cluster data...[/bright_black]"
 
         lines = [
-            "[bold]🖥️  Cluster Load[/bold]",
+            "[bold]Cluster Load[/bold]",
             "",
             "[bold]Nodes:[/bold]",
             f"  Free: {color_pct(nodes_pct)}",
@@ -142,13 +154,25 @@ class ClusterSidebar(Static):
             f"  {stats.total_memory_gb - stats.allocated_memory_gb:.1f}/{stats.total_memory_gb:.1f} GB",
         ]
 
-        if stats.total_gpus > 0 and gpus_pct is not None:
+        # Display GPUs by type if available
+        if stats.gpus_by_type:
+            lines.append("")
+            lines.append("[bold]GPUs:[/bold]")
+            # Sort by type name for consistent display
+            for gpu_type in sorted(stats.gpus_by_type.keys()):
+                total, allocated = stats.gpus_by_type[gpu_type]
+                free_pct = stats.get_gpu_type_free_pct(gpu_type)
+                type_display = gpu_type if gpu_type != "gpu" else "generic"
+                lines.append(f"  {type_display}: {allocated}/{total} ({color_pct(free_pct)})")
+        elif stats.total_gpus > 0 and gpus_pct is not None:
+            # Fallback to old format if no type-specific data
+            free_gpus = stats.total_gpus - stats.allocated_gpus
             lines.extend(
                 [
                     "",
                     "[bold]GPUs:[/bold]",
-                    f"  Free: {color_pct(gpus_pct)}",
-                    f"  {stats.total_gpus - stats.allocated_gpus}/{stats.total_gpus} available",
+                    f"  Total: {stats.total_gpus}",
+                    f"  Free: {free_gpus} ({color_pct(gpus_pct)})",
                 ]
             )
 
