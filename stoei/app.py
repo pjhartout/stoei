@@ -303,7 +303,7 @@ class SlurmMonitor(App[None]):
             JobState.PENDING: f"[bold yellow]{state}[/bold yellow]",
             JobState.COMPLETED: f"[green]{state}[/green]",
             JobState.FAILED: f"[bold red]{state}[/bold red]",
-            JobState.CANCELLED: f"[dim]{state}[/dim]",
+            JobState.CANCELLED: f"[bright_black]{state}[/bright_black]",
             JobState.TIMEOUT: f"[red]{state}[/red]",
         }
         return state_formats.get(category, state)
@@ -332,7 +332,6 @@ class SlurmMonitor(App[None]):
 
         for node_data in self._cluster_nodes:
             # Parse node information
-            node_name = node_data.get("NodeName", "")
             state = node_data.get("State", "").upper()
 
             # Count nodes
