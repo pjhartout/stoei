@@ -1,5 +1,6 @@
 """User overview tab widget."""
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import ClassVar
@@ -108,11 +109,59 @@ class UserOverviewTab(VerticalScroll):
             users_table.move_cursor(row=new_row)
 
     @staticmethod
+    def _parse_tres(tres_str: str) -> tuple[int, float, int]:
+        """Parse TRES string to extract CPU, memory (GB), and GPU counts.
+
+        Args:
+            tres_str: TRES string in format like "cpu=32,mem=256G,node=4,gres/gpu=16".
+
+        Returns:
+            Tuple of (cpus, memory_gb, gpus).
+        """
+        cpus = 0
+        memory_gb = 0.0
+        gpus = 0
+
+        if not tres_str or tres_str.strip() == "":
+            return cpus, memory_gb, gpus
+
+        # Parse CPU count
+        cpu_match = re.search(r"cpu=(\d+)", tres_str)
+        if cpu_match:
+            try:
+                cpus = int(cpu_match.group(1))
+            except ValueError:
+                pass
+
+        # Parse memory (can be in G or M)
+        mem_match = re.search(r"mem=(\d+)([GM])", tres_str, re.IGNORECASE)
+        if mem_match:
+            try:
+                mem_value = int(mem_match.group(1))
+                mem_unit = mem_match.group(2).upper()
+                if mem_unit == "G":
+                    memory_gb = float(mem_value)
+                elif mem_unit == "M":
+                    memory_gb = mem_value / 1024.0
+            except ValueError:
+                pass
+
+        # Parse GPUs (format: gres/gpu=X)
+        gpu_match = re.search(r"gres/gpu=(\d+)", tres_str, re.IGNORECASE)
+        if gpu_match:
+            try:
+                gpus = int(gpu_match.group(1))
+            except ValueError:
+                pass
+
+        return cpus, memory_gb, gpus
+
+    @staticmethod
     def aggregate_user_stats(jobs: list[tuple[str, ...]]) -> list[UserStats]:
         """Aggregate job data into user statistics.
 
         Args:
-            jobs: List of job tuples from squeue (JobID, Name, User, State, Time, Nodes, NodeList).
+            jobs: List of job tuples from squeue (JobID, Name, User, State, Time, Nodes, NodeList, TRES).
 
         Returns:
             List of UserStats objects.
@@ -156,9 +205,20 @@ class UserOverviewTab(VerticalScroll):
 
             user_data[username]["total_nodes"] += node_count
 
-            # Estimate CPUs (assuming 1 CPU per node as default, could be improved)
-            # This is a rough estimate - actual CPU allocation would need job details
-            user_data[username]["total_cpus"] += node_count
+            # Parse TRES for CPU, memory, and GPU information
+            tres_str = job[7].strip() if len(job) > 7 else ""
+            cpus, memory_gb, gpus = UserOverviewTab._parse_tres(tres_str)
+
+            # Use TRES CPU count if available, otherwise estimate from nodes
+            if cpus > 0:
+                user_data[username]["total_cpus"] += cpus
+            else:
+                # Fallback: estimate CPUs from nodes (1 CPU per node)
+                user_data[username]["total_cpus"] += node_count
+
+            # Add memory and GPUs from TRES
+            user_data[username]["total_memory_gb"] += memory_gb
+            user_data[username]["total_gpus"] += gpus
 
         # Convert to UserStats objects
         user_stats: list[UserStats] = []
