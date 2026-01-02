@@ -5,6 +5,7 @@ repos:
       - id: ruff
         args: [--fix]
       - id: ruff-format
+        args: [--check]
 
   - repo: local
     hooks:
@@ -14,3 +15,4 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+        always_run: true

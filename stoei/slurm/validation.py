@@ -12,6 +12,35 @@ SAFE_JOBID_PATTERN = re.compile(r"^[0-9]+(_[0-9]+)?$")  # Matches "12345" or "12
 class ValidationError(Exception):
     """Raised when input validation fails."""
 
+    def __init__(self, message: str) -> None:
+        """Initialize validation error with message.
+
+        Args:
+            message: Error message describing the validation failure.
+        """
+        super().__init__(message)
+        self.message = message
+
+
+class UsernameValidationError(ValidationError):
+    """Raised when username validation fails."""
+
+    EMPTY_MESSAGE = "Username cannot be empty"
+    UNSAFE_MESSAGE_TEMPLATE = "Unsafe characters detected in username: {username!r}"
+
+
+class JobIdValidationError(ValidationError):
+    """Raised when job ID validation fails."""
+
+    EMPTY_MESSAGE = "Job ID cannot be empty"
+    INVALID_FORMAT_MESSAGE_TEMPLATE = "Invalid job ID format: {job_id!r}. Expected format: 12345 or 12345_0"
+
+
+class UsernameRetrievalError(ValidationError):
+    """Raised when username cannot be retrieved."""
+
+    MESSAGE = "Unable to determine the current username"
+
 
 def validate_username(username: str) -> bool:
     """Validate that a username is safe for CLI usage.
@@ -26,9 +55,9 @@ def validate_username(username: str) -> bool:
         ValidationError: If the username contains unsafe characters.
     """
     if not username:
-        raise ValidationError("Username cannot be empty")
+        raise UsernameValidationError(UsernameValidationError.EMPTY_MESSAGE)
     if not SAFE_USERNAME_PATTERN.fullmatch(username):
-        raise ValidationError(f"Unsafe characters detected in username: {username!r}")
+        raise UsernameValidationError(UsernameValidationError.UNSAFE_MESSAGE_TEMPLATE.format(username=username))
     return True
 
 
@@ -45,9 +74,9 @@ def validate_job_id(job_id: str) -> bool:
         ValidationError: If the job ID format is invalid.
     """
     if not job_id:
-        raise ValidationError("Job ID cannot be empty")
+        raise JobIdValidationError(JobIdValidationError.EMPTY_MESSAGE)
     if not SAFE_JOBID_PATTERN.fullmatch(job_id):
-        raise ValidationError(f"Invalid job ID format: {job_id!r}. Expected format: 12345 or 12345_0")
+        raise JobIdValidationError(JobIdValidationError.INVALID_FORMAT_MESSAGE_TEMPLATE.format(job_id=job_id))
     return True
 
 
@@ -62,7 +91,7 @@ def get_current_username() -> str:
     """
     username = getpass.getuser()
     if not username:
-        raise ValidationError("Unable to determine the current username")
+        raise UsernameRetrievalError(UsernameRetrievalError.MESSAGE)
     validate_username(username)
     return username
 
@@ -81,7 +110,8 @@ def resolve_executable(executable: str) -> str:
     """
     resolved = shutil.which(executable)
     if resolved is None:
-        raise FileNotFoundError(f"Executable {executable!r} was not found on PATH")
+        error_msg = f"Executable {executable!r} was not found on PATH"
+        raise FileNotFoundError(error_msg)
     return resolved
 
 

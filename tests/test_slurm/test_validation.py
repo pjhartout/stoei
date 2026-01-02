@@ -5,6 +5,7 @@ from unittest.mock import patch
 import pytest
 from stoei.slurm.validation import (
     ValidationError,
+    check_slurm_available,
     get_current_username,
     resolve_executable,
     validate_job_id,
@@ -131,3 +132,59 @@ class TestValidationError:
         """Test that the error message is preserved."""
         error = ValidationError("Custom message")
         assert str(error) == "Custom message"
+
+
+class TestCheckSlurmAvailable:
+    """Tests for check_slurm_available function."""
+
+    def test_returns_tuple(self) -> None:
+        """Test that function returns a tuple."""
+        result = check_slurm_available()
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+    def test_returns_false_when_commands_missing(self) -> None:
+        """Test that function returns False when SLURM commands are missing."""
+        with patch("stoei.slurm.validation.shutil.which", return_value=None):
+            is_available, error_msg = check_slurm_available()
+            assert is_available is False
+            assert error_msg is not None
+            assert "SLURM commands not found" in error_msg
+
+    def test_returns_true_when_all_commands_available(self) -> None:
+        """Test that function returns True when all commands are available."""
+        with patch("stoei.slurm.validation.shutil.which", return_value="/usr/bin/squeue"):
+            is_available, error_msg = check_slurm_available()
+            assert is_available is True
+            assert error_msg is None
+
+    def test_error_message_lists_missing_commands(self) -> None:
+        """Test that error message lists which commands are missing."""
+
+        def mock_which(cmd: str) -> str | None:
+            if cmd == "squeue":
+                return "/usr/bin/squeue"
+            return None
+
+        with patch("stoei.slurm.validation.shutil.which", side_effect=mock_which):
+            is_available, error_msg = check_slurm_available()
+            assert is_available is False
+            assert error_msg is not None
+            assert "scontrol" in error_msg
+            assert "sacct" in error_msg
+            assert "squeue" not in error_msg.split("not found")[1]
+
+    def test_checks_all_required_commands(self) -> None:
+        """Test that function checks for all required SLURM commands."""
+        calls = []
+
+        def mock_which(cmd: str) -> str:
+            calls.append(cmd)
+            return f"/usr/bin/{cmd}"
+
+        with patch("stoei.slurm.validation.shutil.which", side_effect=mock_which):
+            check_slurm_available()
+
+        assert "squeue" in calls
+        assert "scontrol" in calls
+        assert "sacct" in calls

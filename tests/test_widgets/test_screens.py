@@ -395,3 +395,148 @@ class TestJobInputScreenActions:
         screen = JobInputScreen()
         assert hasattr(screen, "action_cancel")
         assert callable(screen.action_cancel)
+
+
+class TestScreensInApp:
+    """Functional tests for screens running in an app context."""
+
+    async def test_job_info_screen_composes(self) -> None:
+        """Test that JobInfoScreen composes correctly."""
+        from textual.app import App
+        from textual.widgets import Button
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(JobInfoScreen("12345", "Test job info"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            # Query through the screen stack
+            screen = app.screen
+            close_btn = screen.query_one("#close-button", Button)
+            assert close_btn is not None
+
+    async def test_job_info_screen_with_error_composes(self) -> None:
+        """Test that JobInfoScreen with error composes correctly."""
+        from textual.app import App
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(JobInfoScreen("12345", "", error="Job not found"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            error_text = screen.query_one("#error-text")
+            assert error_text is not None
+
+    async def test_cancel_confirm_screen_composes(self) -> None:
+        """Test that CancelConfirmScreen composes correctly."""
+        from textual.app import App
+        from textual.widgets import Button
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(CancelConfirmScreen("12345", "test_job"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            confirm_btn = screen.query_one("#confirm-cancel-btn", Button)
+            abort_btn = screen.query_one("#abort-cancel-btn", Button)
+            assert confirm_btn is not None
+            assert abort_btn is not None
+
+    async def test_cancel_confirm_abort_button_focused(self) -> None:
+        """Test that abort button is focused by default (safer option)."""
+        from textual.app import App
+        from textual.widgets import Button
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(CancelConfirmScreen("12345"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            abort_btn = screen.query_one("#abort-cancel-btn", Button)
+            assert abort_btn.has_focus
+
+    async def test_job_input_screen_composes(self) -> None:
+        """Test that JobInputScreen composes correctly."""
+        from textual.app import App
+        from textual.widgets import Button, Input
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(JobInputScreen())
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            input_widget = screen.query_one("#job-id-input", Input)
+            submit_btn = screen.query_one("#submit-btn", Button)
+            cancel_btn = screen.query_one("#cancel-btn", Button)
+            assert input_widget is not None
+            assert submit_btn is not None
+            assert cancel_btn is not None
+
+    async def test_job_input_screen_input_focused(self) -> None:
+        """Test that input field is focused on mount."""
+        from textual.app import App
+        from textual.widgets import Input
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(JobInputScreen())
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            input_widget = screen.query_one("#job-id-input", Input)
+            assert input_widget.has_focus
+
+    async def test_log_viewer_screen_composes_with_file(self, tmp_path: Path) -> None:
+        """Test that LogViewerScreen composes with a real file."""
+        from textual.app import App
+        from textual.widgets import Button
+
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Line 1\nLine 2\nLine 3\n")
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            close_btn = screen.query_one("#log-close-button", Button)
+            editor_btn = screen.query_one("#editor-button", Button)
+            assert close_btn is not None
+            assert editor_btn is not None
+
+    async def test_log_viewer_screen_composes_with_missing_file(self) -> None:
+        """Test that LogViewerScreen handles missing file."""
+        from textual.app import App
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen("/nonexistent/path.log", "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            # Should still compose with error message
+            close_btn = screen.query_one("#log-close-button")
+            assert close_btn is not None
+            error_text = screen.query_one("#log-error-text")
+            assert error_text is not None

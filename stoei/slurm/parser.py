@@ -1,6 +1,14 @@
 """Parsers for SLURM command output."""
 
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    pass
+
+# Constants for parsing
+MIN_SQUEUE_PARTS = 6
+MIN_SACCT_PARTS = 7
 
 
 def parse_scontrol_output(raw_output: str) -> dict[str, str]:
@@ -43,7 +51,7 @@ def parse_squeue_output(raw_output: str) -> list[tuple[str, ...]]:
     jobs: list[tuple[str, ...]] = []
     for line in lines[1:]:  # Skip header
         parts = line.split("|")
-        if len(parts) >= 6:
+        if len(parts) >= MIN_SQUEUE_PARTS:
             jobs.append(tuple(parts))
 
     return jobs
@@ -68,7 +76,7 @@ def parse_sacct_output(raw_output: str) -> tuple[list[tuple[str, ...]], int, int
 
     for line in lines[1:]:  # Skip header
         parts = line.split("|")
-        if len(parts) >= 7:
+        if len(parts) >= MIN_SACCT_PARTS:
             jobs.append(tuple(parts))
             try:
                 restart_count = int(parts[3])
@@ -132,3 +140,52 @@ def parse_sacct_job_output(raw_output: str, fields: list[str]) -> dict[str, str]
                 result[field] = value
 
     return result
+
+
+def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
+    """Parse scontrol show nodes output into a list of node dictionaries.
+
+    Args:
+        raw_output: Raw output from 'scontrol show nodes' command.
+
+    Returns:
+        List of dictionaries, each containing node information.
+    """
+    nodes: list[dict[str, str]] = []
+    current_node: dict[str, str] = {}
+
+    # Split by double newlines (node separator) or single newline with NodeName
+    lines = raw_output.split("\n")
+    for line in lines:
+        stripped_line = line.strip()
+        if not stripped_line:
+            if current_node:
+                nodes.append(current_node)
+                current_node = {}
+            continue
+
+        # Check if this is a new node entry (starts with NodeName=)
+        if stripped_line.startswith("NodeName="):
+            if current_node:
+                nodes.append(current_node)
+            current_node = {}
+
+        # Parse key=value pairs
+        # Both first line and continuation lines can have multiple key=value pairs
+        # Continuation lines start with spaces/tabs
+
+        # Parse all key=value pairs on this line using regex
+        # Pattern matches: Key=Value where Key is alphanumeric with possible slashes/colons
+        # and Value is everything until the next Key= or end of line
+        pattern = r"(\w+(?:[/:]\w+)*)=([^\s=]+(?:\s+[^\s=]+)*?)(?=\s+\w+(?:[/:]\w+)*=|$)"
+        matches = re.finditer(pattern, stripped_line)
+        for match in matches:
+            key = match.group(1)
+            value = match.group(2).strip()
+            current_node[key] = value
+
+    # Add last node if exists
+    if current_node:
+        nodes.append(current_node)
+
+    return nodes

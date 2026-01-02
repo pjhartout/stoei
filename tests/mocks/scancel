@@ -9,9 +9,12 @@ CANCELLABLE_JOBS = {"12345", "12346", "12347", "12348", "12349"}
 # Jobs that will fail cancellation (e.g., already completed)
 FAILED_JOBS = {"12340", "12341", "12342", "12343", "12344"}
 
+MIN_ARGS_REQUIRED = 2
+
 
 def main() -> None:
-    if len(sys.argv) < 2:
+    """Main entry point for mock scancel command."""
+    if len(sys.argv) < MIN_ARGS_REQUIRED:
         print("scancel: error: No job id specified", file=sys.stderr)
         sys.exit(1)
 

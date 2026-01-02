@@ -41,36 +41,45 @@ Footer > .footer--description {
     color: $foreground;
 }
 
-/* Statistics container */
-#stats-container {
+/* Main container with sidebar and content */
+#main-container {
+    height: 1fr;
+    width: 100%;
+    layout: horizontal;
+}
+
+/* ClusterSidebar styles are defined in the widget's DEFAULT_CSS */
+/* Only override if needed for layout */
+#cluster-sidebar {
+    height: 1fr;
+}
+
+#content-area {
+    width: 1fr;
+    height: 1fr;
+    layout: vertical;
+}
+
+/* Tab container - only takes space for header */
+#tab-container {
     height: auto;
-    padding: 1;
-    border: heavy ansi_bright_black;
-    margin-bottom: 1;
-    background: ansi_black;
+    width: 100%;
 }
 
-JobStats {
-    color: $foreground;
-}
-
-/* Unified jobs panel */
-#jobs-panel {
+/* Tab content containers */
+.tab-content {
     width: 100%;
     height: 1fr;
-    border: heavy ansi_blue;
-    background: $background;
-}
-
-#jobs-panel:focus-within {
-    border: heavy ansi_cyan;
+    layout: vertical;
+    min-height: 10;
 }
 
 #jobs-header {
     width: 100%;
-    height: auto;
+    height: 3;
     background: ansi_black;
     padding: 0 1;
+    border-bottom: heavy ansi_blue;
 }
 
 #jobs-title {
@@ -96,6 +105,13 @@ JobStats {
 }
 
 /* DataTable styling */
+#jobs_table {
+    height: 1fr;
+    width: 100%;
+    background: $background;
+    min-height: 15;
+}
+
 DataTable {
     height: 1fr;
     width: 100%;

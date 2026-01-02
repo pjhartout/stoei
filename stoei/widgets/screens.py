@@ -101,7 +101,7 @@ class LogViewerScreen(Screen[None]):
             file_size = path.stat().st_size
 
             if file_size == 0:
-                self.file_contents = "[dim](empty file)[/dim]"
+                self.file_contents = "[bright_black](empty file)[/bright_black]"
                 logger.info(f"Loaded log file: {self.filepath}")
                 return
 
@@ -127,7 +127,7 @@ class LogViewerScreen(Screen[None]):
                 self.file_contents = (
                     f"[bold yellow]⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
                     f"of {truncated_size_mb:.1f} MB)[/bold yellow]\n"
-                    f"[dim]{'─' * 60}[/dim]\n\n"
+                    f"[bright_black]{'─' * 60}[/bright_black]\n\n"
                     f"{tail_text}"
                 )
                 logger.info(
@@ -539,7 +539,7 @@ class CancelConfirmScreen(Screen[bool]):
                 job_display += f"\nJob Name: [bold]{self.job_name}[/bold]"
             yield Static(job_display, id="cancel-job-info")
             yield Static(
-                "[dim]This action cannot be undone.[/dim]",
+                "[bright_black]This action cannot be undone.[/bright_black]",
                 id="cancel-warning",
             )
             with Container(id="cancel-button-row"):

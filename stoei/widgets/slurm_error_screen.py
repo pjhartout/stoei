@@ -38,7 +38,7 @@ class SlurmUnavailableScreen(Screen[None]):
                     "  • A SLURM cluster with a controller node\n"
                     "  • SLURM commands (squeue, sacct, scontrol) available in your PATH\n"
                     "  • Network access to the SLURM controller (if running remotely)\n\n"
-                    "[dim]Note: Stoei cannot function without access to SLURM commands.[/dim]",
+                    "[bright_black]Note: Stoei cannot function without access to SLURM commands.[/bright_black]",
                     id="error-message",
                 )
 

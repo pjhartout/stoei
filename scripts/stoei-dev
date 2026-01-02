@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Development wrapper for stoei that always uses the current codebase
+# This script finds the project root and runs stoei with uv run
+
+# Find the project root (directory containing pyproject.toml)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# Change to project root and run stoei
+cd "$PROJECT_ROOT" || exit 1
+exec uv run python -m stoei "$@"

@@ -18,13 +18,14 @@ MOCK_HISTORY = [
 
 
 def main() -> None:
+    """Main entry point for mock sacct command."""
     parser = argparse.ArgumentParser()
     parser.add_argument("-u", "--user", default=None)
     parser.add_argument("--format", default=None)
     parser.add_argument("-S", "--starttime", default=None)
     parser.add_argument("-X", action="store_true")
     parser.add_argument("-P", action="store_true")
-    args = parser.parse_args()
+    parser.parse_args()
 
     # Output header
     print("JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList")

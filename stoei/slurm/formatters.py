@@ -93,35 +93,29 @@ def format_value(key: str, value: str) -> str:
     if key in ("JobState", "State"):
         base_state = value.split()[0]  # Handle "RUNNING by 12345" etc.
         color = STATE_COLORS.get(base_state, "white")
-        return f"[{color}]{value}[/{color}]"
-
+        formatted = f"[{color}]{value}[/{color}]"
     # Exit codes
-    if "ExitCode" in key:
-        if value == "0:0":
-            return "[green]0:0 ✓[/green]"
-        return f"[red]{value} ✗[/red]"
-
+    elif "ExitCode" in key:
+        formatted = "[green]0:0 ✓[/green]" if value == "0:0" else f"[red]{value} ✗[/red]"
     # Paths
-    if key in ("WorkDir", "StdErr", "StdOut", "StdIn", "Command"):
-        return f"[italic cyan]{value}[/italic cyan]"
-
+    elif key in ("WorkDir", "StdErr", "StdOut", "StdIn", "Command"):
+        formatted = f"[italic cyan]{value}[/italic cyan]"
     # Time values
-    if "Time" in key and value not in ("Unknown", "N/A"):
-        return f"[yellow]{value}[/yellow]"
-
+    elif "Time" in key and value not in ("Unknown", "N/A"):
+        formatted = f"[yellow]{value}[/yellow]"
     # Numbers and resources
-    if key in ("NumNodes", "NumCPUs", "NumTasks", "Priority", "Nice", "Restarts"):
-        return f"[bold]{value}[/bold]"
-
+    elif key in ("NumNodes", "NumCPUs", "NumTasks", "Priority", "Nice", "Restarts"):
+        formatted = f"[bold]{value}[/bold]"
     # TRES (trackable resources)
-    if "TRES" in key or key == "Gres":
-        return f"[magenta]{value}[/magenta]"
-
+    elif "TRES" in key or key == "Gres":
+        formatted = f"[magenta]{value}[/magenta]"
     # Node lists
-    if "Node" in key and key != "NumNodes":
-        return f"[blue]{value}[/blue]"
+    elif "Node" in key and key != "NumNodes":
+        formatted = f"[blue]{value}[/blue]"
+    else:
+        formatted = value
 
-    return value
+    return formatted
 
 
 def format_job_info(raw_output: str) -> str:

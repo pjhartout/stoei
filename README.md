@@ -145,6 +145,9 @@ stoei
 | `Enter` | View details of selected job |
 | `↑/↓` | Navigate between jobs |
 | `Tab` | Switch between tables |
+| `1` | Switch to Jobs tab |
+| `2` | Switch to Nodes tab |
+| `3` | Switch to Users tab |
 
 ## Requirements
 
@@ -167,6 +170,19 @@ uv sync --all-extras
 # Install pre-commit hooks
 uv run pre-commit install
 ```
+
+### Installing Development Binary
+
+To install a development binary that automatically uses your local codebase (editable installation):
+
+```bash
+# From the project root directory
+uv tool install -e . --force
+```
+
+This installs `stoei` as an editable package, so any changes you make to the code will be immediately reflected when you run `stoei` from anywhere. The `--force` flag overwrites any existing installation.
+
+**Note**: When testing the app during development, always use `timeout 10 stoei` to prevent the agent from getting stuck, as `stoei` is an interactive TUI application.
 
 ### Running Tests
 
