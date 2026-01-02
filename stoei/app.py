@@ -5,7 +5,8 @@ from pathlib import Path
 from typing import ClassVar
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, VerticalScroll
+from textual.containers import Container, Horizontal
+from textual.events import Key
 from textual.timer import Timer
 from textual.widgets import Button, DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
@@ -27,7 +28,7 @@ from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen
 from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
 from stoei.widgets.tabs import TabContainer, TabSwitched
-from stoei.widgets.user_overview import UserOverviewTab, UserStats
+from stoei.widgets.user_overview import UserOverviewTab
 
 logger = get_logger(__name__)
 
@@ -52,6 +53,12 @@ class SlurmMonitor(App[None]):
         ("i", "show_job_info", "Job Info"),
         ("enter", "show_selected_job_info", "View Selected Job"),
         ("c", "cancel_job", "Cancel Job"),
+        ("1", "switch_tab_jobs", "Jobs Tab"),
+        ("2", "switch_tab_nodes", "Nodes Tab"),
+        ("3", "switch_tab_users", "Users Tab"),
+        ("left", "previous_tab", "Previous Tab"),
+        ("right", "next_tab", "Next Tab"),
+        ("shift+tab", "previous_tab", "Previous Tab"),
     )
 
     def __init__(self) -> None:
@@ -82,11 +89,10 @@ class SlurmMonitor(App[None]):
 
                 # Jobs tab (default)
                 with Container(id="tab-jobs-content", classes="tab-content"):
-                    with VerticalScroll(id="jobs-panel"):
-                        with Horizontal(id="jobs-header"):
-                            yield Static("[bold]📋 My Jobs[/bold]", id="jobs-title")
-                            yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
-                        yield DataTable(id="jobs_table")
+                    with Horizontal(id="jobs-header"):
+                        yield Static("[bold]📋 My Jobs[/bold]", id="jobs-title")
+                        yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
+                    yield DataTable(id="jobs_table")
 
                 # Nodes tab
                 with Container(id="tab-nodes-content", classes="tab-content"):
@@ -120,18 +126,21 @@ class SlurmMonitor(App[None]):
 
         logger.info("Mounting application")
 
-        # Hide non-default tabs initially
+        # Hide non-default tabs initially and ensure jobs tab is visible
         try:
+            jobs_tab = self.query_one("#tab-jobs-content", Container)
+            jobs_tab.display = True
             nodes_tab = self.query_one("#tab-nodes-content", Container)
             nodes_tab.display = False
             users_tab = self.query_one("#tab-users-content", Container)
             users_tab.display = False
         except Exception as exc:
-            logger.warning(f"Failed to hide tabs: {exc}")
+            logger.warning(f"Failed to set tab visibility: {exc}")
 
         jobs_table = self.query_one("#jobs_table", DataTable)
         jobs_table.cursor_type = "row"
         jobs_table.add_columns("JobID", "Name", "State", "Time", "Nodes", "NodeList")
+        logger.debug("Jobs table columns added, ready for data")
 
         # Show loading message
         self.notify("Loading job data...", timeout=2)
@@ -176,31 +185,82 @@ class SlurmMonitor(App[None]):
 
     def _update_ui_from_cache(self) -> None:
         """Update UI components from cached data (must run on main thread)."""
-        jobs_table = self.query_one("#jobs_table", DataTable)
+        # Check which tab is active
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            active_tab = tab_container.active_tab
+        except Exception:
+            active_tab = "jobs"  # Default to jobs tab if we can't determine
 
-        # Save cursor position before clearing
-        cursor_row = jobs_table.cursor_row
+        # Only update jobs table if jobs tab is active
+        if active_tab == "jobs":
+            try:
+                jobs_table = self.query_one("#jobs_table", DataTable)
+            except Exception as exc:
+                logger.error(f"Failed to find jobs table: {exc}")
+            else:
+                # Save cursor position before clearing
+                cursor_row = jobs_table.cursor_row
 
-        jobs_table.clear()
+                # Clear existing rows but keep columns
+                jobs_table.clear(columns=False)
 
-        # Add jobs from cache with state-based styling
-        jobs = self._job_cache.jobs
-        for job in jobs:
-            # Apply state-based row styling using Rich markup
-            state_display = self._format_state(job.state, job.state_category)
-            jobs_table.add_row(
-                job.job_id,
-                job.name,
-                state_display,
-                job.time,
-                job.nodes,
-                job.node_list,
-            )
+                # Add jobs from cache with state-based styling
+                jobs = self._job_cache.jobs
+                logger.debug(f"Updating UI with {len(jobs)} jobs from cache")
+                rows_added = 0
+                for job in jobs:
+                    try:
+                        # Apply state-based row styling using Rich markup
+                        state_display = self._format_state(job.state, job.state_category)
+                        jobs_table.add_row(
+                            job.job_id,
+                            job.name,
+                            state_display,
+                            job.time,
+                            job.nodes,
+                            job.node_list,
+                        )
+                        rows_added += 1
+                    except Exception as exc:
+                        logger.error(f"Failed to add job {job.job_id} to table: {exc}")
+                logger.debug(f"Added {rows_added} rows to jobs table (table now has {jobs_table.row_count} rows)")
 
-        # Restore cursor position if possible
-        if cursor_row is not None and jobs_table.row_count > 0:
-            new_row = min(cursor_row, jobs_table.row_count - 1)
-            jobs_table.move_cursor(row=new_row)
+                # Ensure table is properly displayed and visible
+                if rows_added > 0:
+                    logger.debug(f"Table has {jobs_table.row_count} rows, columns: {list(jobs_table.columns.keys())}")
+
+                # Restore cursor position if possible
+                cursor_restored = False
+                if cursor_row is not None and jobs_table.row_count > 0:
+                    new_row = min(cursor_row, jobs_table.row_count - 1)
+                    jobs_table.move_cursor(row=new_row)
+                    cursor_restored = True
+
+                # Force a refresh and ensure table is visible
+                if jobs_table.row_count > 0:
+                    jobs_table.display = True
+                    # Ensure table is mounted and has proper size
+                    if jobs_table.is_attached:
+                        # Ensure parent containers are properly sized
+                        try:
+                            jobs_tab = self.query_one("#tab-jobs-content", Container)
+                            if jobs_tab.is_attached:
+                                jobs_tab.refresh(layout=True)
+                        except Exception:
+                            pass
+                        # Force layout recalculation for the table
+                        jobs_table.refresh(layout=True)
+                        # Move cursor to first row only if we didn't restore a position
+                        if jobs_table.row_count > 0 and not cursor_restored:
+                            jobs_table.move_cursor(row=0)
+                        logger.debug(
+                            f"Table refreshed: {jobs_table.row_count} rows, "
+                            f"size={jobs_table.size}, visible={jobs_table.visible}, "
+                            f"display={jobs_table.display}"
+                        )
+                    else:
+                        logger.warning("Table is not attached to DOM")
 
         # Update cluster sidebar
         self._update_cluster_sidebar()
@@ -221,8 +281,12 @@ class SlurmMonitor(App[None]):
             self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
             logger.info(f"Auto-refresh started with interval {self.refresh_interval}s")
 
-            # Focus the table
-            jobs_table.focus()
+            # Focus the table to ensure it's rendered
+            try:
+                jobs_table.focus()
+                logger.debug("Focused jobs table")
+            except Exception as exc:
+                logger.warning(f"Failed to focus jobs table: {exc}")
 
     def _format_state(self, state: str, category: JobState) -> str:
         """Format job state with color coding.
@@ -415,7 +479,15 @@ class SlurmMonitor(App[None]):
             active_tab.display = True
 
             # Update the tab content if needed (always update when switching to ensure data is shown)
-            if event.tab_name == "nodes":
+            if event.tab_name == "jobs":
+                # Focus the jobs table to enable arrow key navigation
+                try:
+                    jobs_table = self.query_one("#jobs_table", DataTable)
+                    jobs_table.focus()
+                    logger.debug("Focused jobs table for arrow key navigation")
+                except Exception as exc:
+                    logger.debug(f"Failed to focus jobs table: {exc}")
+            elif event.tab_name == "nodes":
                 # Always update when switching to nodes tab
                 self._update_node_overview()
             elif event.tab_name == "users":
@@ -429,6 +501,66 @@ class SlurmMonitor(App[None]):
         logger.info("Manual refresh triggered")
         self.notify("Refreshing...")
         self._start_refresh_worker()
+
+    def action_switch_tab_jobs(self) -> None:
+        """Switch to the Jobs tab."""
+        try:
+            tab_container = self.query_one("TabContainer", TabContainer)
+            tab_container.switch_tab("jobs")
+        except Exception as exc:
+            logger.debug(f"Failed to switch to jobs tab: {exc}")
+
+    def action_switch_tab_nodes(self) -> None:
+        """Switch to the Nodes tab."""
+        try:
+            tab_container = self.query_one("TabContainer", TabContainer)
+            tab_container.switch_tab("nodes")
+        except Exception as exc:
+            logger.debug(f"Failed to switch to nodes tab: {exc}")
+
+    def action_switch_tab_users(self) -> None:
+        """Switch to the Users tab."""
+        try:
+            tab_container = self.query_one("TabContainer", TabContainer)
+            tab_container.switch_tab("users")
+        except Exception as exc:
+            logger.debug(f"Failed to switch to users tab: {exc}")
+
+    def action_next_tab(self) -> None:
+        """Switch to the next tab (cycling)."""
+        try:
+            tab_container = self.query_one("TabContainer", TabContainer)
+            current_tab = tab_container.active_tab
+            tab_order = ["jobs", "nodes", "users"]
+            current_index = tab_order.index(current_tab)
+            next_index = (current_index + 1) % len(tab_order)
+            tab_container.switch_tab(tab_order[next_index])
+        except Exception as exc:
+            logger.debug(f"Failed to switch to next tab: {exc}")
+
+    def action_previous_tab(self) -> None:
+        """Switch to the previous tab (cycling)."""
+        try:
+            tab_container = self.query_one("TabContainer", TabContainer)
+            current_tab = tab_container.active_tab
+            tab_order = ["jobs", "nodes", "users"]
+            current_index = tab_order.index(current_tab)
+            previous_index = (current_index - 1) % len(tab_order)
+            tab_container.switch_tab(tab_order[previous_index])
+        except Exception as exc:
+            logger.debug(f"Failed to switch to previous tab: {exc}")
+
+    def on_key(self, event: Key) -> None:
+        """Handle key events, intercepting Tab for tab navigation.
+
+        Args:
+            event: The key event.
+        """
+        # Intercept Tab for tab navigation (Shift+Tab is handled by binding)
+        # Check if it's a plain tab (not shift+tab which comes through as binding)
+        if event.key == "tab" and event.name == "tab":
+            event.prevent_default()
+            self.action_next_tab()
 
     def action_show_job_info(self) -> None:
         """Show job info dialog."""
