@@ -21,7 +21,10 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --extra dev
+
+      - name: Verify ruff is installed
+        run: uv run ruff --version
 
       - name: Run ruff format check
         run: uv run ruff format --check .
@@ -43,7 +46,10 @@ jobs:
         run: uv python install 3.11
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --extra dev
+
+      - name: Verify ty is installed
+        run: uv run ty --version
 
       - name: Run ty
         run: uv run ty check stoei/
@@ -65,7 +71,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --all-extras
+        run: uv sync --extra dev
 
       - name: Run tests with coverage
         run: uv run pytest --cov=stoei --cov-report=xml --cov-report=term-missing
