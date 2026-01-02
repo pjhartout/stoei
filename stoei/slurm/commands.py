@@ -49,6 +49,40 @@ SACCT_JOB_FIELDS = [
 ]
 
 
+def _run_subprocess_command(
+    command: list[str], timeout: int, command_name: str
+) -> tuple[subprocess.CompletedProcess[str] | None, str | None]:
+    """Run a subprocess command and handle common errors.
+
+    Args:
+        command: The command to run.
+        timeout: Command timeout in seconds.
+        command_name: Name of the command for error messages.
+
+    Returns:
+        Tuple of (result, optional error message). Result is None on error.
+    """
+    try:
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            check=False,
+        )
+    except FileNotFoundError:
+        logger.exception(f"{command_name} not found")
+        return None, f"{command_name} not found"
+    except subprocess.TimeoutExpired:
+        logger.exception(f"Timeout running {command_name}")
+        return None, "Command timed out"
+    except subprocess.SubprocessError:
+        logger.exception(f"Error running {command_name}")
+        return None, f"Error running {command_name}"
+    else:
+        return result, None
+
+
 def _run_scontrol_for_job(job_id: str) -> tuple[str, str | None]:
     """Run scontrol show jobid and return raw output.
 
@@ -63,27 +97,13 @@ def _run_scontrol_for_job(job_id: str) -> tuple[str, str | None]:
     except ValidationError as exc:
         return "", str(exc)
 
-    try:
-        scontrol = resolve_executable("scontrol")
-        command = [scontrol, "show", "jobid", job_id]
-        logger.debug(f"Running command: {' '.join(command)}")
+    scontrol = resolve_executable("scontrol")
+    command = [scontrol, "show", "jobid", job_id]
+    logger.debug(f"Running command: {' '.join(command)}")
 
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        logger.error(f"scontrol not found: {exc}")
-        return "", f"scontrol not found: {exc}"
-    except subprocess.TimeoutExpired:
-        logger.error(f"Timeout getting job info for {job_id}")
-        return "", "Command timed out"
-    except subprocess.SubprocessError as exc:
-        logger.error(f"Error running scontrol: {exc}")
-        return "", f"Error running scontrol: {exc}"
+    result, error = _run_subprocess_command(command, timeout=10, command_name="scontrol")
+    if error or result is None:
+        return "", error or "Unknown error"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Job not found or invalid job ID"
@@ -113,35 +133,21 @@ def _run_sacct_for_job(job_id: str) -> tuple[str, str | None]:
     except ValidationError as exc:
         return "", str(exc)
 
-    try:
-        sacct = resolve_executable("sacct")
-        format_str = ",".join(SACCT_JOB_FIELDS)
-        command = [
-            sacct,
-            "-j",
-            job_id,
-            f"--format={format_str}",
-            "-P",  # Parseable output with | delimiter
-            "--noheader",
-        ]
-        logger.debug(f"Running sacct command: {' '.join(command)}")
+    sacct = resolve_executable("sacct")
+    format_str = ",".join(SACCT_JOB_FIELDS)
+    command = [
+        sacct,
+        "-j",
+        job_id,
+        f"--format={format_str}",
+        "-P",  # Parseable output with | delimiter
+        "--noheader",
+    ]
+    logger.debug(f"Running sacct command: {' '.join(command)}")
 
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
-    except FileNotFoundError as exc:
-        logger.error(f"sacct not found: {exc}")
-        return "", f"sacct not found: {exc}"
-    except subprocess.TimeoutExpired:
-        logger.error(f"Timeout getting job info via sacct for {job_id}")
-        return "", "Command timed out"
-    except subprocess.SubprocessError as exc:
-        logger.error(f"Error running sacct: {exc}")
-        return "", f"Error running sacct: {exc}"
+    result, error = _run_subprocess_command(command, timeout=10, command_name="sacct")
+    if error or result is None:
+        return "", error or "Unknown error"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Job not found in accounting database"
@@ -318,14 +324,14 @@ def get_running_jobs() -> list[tuple[str, ...]]:
             timeout=5,
             check=False,
         )
-    except (FileNotFoundError, ValidationError) as exc:
-        logger.error(f"Error setting up squeue command: {exc}")
+    except (FileNotFoundError, ValidationError):
+        logger.exception("Error setting up squeue command")
         return []
     except subprocess.TimeoutExpired:
-        logger.error("Timeout getting running jobs")
+        logger.exception("Timeout getting running jobs")
         return []
-    except subprocess.SubprocessError as exc:
-        logger.error(f"Error getting running jobs: {exc}")
+    except subprocess.SubprocessError:
+        logger.exception("Error getting running jobs")
         return []
 
     if result.returncode != 0:
@@ -365,14 +371,14 @@ def get_job_history() -> tuple[list[tuple[str, ...]], int, int, int]:
             timeout=5,
             check=False,
         )
-    except (FileNotFoundError, ValidationError) as exc:
-        logger.error(f"Error setting up sacct command: {exc}")
+    except (FileNotFoundError, ValidationError):
+        logger.exception("Error setting up sacct command")
         return [], 0, 0, 0
     except subprocess.TimeoutExpired:
-        logger.error("Timeout getting job history")
+        logger.exception("Timeout getting job history")
         return [], 0, 0, 0
-    except subprocess.SubprocessError as exc:
-        logger.error(f"Error getting job history: {exc}")
+    except subprocess.SubprocessError:
+        logger.exception("Error getting job history")
         return [], 0, 0, 0
 
     if result.returncode != 0:
@@ -410,15 +416,15 @@ def cancel_job(job_id: str) -> tuple[bool, str | None]:
             timeout=10,
             check=False,
         )
-    except FileNotFoundError as exc:
-        logger.error(f"scancel not found: {exc}")
-        return False, f"scancel not found: {exc}"
+    except FileNotFoundError:
+        logger.exception("scancel not found")
+        return False, "scancel not found"
     except subprocess.TimeoutExpired:
-        logger.error(f"Timeout cancelling job {job_id}")
+        logger.exception(f"Timeout cancelling job {job_id}")
         return False, "Command timed out"
-    except subprocess.SubprocessError as exc:
-        logger.error(f"Error running scancel: {exc}")
-        return False, f"Error running scancel: {exc}"
+    except subprocess.SubprocessError:
+        logger.exception("Error running scancel")
+        return False, "Error running scancel"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Failed to cancel job"
@@ -447,15 +453,15 @@ def get_cluster_nodes() -> tuple[list[dict[str, str]], str | None]:
             timeout=15,
             check=False,
         )
-    except FileNotFoundError as exc:
-        logger.error(f"scontrol not found: {exc}")
-        return [], f"scontrol not found: {exc}"
+    except FileNotFoundError:
+        logger.exception("scontrol not found")
+        return [], "scontrol not found"
     except subprocess.TimeoutExpired:
-        logger.error("Timeout getting cluster nodes")
+        logger.exception("Timeout getting cluster nodes")
         return [], "Command timed out"
-    except subprocess.SubprocessError as exc:
-        logger.error(f"Error running scontrol: {exc}")
-        return [], f"Error running scontrol: {exc}"
+    except subprocess.SubprocessError:
+        logger.exception("Error running scontrol")
+        return [], "Error running scontrol"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Failed to get cluster nodes"
@@ -494,14 +500,14 @@ def get_all_users_jobs() -> list[tuple[str, ...]]:
             timeout=10,
             check=False,
         )
-    except FileNotFoundError as exc:
-        logger.error(f"Error setting up squeue command: {exc}")
+    except FileNotFoundError:
+        logger.exception("Error setting up squeue command")
         return []
     except subprocess.TimeoutExpired:
-        logger.error("Timeout getting all users jobs")
+        logger.exception("Timeout getting all users jobs")
         return []
-    except subprocess.SubprocessError as exc:
-        logger.error(f"Error getting all users jobs: {exc}")
+    except subprocess.SubprocessError:
+        logger.exception("Error getting all users jobs")
         return []
 
     if result.returncode != 0:

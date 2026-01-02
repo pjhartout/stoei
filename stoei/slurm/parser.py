@@ -153,15 +153,15 @@ def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
     # Split by double newlines (node separator) or single newline with NodeName
     lines = raw_output.split("\n")
     for line in lines:
-        line = line.strip()
-        if not line:
+        stripped_line = line.strip()
+        if not stripped_line:
             if current_node:
                 nodes.append(current_node)
                 current_node = {}
             continue
 
         # Check if this is a new node entry (starts with NodeName=)
-        if line.startswith("NodeName="):
+        if stripped_line.startswith("NodeName="):
             if current_node:
                 nodes.append(current_node)
             current_node = {}
@@ -169,13 +169,12 @@ def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
         # Parse key=value pairs
         # Both first line and continuation lines can have multiple key=value pairs
         # Continuation lines start with spaces/tabs
-        line_stripped = line.strip()
 
         # Parse all key=value pairs on this line using regex
         # Pattern matches: Key=Value where Key is alphanumeric with possible slashes/colons
         # and Value is everything until the next Key= or end of line
         pattern = r"(\w+(?:[/:]\w+)*)=([^\s=]+(?:\s+[^\s=]+)*?)(?=\s+\w+(?:[/:]\w+)*=|$)"
-        matches = re.finditer(pattern, line_stripped)
+        matches = re.finditer(pattern, stripped_line)
         for match in matches:
             key = match.group(1)
             value = match.group(2).strip()
