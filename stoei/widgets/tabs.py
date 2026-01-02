@@ -3,8 +3,13 @@
 from typing import ClassVar
 
 from textual import events
+from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
 from textual.widgets import Button
+
+from stoei.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 class TabSwitched(events.Message):
@@ -69,7 +74,7 @@ class TabContainer(Container):
         self._active_tab: str = "jobs"
         self._tabs: dict[str, Container] = {}
 
-    def compose(self) -> None:
+    def compose(self) -> ComposeResult:
         """Create the tab container layout."""
         with Container(id="tab-header"), Horizontal(id="tab-buttons"):
             yield Button("📋 My Jobs", id="tab-jobs", classes="tab-button active")
@@ -115,18 +120,18 @@ class TabContainer(Container):
                 try:
                     tab_content = screen.query_one(f"#{tab_id}", Container)
                     tab_content.display = False
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug(f"Failed to hide tab {tab_id}: {exc}")
 
             # Show the active tab content
             active_tab_id = f"tab-{tab_name}-content"
             try:
                 active_tab = screen.query_one(f"#{active_tab_id}", Container)
                 active_tab.display = True
-            except Exception:
-                pass
-        except Exception:
-            pass
+            except Exception as exc:
+                logger.debug(f"Failed to show tab {active_tab_id}: {exc}")
+        except Exception as exc:
+            logger.debug(f"Failed to switch tab UI: {exc}")
 
         # Post message for app to handle additional updates
         self.post_message(TabSwitched(tab_name))

@@ -125,11 +125,15 @@ class ClusterSidebar(Static):
         gpus_pct = stats.free_gpus_pct if stats.total_gpus > 0 else None
 
         # Color coding based on availability
+        # Thresholds for color coding: green >= 50%, yellow >= 25%, red < 25%
+        green_threshold = 50.0
+        yellow_threshold = 25.0
+
         def color_pct(pct: float) -> str:
             """Color code percentage."""
-            if pct >= 50:
+            if pct >= green_threshold:
                 return f"[green]{pct:.1f}%[/green]"
-            elif pct >= 25:
+            elif pct >= yellow_threshold:
                 return f"[yellow]{pct:.1f}%[/yellow]"
             else:
                 return f"[red]{pct:.1f}%[/red]"

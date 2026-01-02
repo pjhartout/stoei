@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import ClassVar
 
+from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Static
 
@@ -73,7 +74,7 @@ class NodeOverviewTab(VerticalScroll):
         super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.nodes: list[NodeInfo] = []
 
-    def compose(self) -> None:
+    def compose(self) -> ComposeResult:
         """Create the node overview layout."""
         yield Static("[bold]🖥️  Node Overview[/bold]", id="node-overview-title")
         yield DataTable(id="nodes_table")
@@ -164,9 +165,13 @@ class NodeOverviewTab(VerticalScroll):
         Returns:
             Formatted percentage string.
         """
-        if pct >= 90:
+        # Thresholds for color coding: red >= 90%, yellow >= 70%, green < 70%
+        red_threshold = 90.0
+        yellow_threshold = 70.0
+
+        if pct >= red_threshold:
             return f"[red]{pct:.1f}%[/red]"
-        elif pct >= 70:
+        elif pct >= yellow_threshold:
             return f"[yellow]{pct:.1f}%[/yellow]"
         else:
             return f"[green]{pct:.1f}%[/green]"

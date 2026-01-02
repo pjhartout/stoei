@@ -1,10 +1,12 @@
 """User overview tab widget."""
 
+import contextlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import ClassVar
 
+from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Static
 
@@ -50,7 +52,7 @@ class UserOverviewTab(VerticalScroll):
         super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.users: list[UserStats] = []
 
-    def compose(self) -> None:
+    def compose(self) -> ComposeResult:
         """Create the user overview layout."""
         yield Static("[bold]👥 User Overview[/bold]", id="user-overview-title")
         yield DataTable(id="users_table")
@@ -128,10 +130,8 @@ class UserOverviewTab(VerticalScroll):
         # Parse CPU count
         cpu_match = re.search(r"cpu=(\d+)", tres_str)
         if cpu_match:
-            try:
+            with contextlib.suppress(ValueError):
                 cpus = int(cpu_match.group(1))
-            except ValueError:
-                pass
 
         # Parse memory (can be in G or M)
         mem_match = re.search(r"mem=(\d+)([GM])", tres_str, re.IGNORECASE)
@@ -149,10 +149,8 @@ class UserOverviewTab(VerticalScroll):
         # Parse GPUs (format: gres/gpu=X)
         gpu_match = re.search(r"gres/gpu=(\d+)", tres_str, re.IGNORECASE)
         if gpu_match:
-            try:
+            with contextlib.suppress(ValueError):
                 gpus = int(gpu_match.group(1))
-            except ValueError:
-                pass
 
         return cpus, memory_gb, gpus
 
@@ -166,6 +164,13 @@ class UserOverviewTab(VerticalScroll):
         Returns:
             List of UserStats objects.
         """
+        # Constants for job tuple indices
+        min_job_fields = 7
+        username_index = 2
+        nodes_index = 5
+        tres_index = 7
+        range_parts_count = 2
+
         user_data: dict[str, dict[str, int | float]] = defaultdict(
             lambda: {
                 "job_count": 0,
@@ -177,22 +182,22 @@ class UserOverviewTab(VerticalScroll):
         )
 
         for job in jobs:
-            if len(job) < 7:
+            if len(job) < min_job_fields:
                 continue
 
-            username = job[2].strip() if len(job) > 2 else ""
+            username = job[username_index].strip() if len(job) > username_index else ""
             if not username:
                 continue
 
             user_data[username]["job_count"] += 1
 
             # Parse nodes (format: "4" or "4-8")
-            nodes_str = job[5].strip() if len(job) > 5 else "0"
+            nodes_str = job[nodes_index].strip() if len(job) > nodes_index else "0"
             try:
                 if "-" in nodes_str:
                     # Range like "4-8" means 5 nodes
                     parts = nodes_str.split("-")
-                    if len(parts) == 2:
+                    if len(parts) == range_parts_count:
                         start = int(parts[0])
                         end = int(parts[1])
                         node_count = end - start + 1
@@ -206,7 +211,7 @@ class UserOverviewTab(VerticalScroll):
             user_data[username]["total_nodes"] += node_count
 
             # Parse TRES for CPU, memory, and GPU information
-            tres_str = job[7].strip() if len(job) > 7 else ""
+            tres_str = job[tres_index].strip() if len(job) > tres_index else ""
             cpus, memory_gb, gpus = UserOverviewTab._parse_tres(tres_str)
 
             # Use TRES CPU count if available, otherwise estimate from nodes
