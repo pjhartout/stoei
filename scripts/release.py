@@ -28,6 +28,7 @@ class VersionNotFoundError(VersionError):
     """Raised when version cannot be found in pyproject.toml."""
 
     def __init__(self) -> None:
+        """Initialize the VersionNotFoundError."""
         super().__init__("Could not find version in pyproject.toml")
 
 
@@ -35,6 +36,11 @@ class InvalidVersionFormatError(VersionError):
     """Raised when version format is invalid."""
 
     def __init__(self, version: str) -> None:
+        """Initialize the InvalidVersionFormatError.
+
+        Args:
+            version: The invalid version string.
+        """
         super().__init__(f"Invalid version format: {version}")
         self.version = version
 
@@ -43,6 +49,11 @@ class InvalidBumpTypeError(VersionError):
     """Raised when bump type is invalid."""
 
     def __init__(self, bump_type: str) -> None:
+        """Initialize the InvalidBumpTypeError.
+
+        Args:
+            bump_type: The invalid bump type string.
+        """
         super().__init__(f"Invalid bump type: {bump_type}. Use patch, minor, or major")
         self.bump_type = bump_type
 
@@ -51,6 +62,11 @@ class TagExistsError(Exception):
     """Raised when a tag already exists."""
 
     def __init__(self, tag_name: str) -> None:
+        """Initialize the TagExistsError.
+
+        Args:
+            tag_name: The tag name that already exists.
+        """
         super().__init__(f"Tag {tag_name} already exists")
         self.tag_name = tag_name
 
