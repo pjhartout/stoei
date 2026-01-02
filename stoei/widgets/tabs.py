@@ -4,10 +4,7 @@ from typing import ClassVar
 
 from textual import events
 from textual.containers import Container, Horizontal
-from textual.widgets import Button, Static
-
-from stoei.widgets.node_overview import NodeOverviewTab
-from stoei.widgets.user_overview import UserOverviewTab
+from textual.widgets import Button
 
 
 class TabSwitched(events.Message):
@@ -28,7 +25,7 @@ class TabContainer(Container):
 
     DEFAULT_CSS: ClassVar[str] = """
     TabContainer {
-        height: 100%;
+        height: auto;
         width: 100%;
     }
 
@@ -74,11 +71,10 @@ class TabContainer(Container):
 
     def compose(self) -> None:
         """Create the tab container layout."""
-        with Container(id="tab-header"):
-            with Horizontal(id="tab-buttons"):
-                yield Button("📋 My Jobs", id="tab-jobs", classes="tab-button active")
-                yield Button("🖥️  Nodes", id="tab-nodes", classes="tab-button")
-                yield Button("👥 Users", id="tab-users", classes="tab-button")
+        with Container(id="tab-header"), Horizontal(id="tab-buttons"):
+            yield Button("📋 My Jobs", id="tab-jobs", classes="tab-button active")
+            yield Button("🖥️  Nodes", id="tab-nodes", classes="tab-button")
+            yield Button("👥 Users", id="tab-users", classes="tab-button")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle tab button presses.
@@ -139,5 +135,3 @@ class TabContainer(Container):
     def active_tab(self) -> str:
         """Get the currently active tab name."""
         return self._active_tab
-
-
