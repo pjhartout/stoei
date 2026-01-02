@@ -82,6 +82,9 @@ select = [
     "TRY",    # tryceratops
 ]
 
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["D102", "S101", "PLC0415", "PLR2004", "ARG002"]  # Allow missing docstrings, assert, local imports, magic values, and unused args in tests
+
 [tool.ruff.lint.pydocstyle]
 convention = "google"
 

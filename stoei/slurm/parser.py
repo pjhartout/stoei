@@ -6,6 +6,10 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     pass
 
+# Constants for parsing
+MIN_SQUEUE_PARTS = 6
+MIN_SACCT_PARTS = 7
+
 
 def parse_scontrol_output(raw_output: str) -> dict[str, str]:
     """Parse scontrol output into key-value pairs.
@@ -47,7 +51,7 @@ def parse_squeue_output(raw_output: str) -> list[tuple[str, ...]]:
     jobs: list[tuple[str, ...]] = []
     for line in lines[1:]:  # Skip header
         parts = line.split("|")
-        if len(parts) >= 6:
+        if len(parts) >= MIN_SQUEUE_PARTS:
             jobs.append(tuple(parts))
 
     return jobs
@@ -72,7 +76,7 @@ def parse_sacct_output(raw_output: str) -> tuple[list[tuple[str, ...]], int, int
 
     for line in lines[1:]:  # Skip header
         parts = line.split("|")
-        if len(parts) >= 7:
+        if len(parts) >= MIN_SACCT_PARTS:
             jobs.append(tuple(parts))
             try:
                 restart_count = int(parts[3])
