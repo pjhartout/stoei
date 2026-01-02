@@ -1,10 +1,8 @@
 """Unit tests for the NodeOverviewTab widget."""
 
 import pytest
-from textual.app import App
-from textual.widgets import DataTable
-
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
+from textual.app import App
 
 
 class TestNodeInfo:
@@ -113,7 +111,7 @@ class TestNodeOverviewTab:
 
     async def test_update_nodes(self, app: NodeOverviewTestApp) -> None:
         """Test updating nodes."""
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(80, 24)):
             node_tab = app.query_one("#node-overview", NodeOverviewTab)
             nodes = [
                 NodeInfo(

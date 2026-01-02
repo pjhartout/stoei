@@ -1,7 +1,5 @@
 """Tests for parsing scontrol nodes output."""
 
-import pytest
-
 from stoei.slurm.parser import parse_scontrol_nodes_output
 
 

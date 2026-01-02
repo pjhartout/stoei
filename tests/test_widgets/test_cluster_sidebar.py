@@ -120,6 +120,7 @@ class TestClusterSidebar:
         assert "GPUs" in rendered
         assert "30" in rendered  # free GPUs
         assert "50" in rendered
+        assert "free" in rendered.lower()  # Should show "free" in the display
 
     def test_render_stats_without_gpus(self, cluster_sidebar: ClusterSidebar) -> None:
         """Test that rendered stats don't contain GPUs when not available."""
@@ -148,3 +149,97 @@ class TestClusterSidebar:
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
         assert "[red]" in rendered
+
+    def test_render_stats_loading_state(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that loading state shows loading message."""
+        rendered = cluster_sidebar._render_stats()
+        assert "Loading cluster data" in rendered or "bright_black" in rendered
+        assert not cluster_sidebar._data_loaded
+
+    def test_render_stats_after_data_loaded(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that stats render correctly after data is loaded."""
+        stats = ClusterStats(total_nodes=10, free_nodes=5)
+        cluster_sidebar.update_stats(stats)
+        assert cluster_sidebar._data_loaded
+        rendered = cluster_sidebar._render_stats()
+        assert "Loading cluster data" not in rendered
+        assert "Nodes" in rendered
+
+    def test_update_stats_sets_data_loaded_flag(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that update_stats sets the _data_loaded flag."""
+        assert not cluster_sidebar._data_loaded
+        stats = ClusterStats(total_nodes=10, free_nodes=5)
+        cluster_sidebar.update_stats(stats)
+        assert cluster_sidebar._data_loaded
+
+    def test_render_stats_with_zero_values(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test rendering with all zero values."""
+        stats = ClusterStats()
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "0/0" in rendered
+        assert "0.0/0.0" in rendered or "0/0" in rendered
+
+    def test_render_stats_gpu_none_handling(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that None gpu_pct doesn't cause errors."""
+        stats = ClusterStats(total_gpus=0, allocated_gpus=0)
+        cluster_sidebar.update_stats(stats)
+        # Should not raise an error
+        rendered = cluster_sidebar._render_stats()
+        assert "GPUs" not in rendered
+
+    def test_render_stats_boundary_values(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test rendering with boundary percentage values."""
+        # Exactly 50% (should be green)
+        stats = ClusterStats(total_nodes=100, free_nodes=50)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "[green]" in rendered
+
+        # Exactly 25% (should be yellow)
+        stats = ClusterStats(total_nodes=100, free_nodes=25)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "[yellow]" in rendered
+
+        # Just below 25% (should be red)
+        stats = ClusterStats(total_nodes=100, free_nodes=24)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "[red]" in rendered
+
+    def test_render_stats_memory_formatting(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that memory values are formatted with one decimal place."""
+        stats = ClusterStats(total_memory_gb=1234.567, allocated_memory_gb=567.891)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        # Should contain formatted memory values
+        assert "GB" in rendered
+        # Check for decimal formatting (one decimal place)
+        import re
+
+        memory_matches = re.findall(r"(\d+\.\d+)\s*GB", rendered)
+        assert len(memory_matches) > 0
+        for match in memory_matches:
+            # Each match should have exactly one decimal place
+            assert len(match.split(".")[1]) == 1
+
+    def test_render_stats_cpu_calculation(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that CPU calculation shows free CPUs correctly."""
+        stats = ClusterStats(total_cpus=100, allocated_cpus=30)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        # Should show 70 free CPUs (100 - 30)
+        assert "70" in rendered
+        assert "100" in rendered
+
+    def test_multiple_updates(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that multiple updates work correctly."""
+        stats1 = ClusterStats(total_nodes=10, free_nodes=5)
+        cluster_sidebar.update_stats(stats1)
+        assert cluster_sidebar.stats.total_nodes == 10
+
+        stats2 = ClusterStats(total_nodes=20, free_nodes=15)
+        cluster_sidebar.update_stats(stats2)
+        assert cluster_sidebar.stats.total_nodes == 20
+        assert cluster_sidebar.stats.free_nodes == 15

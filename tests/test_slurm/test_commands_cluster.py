@@ -3,7 +3,6 @@
 from pathlib import Path
 
 import pytest
-
 from stoei.slurm.commands import get_all_users_jobs, get_cluster_nodes
 
 
@@ -30,7 +29,7 @@ class TestGetClusterNodes:
 
     def test_empty_result_returns_empty_list(self, mock_slurm_path: Path) -> None:
         """Test that empty scontrol output returns empty list."""
-        nodes, error = get_cluster_nodes()
+        nodes, _error = get_cluster_nodes()
         # Mock may return empty or populated, both are valid
         assert isinstance(nodes, list)
 

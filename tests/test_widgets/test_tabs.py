@@ -1,11 +1,9 @@
 """Unit tests for the TabContainer widget."""
 
 import pytest
-from textual.app import App
-from textual.containers import Container
-from textual.widgets import Button
-
 from stoei.widgets.tabs import TabContainer, TabSwitched
+from textual.app import App
+from textual.widgets import Button
 
 
 class TestTabSwitched:
@@ -40,7 +38,7 @@ class TestTabContainer:
     async def test_switch_tab_to_nodes(self) -> None:
         """Test switching to nodes tab."""
         app = TabTestApp()
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(80, 24)):
             tab_container = app.query_one("#tab-container", TabContainer)
             tab_container.switch_tab("nodes")
             assert tab_container.active_tab == "nodes"
@@ -48,7 +46,7 @@ class TestTabContainer:
     async def test_switch_tab_to_users(self) -> None:
         """Test switching to users tab."""
         app = TabTestApp()
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(80, 24)):
             tab_container = app.query_one("#tab-container", TabContainer)
             tab_container.switch_tab("users")
             assert tab_container.active_tab == "users"
@@ -62,10 +60,69 @@ class TestTabContainer:
     async def test_switch_tab_updates_button_states(self) -> None:
         """Test that switching tabs updates button active states."""
         app = TabTestApp()
-        async with app.run_test() as pilot:
+        async with app.run_test(size=(80, 24)):
             tab_container = app.query_one("#tab-container", TabContainer)
             tab_container.switch_tab("nodes")
             assert tab_container.active_tab == "nodes"
             # Check button has active class
             nodes_btn = app.query_one("#tab-nodes", Button)
             assert "active" in nodes_btn.classes
+
+    async def test_clicking_jobs_button_switches_tab(self) -> None:
+        """Test that clicking jobs button switches to jobs tab."""
+        app = TabTestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            tab_container = app.query_one("#tab-container", TabContainer)
+            # First switch away from jobs
+            tab_container.switch_tab("nodes")
+            assert tab_container.active_tab == "nodes"
+
+            # Now click the jobs button
+            jobs_btn = app.query_one("#tab-jobs", Button)
+            jobs_btn.press()
+            await pilot.pause()
+            assert tab_container.active_tab == "jobs"
+
+    async def test_clicking_nodes_button_switches_tab(self) -> None:
+        """Test that clicking nodes button switches to nodes tab."""
+        app = TabTestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            tab_container = app.query_one("#tab-container", TabContainer)
+            assert tab_container.active_tab == "jobs"
+
+            # Click nodes button
+            nodes_btn = app.query_one("#tab-nodes", Button)
+            nodes_btn.press()
+            await pilot.pause()
+            assert tab_container.active_tab == "nodes"
+
+    async def test_clicking_users_button_switches_tab(self) -> None:
+        """Test that clicking users button switches to users tab."""
+        app = TabTestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            tab_container = app.query_one("#tab-container", TabContainer)
+            assert tab_container.active_tab == "jobs"
+
+            # Click users button
+            users_btn = app.query_one("#tab-users", Button)
+            users_btn.press()
+            await pilot.pause()
+            assert tab_container.active_tab == "users"
+
+    async def test_jobs_button_removes_active_from_other_buttons(self) -> None:
+        """Test that switching removes active class from other buttons."""
+        app = TabTestApp()
+        async with app.run_test(size=(80, 24)):
+            tab_container = app.query_one("#tab-container", TabContainer)
+
+            # Switch to nodes
+            tab_container.switch_tab("nodes")
+            nodes_btn = app.query_one("#tab-nodes", Button)
+            jobs_btn = app.query_one("#tab-jobs", Button)
+            assert "active" in nodes_btn.classes
+            assert "active" not in jobs_btn.classes
+
+            # Switch back to jobs
+            tab_container.switch_tab("jobs")
+            assert "active" in jobs_btn.classes
+            assert "active" not in nodes_btn.classes
