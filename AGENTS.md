@@ -47,6 +47,10 @@ I want to have mostly self-explanatory code. Use the Readme to show the user how
 
 I want to have a clear code structure. In the end, I want the main source code for the package repository
 
+## Code style
+
+- **All imports must be hoisted to the top of the file** - no imports inside functions, methods, or conditional blocks. This is enforced by ruff rule PLC0415.
+
 ## Agent Auto-run Commands
 
 **CRITICAL: You MUST automatically run these commands after making ANY code changes:**
