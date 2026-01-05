@@ -23,6 +23,8 @@ I want a full `pytest`-based test suite. I want to make extensive use of fixture
 
 I want to run this test suite on each push and opened PR on github workflows. I also want to have precommit hook to check for uv formatting and ty respecting the project rules.
 
+**Important**: Always run tests (`uv run pytest`) after making any code changes to ensure everything still works correctly.
+
 **Important**: Do NOT run interactive commands like `stoei` itself during development/testing as it is a TUI application that requires user interaction. If you must run it for verification, always use `timeout` to interrupt it after 10 seconds (e.g., `timeout 10 stoei`). Prefer using the pytest test suite for verification instead.
 
 **Performance**: The test suite must execute in under 20 seconds. To achieve this:
@@ -62,7 +64,7 @@ I want to have a clear code structure. In the end, I want the main source code f
    uv run ty check stoei/
    ```
 
-2. **After making significant changes, ALSO run:**
+2. **After making ANY changes, ALWAYS run:**
    ```bash
    uv run pytest
    ```
