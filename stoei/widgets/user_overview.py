@@ -232,11 +232,11 @@ class UserOverviewTab(VerticalScroll):
             user_stats.append(
                 UserStats(
                     username=username,
-                    job_count=data["job_count"],
-                    total_cpus=data["total_cpus"],
+                    job_count=int(data["job_count"]),
+                    total_cpus=int(data["total_cpus"]),
                     total_memory_gb=data["total_memory_gb"],
-                    total_gpus=data["total_gpus"],
-                    total_nodes=data["total_nodes"],
+                    total_gpus=int(data["total_gpus"]),
+                    total_nodes=int(data["total_nodes"]),
                 )
             )
 
