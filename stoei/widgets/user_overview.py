@@ -165,7 +165,7 @@ class UserOverviewTab(VerticalScroll):
             List of UserStats objects.
         """
         # Constants for job tuple indices
-        min_job_fields = 7
+        min_job_fields = 8
         username_index = 2
         nodes_index = 5
         tres_index = 7
