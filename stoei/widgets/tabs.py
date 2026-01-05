@@ -80,6 +80,7 @@ class TabContainer(Container):
             yield Button("📋 My Jobs", id="tab-jobs", classes="tab-button active")
             yield Button("🖥️  Nodes", id="tab-nodes", classes="tab-button")
             yield Button("👥 Users", id="tab-users", classes="tab-button")
+            yield Button("📝 Logs", id="tab-logs", classes="tab-button")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle tab button presses.
@@ -93,18 +94,20 @@ class TabContainer(Container):
             self.switch_tab("nodes")
         elif event.button.id == "tab-users":
             self.switch_tab("users")
+        elif event.button.id == "tab-logs":
+            self.switch_tab("logs")
 
     def switch_tab(self, tab_name: str) -> None:
         """Switch to a different tab.
 
         Args:
-            tab_name: Name of the tab to switch to ('jobs', 'nodes', or 'users').
+            tab_name: Name of the tab to switch to ('jobs', 'nodes', 'users', or 'logs').
         """
         if tab_name == self._active_tab:
             return
 
         # Update button states
-        for btn_id in ["tab-jobs", "tab-nodes", "tab-users"]:
+        for btn_id in ["tab-jobs", "tab-nodes", "tab-users", "tab-logs"]:
             btn = self.query_one(f"#{btn_id}", Button)
             if btn_id == f"tab-{tab_name}":
                 btn.add_class("active")
@@ -116,7 +119,7 @@ class TabContainer(Container):
         # Hide all tab contents in parent
         try:
             screen = self.screen
-            for tab_id in ["tab-jobs-content", "tab-nodes-content", "tab-users-content"]:
+            for tab_id in ["tab-jobs-content", "tab-nodes-content", "tab-users-content", "tab-logs-content"]:
                 try:
                     tab_content = screen.query_one(f"#{tab_id}", Container)
                     tab_content.display = False

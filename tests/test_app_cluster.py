@@ -150,6 +150,7 @@ class TestAppClusterIntegration:
             async with app.run_test(size=(80, 24)):
                 nodes_tab = app.query_one("#tab-nodes-content")
                 users_tab = app.query_one("#tab-users-content")
+                logs_tab = app.query_one("#tab-logs-content")
                 jobs_tab = app.query_one("#tab-jobs-content")
 
                 # Jobs tab should be visible (default)
@@ -157,6 +158,7 @@ class TestAppClusterIntegration:
                 # Other tabs should be hidden
                 assert nodes_tab.display is False
                 assert users_tab.display is False
+                assert logs_tab.display is False
 
     def test_app_refresh_fetches_cluster_data(self, app: SlurmMonitor) -> None:
         """Test that app refresh fetches cluster data."""
@@ -293,6 +295,24 @@ class TestAppClusterIntegration:
                 users_tab = app.query_one("#tab-users-content")
                 assert users_tab.display is True
 
+    async def test_action_switch_tab_logs(self, app: SlurmMonitor) -> None:
+        """Test that action_switch_tab_logs switches to logs tab."""
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                tab_container = app.query_one("TabContainer", TabContainer)
+                assert tab_container.active_tab == "jobs"
+
+                # Switch to logs tab using action
+                app.action_switch_tab_logs()
+
+                # Should be on logs tab
+                assert tab_container.active_tab == "logs"
+                logs_tab = app.query_one("#tab-logs-content")
+                assert logs_tab.display is True
+
     def test_bindings_include_tab_shortcuts(self, app: SlurmMonitor) -> None:
         """Test that keyboard bindings include tab switching shortcuts."""
         binding_keys = [b[0] for b in app.BINDINGS]
@@ -310,6 +330,7 @@ class TestAppClusterIntegration:
         assert bindings_dict["1"] == "switch_tab_jobs"
         assert bindings_dict["2"] == "switch_tab_nodes"
         assert bindings_dict["3"] == "switch_tab_users"
+        assert bindings_dict["4"] == "switch_tab_logs"
         assert bindings_dict["left"] == "previous_tab"
         assert bindings_dict["right"] == "next_tab"
         assert bindings_dict["shift+tab"] == "previous_tab"
@@ -332,7 +353,11 @@ class TestAppClusterIntegration:
                 app.action_next_tab()
                 assert tab_container.active_tab == "users"
 
-                # Cycle forward: users -> jobs (wraps around)
+                # Cycle forward: users -> logs
+                app.action_next_tab()
+                assert tab_container.active_tab == "logs"
+
+                # Cycle forward: logs -> jobs (wraps around)
                 app.action_next_tab()
                 assert tab_container.active_tab == "jobs"
 
@@ -346,7 +371,11 @@ class TestAppClusterIntegration:
                 tab_container = app.query_one("TabContainer", TabContainer)
                 assert tab_container.active_tab == "jobs"
 
-                # Cycle backward: jobs -> users (wraps around)
+                # Cycle backward: jobs -> logs (wraps around)
+                app.action_previous_tab()
+                assert tab_container.active_tab == "logs"
+
+                # Cycle backward: logs -> users
                 app.action_previous_tab()
                 assert tab_container.active_tab == "users"
 
@@ -376,7 +405,11 @@ class TestAppClusterIntegration:
                 await pilot.press("tab")
                 assert tab_container.active_tab == "users"
 
-                # Press Tab: users -> jobs (wraps around)
+                # Press Tab: users -> logs
+                await pilot.press("tab")
+                assert tab_container.active_tab == "logs"
+
+                # Press Tab: logs -> jobs (wraps around)
                 await pilot.press("tab")
                 assert tab_container.active_tab == "jobs"
 
@@ -393,4 +426,4 @@ class TestAppClusterIntegration:
                 tab_container = app.query_one("TabContainer", TabContainer)
                 # Test that the action works directly (binding may work in real usage)
                 app.action_previous_tab()
-                assert tab_container.active_tab == "users"
+                assert tab_container.active_tab == "logs"

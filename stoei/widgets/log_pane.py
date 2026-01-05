@@ -30,7 +30,7 @@ class LogPane(RichLog):
 
     def __init__(
         self,
-        max_lines: int = 4,
+        max_lines: int | None = None,
         *,
         name: str | None = None,
         id: str | None = None,
@@ -40,7 +40,7 @@ class LogPane(RichLog):
         """Initialize the LogPane widget.
 
         Args:
-            max_lines: Maximum number of log lines to retain.
+            max_lines: Maximum number of log lines to retain (None for unlimited).
             name: The name of the widget.
             id: The ID of the widget in the DOM.
             classes: The CSS classes for the widget.

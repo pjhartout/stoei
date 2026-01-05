@@ -43,6 +43,7 @@ REFRESH_INTERVAL = 5.0
 class SlurmMonitor(App[None]):
     """Textual TUI app for monitoring SLURM jobs."""
 
+    TITLE = "STOEI"
     ENABLE_COMMAND_PALETTE = False
     CSS_PATH: ClassVar[list[Path]] = [
         STYLES_DIR / "app.tcss",
@@ -57,6 +58,7 @@ class SlurmMonitor(App[None]):
         ("1", "switch_tab_jobs", "Jobs Tab"),
         ("2", "switch_tab_nodes", "Nodes Tab"),
         ("3", "switch_tab_users", "Users Tab"),
+        ("4", "switch_tab_logs", "Logs Tab"),
         ("left", "previous_tab", "Previous Tab"),
         ("right", "next_tab", "Next Tab"),
         ("shift+tab", "previous_tab", "Previous Tab"),
@@ -103,12 +105,12 @@ class SlurmMonitor(App[None]):
                 with Container(id="tab-users-content", classes="tab-content"):
                     yield UserOverviewTab(id="user-overview")
 
+                # Logs tab
+                with Container(id="tab-logs-content", classes="tab-content"):
+                    yield LogPane(id="log_pane")
+
             # Sidebar with cluster load (on the right)
             yield ClusterSidebar(id="cluster-sidebar")
-
-        with Container(id="log-panel"):
-            yield Static("[bold]📝 Logs[/bold]", id="log-title")
-            yield LogPane(id="log_pane")
 
         yield Footer()
 
@@ -135,6 +137,8 @@ class SlurmMonitor(App[None]):
             nodes_tab.display = False
             users_tab = self.query_one("#tab-users-content", Container)
             users_tab.display = False
+            logs_tab = self.query_one("#tab-logs-content", Container)
+            logs_tab.display = False
         except Exception as exc:
             logger.warning(f"Failed to set tab visibility: {exc}")
 
@@ -575,7 +579,7 @@ class SlurmMonitor(App[None]):
             event: The TabSwitched event.
         """
         # Hide all tab contents
-        for tab_id in ["tab-jobs-content", "tab-nodes-content", "tab-users-content"]:
+        for tab_id in ["tab-jobs-content", "tab-nodes-content", "tab-users-content", "tab-logs-content"]:
             try:
                 tab_content = self.query_one(f"#{tab_id}", Container)
                 tab_content.display = False
@@ -603,6 +607,14 @@ class SlurmMonitor(App[None]):
             elif event.tab_name == "users":
                 # Always update when switching to users tab
                 self._update_user_overview()
+            elif event.tab_name == "logs":
+                # Focus the log pane when switching to logs tab
+                try:
+                    log_pane = self.query_one("#log_pane", LogPane)
+                    log_pane.focus()
+                    logger.debug("Focused log pane")
+                except Exception as exc:
+                    logger.debug(f"Failed to focus log pane: {exc}")
         except Exception as exc:
             logger.warning(f"Failed to switch to tab {event.tab_name}: {exc}")
 
@@ -636,12 +648,20 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.debug(f"Failed to switch to users tab: {exc}")
 
+    def action_switch_tab_logs(self) -> None:
+        """Switch to the Logs tab."""
+        try:
+            tab_container = self.query_one("TabContainer", TabContainer)
+            tab_container.switch_tab("logs")
+        except Exception as exc:
+            logger.debug(f"Failed to switch to logs tab: {exc}")
+
     def action_next_tab(self) -> None:
         """Switch to the next tab (cycling)."""
         try:
             tab_container = self.query_one("TabContainer", TabContainer)
             current_tab = tab_container.active_tab
-            tab_order = ["jobs", "nodes", "users"]
+            tab_order = ["jobs", "nodes", "users", "logs"]
             current_index = tab_order.index(current_tab)
             next_index = (current_index + 1) % len(tab_order)
             tab_container.switch_tab(tab_order[next_index])
@@ -653,7 +673,7 @@ class SlurmMonitor(App[None]):
         try:
             tab_container = self.query_one("TabContainer", TabContainer)
             current_tab = tab_container.active_tab
-            tab_order = ["jobs", "nodes", "users"]
+            tab_order = ["jobs", "nodes", "users", "logs"]
             current_index = tab_order.index(current_tab)
             previous_index = (current_index - 1) % len(tab_order)
             tab_container.switch_tab(tab_order[previous_index])
