@@ -159,16 +159,17 @@ class UserOverviewTab(VerticalScroll):
         """Aggregate job data into user statistics.
 
         Args:
-            jobs: List of job tuples from squeue (JobID, Name, User, State, Time, Nodes, NodeList, TRES).
+            jobs: List of job tuples from squeue (JobID, Name, User, State, Time, Nodes, NodeList, [TRES]).
+                TRES is optional (8th field).
 
         Returns:
             List of UserStats objects.
         """
         # Constants for job tuple indices
-        min_job_fields = 8
+        min_job_fields = 7  # Minimum: JobID, Name, User, State, Time, Nodes, NodeList
         username_index = 2
         nodes_index = 5
-        tres_index = 7
+        tres_index = 7  # Optional 8th field
         range_parts_count = 2
 
         user_data: dict[str, dict[str, int | float]] = defaultdict(
