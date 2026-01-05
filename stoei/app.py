@@ -20,12 +20,13 @@ from stoei.slurm.commands import (
     get_cluster_nodes,
     get_job_info,
     get_job_log_paths,
+    get_node_info,
 )
 from stoei.slurm.validation import check_slurm_available
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
-from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen
+from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen, NodeInfoScreen
 from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
 from stoei.widgets.tabs import TabContainer, TabSwitched
 from stoei.widgets.user_overview import UserOverviewTab
@@ -684,12 +685,69 @@ class SlurmMonitor(App[None]):
         self.push_screen(JobInputScreen(), handle_job_id)
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
-        """Handle row selection (Enter key) in DataTable.
+        """Handle row selection in data tables.
 
         Args:
-            event: The row selection event from the DataTable.
+            event: The row selected event.
         """
-        self._show_job_info_for_row(event.data_table, event.row_key)
+        # Check if this is the nodes table
+        if event.data_table.id == "nodes_table":
+            self._show_node_info_for_row(event.data_table, event.row_key)
+        else:
+            # Default to job info for jobs table
+            self._show_job_info_for_row(event.data_table, event.row_key)
+
+    def _show_node_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
+        """Show node info for a specific row in the nodes table.
+
+        Args:
+            table: The DataTable containing the row.
+            row_key: The key of the row to show info for.
+        """
+        try:
+            row_data = table.get_row(row_key)
+            node_name = str(row_data[0]).strip()
+            # Remove Rich markup tags if present
+            node_name = re.sub(r"\[.*?\]", "", node_name).strip()
+
+            if not node_name:
+                logger.warning(f"Could not extract node name from row {row_key}")
+                self.notify("Could not get node name from selected row", severity="error")
+                return
+
+            logger.info(f"Showing info for selected node {node_name}")
+            self._show_node_info(node_name)
+
+        except (IndexError, KeyError):
+            logger.exception(f"Could not get node name from row {row_key}")
+            self.notify("Could not get node name from selected row", severity="error")
+
+    def _show_node_info(self, node_name: str) -> None:
+        """Show detailed information for a node.
+
+        Args:
+            node_name: The name of the node to display.
+        """
+        logger.info(f"Fetching node info for {node_name}")
+        self.notify("Loading node information...", timeout=2)
+
+        # Get node info in a worker to avoid blocking
+        def fetch_node_info() -> None:
+            node_info, error = get_node_info(node_name)
+            self.call_from_thread(lambda: self._display_node_info(node_name, node_info, error))
+
+        self.run_worker(fetch_node_info, name="fetch_node_info", thread=True)
+
+    def _display_node_info(self, node_name: str, node_info: str, error: str | None) -> None:
+        """Display node information in a modal screen.
+
+        Args:
+            node_name: The node name.
+            node_info: Formatted node information.
+            error: Optional error message.
+        """
+        self.push_screen(NodeInfoScreen(node_name, node_info, error))
+        logger.debug(f"Displayed node info screen for {node_name}")
 
     def _show_job_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
         """Show job info for a specific row in a table.

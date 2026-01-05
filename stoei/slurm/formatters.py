@@ -240,3 +240,90 @@ def format_sacct_job_info(parsed: dict[str, str]) -> str:
             lines.append(f"  [bold cyan]{display_name:.<24}[/bold cyan] {formatted}")
 
     return "\n".join(lines)
+
+
+# Categories for node fields
+NODE_CATEGORIES: dict[str, tuple[str, list[str]]] = {
+    "identity": ("🏷️  Identity", ["NodeName", "NodeAddr", "NodeHostName", "Arch", "OS", "Version"]),
+    "status": ("📊 Status", ["State", "Reason", "Owner", "MCS_label"]),
+    "resources": (
+        "💻 Resources",
+        [
+            "CPUTot",
+            "CPUAlloc",
+            "CPULoad",
+            "CPUEfctv",
+            "RealMemory",
+            "AllocMem",
+            "FreeMem",
+            "CfgTRES",
+            "AllocTRES",
+            "Gres",
+            "TmpDisk",
+        ],
+    ),
+    "hardware": (
+        "🔧 Hardware",
+        [
+            "CoresPerSocket",
+            "Sockets",
+            "Boards",
+            "ThreadsPerCore",
+            "Weight",
+            "AvailableFeatures",
+            "ActiveFeatures",
+        ],
+    ),
+    "partitions": ("📦 Partitions", ["Partitions"]),
+    "timing": (
+        "⏱️  Timing",
+        [
+            "BootTime",
+            "SlurmdStartTime",
+            "LastBusyTime",
+            "ResumeAfterTime",
+        ],
+    ),
+    "power": ("⚡ Power", ["CurrentWatts", "AveWatts"]),
+}
+
+
+def format_node_info(raw_output: str) -> str:
+    """Format node info with categories and colors.
+
+    Args:
+        raw_output: Raw output from scontrol show node command.
+
+    Returns:
+        Formatted string with Rich markup for display.
+    """
+    parsed = parse_scontrol_output(raw_output)
+
+    if not parsed:
+        return "[italic]No node information could be parsed.[/italic]"
+
+    lines: list[str] = []
+    seen_keys: set[str] = set()
+
+    # Display categorized fields
+    for _category_id, (category_title, fields) in NODE_CATEGORIES.items():
+        category_lines: list[str] = []
+        for field in fields:
+            if field in parsed:
+                formatted = format_value(field, parsed[field])
+                category_lines.append(f"  [bold cyan]{field:.<24}[/bold cyan] {formatted}")
+                seen_keys.add(field)
+
+        if category_lines:
+            lines.append(f"\n[bold reverse] {category_title} [/bold reverse]")
+            lines.extend(category_lines)
+
+    # Display any remaining fields not in categories
+    remaining = {k: v for k, v in parsed.items() if k not in seen_keys}
+    if remaining:
+        lines.append("\n[bold reverse] 📋 Other [/bold reverse]")
+        for key, value in sorted(remaining.items()):
+            formatted = format_value(key, value)
+            lines.append(f"  [bold cyan]{key:.<24}[/bold cyan] {formatted}")
+
+    return "\n".join(lines)

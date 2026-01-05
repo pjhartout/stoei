@@ -564,3 +564,78 @@ class CancelConfirmScreen(Screen[bool]):
     def action_confirm(self) -> None:
         """Confirm the cancellation (Enter key)."""
         self.dismiss(True)
+
+
+class NodeInfoScreen(Screen[None]):
+    """Modal screen to display node information."""
+
+    BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
+        ("escape", "close", "Close"),
+        ("q", "close", "Close"),
+    )
+
+    def __init__(
+        self,
+        node_name: str,
+        node_info: str,
+        error: str | None = None,
+    ) -> None:
+        """Initialize the node info screen.
+
+        Args:
+            node_name: The node name being displayed.
+            node_info: Formatted node information string.
+            error: Optional error message if node info couldn't be retrieved.
+        """
+        super().__init__()
+        self.node_name = node_name
+        self.node_info = node_info
+        self.error = error
+
+    def compose(self) -> ComposeResult:
+        """Create the node info display layout.
+
+        Yields:
+            The widgets that make up the node info display.
+        """
+        with Vertical():
+            with Container(id="node-info-header"):
+                yield Static("🖥️  [bold]Node Details[/bold]", id="node-info-title")
+                yield Static(f"Node: [bold cyan]{self.node_name}[/bold cyan]", id="node-info-subtitle")
+
+            if self.error:
+                with Container(id="error-container"):
+                    yield Static("⚠️  [bold]Error[/bold]", id="error-icon")
+                    yield Static(self.error, id="error-text")
+            else:
+                with VerticalScroll(id="node-info-content"):
+                    yield Static(self.node_info, id="node-info-text")
+
+            with Container(id="node-info-footer"):
+                yield Static(
+                    "[bold]↑↓[/bold] Scroll | [bold]Esc[/bold] Close",
+                    id="hint-text",
+                )
+                yield Button("✕ Close", variant="default", id="close-button")
+
+    def on_mount(self) -> None:
+        """Focus the content area on mount for scrolling."""
+        try:
+            content = self.query_one("#node-info-content", VerticalScroll)
+            content.focus()
+        except Exception:
+            # If no content (error case), focus the close button
+            self.query_one("#close-button", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button press.
+
+        Args:
+            event: The button press event.
+        """
+        if event.button.id == "close-button":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        """Close the modal."""
+        self.dismiss(None)
