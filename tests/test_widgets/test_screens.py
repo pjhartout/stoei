@@ -199,6 +199,27 @@ class TestLogViewerFileLoading:
             # Restore permissions for cleanup
             log_file.chmod(0o644)
 
+    def test_load_file_with_markup_special_chars(self, tmp_path: Path) -> None:
+        """Test that files with markup-like characters don't cause MarkupError."""
+        # Content that would cause MarkupError if markup is enabled
+        # This simulates the error from the user's report
+        problematic_content = (
+            "=3', 'model=test', 'loaders.train.batch_size=128', "
+            "'training.accumulate_grad_batches=4', 'training.schedule_type=cosine', "
+            "'training.validate_before_training=false', 'training.max_epochs=2', "
+            "'compute.devices=1', 'debug.enable=true', '+debug.limit_val_batches=0', "
+            "'logs.wandb.name=gpu_scaling_2g_2t1d', 'training.warmup_iters=500']\n"
+        )
+        log_file = tmp_path / "error.log"
+        log_file.write_text(problematic_content)
+
+        screen = LogViewerScreen(str(log_file), "stderr")
+        screen._load_file()
+
+        # Should load without error
+        assert screen.load_error is None
+        assert problematic_content.strip() in screen.file_contents
+
 
 class TestCancelConfirmScreen:
     """Tests for CancelConfirmScreen."""
@@ -540,3 +561,39 @@ class TestScreensInApp:
             assert close_btn is not None
             error_text = screen.query_one("#log-error-text")
             assert error_text is not None
+
+    async def test_log_viewer_screen_renders_markup_special_chars(self, tmp_path: Path) -> None:
+        """Test that LogViewerScreen renders files with markup-like characters without error."""
+        from textual.app import App
+        from textual.widgets import Static
+
+        # Content that would cause MarkupError if markup is enabled
+        problematic_content = (
+            "=3', 'model=test', 'loaders.train.batch_size=128', "
+            "'training.accumulate_grad_batches=4', 'training.schedule_type=cosine', "
+            "'training.validate_before_training=false', 'training.max_epochs=2', "
+            "'compute.devices=1', 'debug.enable=true', '+debug.limit_val_batches=0', "
+            "'logs.wandb.name=gpu_scaling_2g_2t1d', 'training.warmup_iters=500']\n"
+        )
+        log_file = tmp_path / "error.log"
+        log_file.write_text(problematic_content)
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stderr"))
+
+        app = TestApp()
+        # This should not raise MarkupError
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            # Verify the content widget exists and renders without MarkupError
+            content_widget = screen.query_one("#log-content-text", Static)
+            assert content_widget is not None
+            # The key test: rendering should not raise MarkupError
+            # This would have failed before the fix
+            rendered = content_widget.render()
+            assert rendered is not None
+            # Verify content is displayed
+            rendered_str = str(rendered)
+            assert problematic_content.strip() in rendered_str or problematic_content in rendered_str
