@@ -3,6 +3,7 @@
 from pathlib import Path
 from typing import ClassVar
 
+from rich.text import Text
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.screen import Screen
@@ -68,7 +69,7 @@ class LogViewerScreen(Screen[None]):
                     yield Static(f"⚠️  {self.load_error}", id="log-error-text")
             else:
                 with VerticalScroll(id="log-content-scroll"):
-                    yield Static(self.file_contents, id="log-content-text")
+                    yield Static(self.file_contents, id="log-content-text", markup=False)
 
             with Container(id="log-viewer-footer"):
                 yield Static(
@@ -221,7 +222,10 @@ class LogViewerScreen(Screen[None]):
             if self.load_error:
                 content_widget.update(f"⚠️  {self.load_error}")
             else:
-                content_widget.update(self.file_contents)
+                # Update with plain text to prevent MarkupError
+                # Use Text to ensure content is treated as plain text
+                plain_text = Text(self.file_contents)
+                content_widget.update(plain_text)
             self.app.notify("File reloaded")
             logger.info(f"Reloaded log file: {self.filepath}")
         except Exception as exc:
