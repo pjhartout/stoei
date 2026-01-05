@@ -141,29 +141,9 @@ DataTable > .datatable--odd-row {
     background: ansi_black;
 }
 
-/* Log panel - pinned to bottom */
-#log-panel {
-    width: 100%;
-    height: auto;
-    border: heavy ansi_magenta;
-    background: $background;
-    margin-top: 1;
-}
-
-#log-panel:focus-within {
-    border: heavy ansi_bright_magenta;
-}
-
-#log-title {
-    width: 100%;
-    height: auto;
-    background: ansi_black;
-    color: ansi_magenta;
-    padding: 0 1;
-}
-
-LogPane {
-    height: 4;
+/* LogPane styling for logs tab */
+#tab-logs-content LogPane {
+    height: 1fr;
     width: 100%;
     background: $background;
     scrollbar-background: ansi_black;

@@ -51,6 +51,14 @@ class TestTabContainer:
             tab_container.switch_tab("users")
             assert tab_container.active_tab == "users"
 
+    async def test_switch_tab_to_logs(self) -> None:
+        """Test switching to logs tab."""
+        app = TabTestApp()
+        async with app.run_test(size=(80, 24)):
+            tab_container = app.query_one("#tab-container", TabContainer)
+            tab_container.switch_tab("logs")
+            assert tab_container.active_tab == "logs"
+
     def test_switch_tab_same_tab(self, tab_container: TabContainer) -> None:
         """Test switching to the same tab does nothing."""
         initial_tab = tab_container.active_tab
@@ -108,6 +116,19 @@ class TestTabContainer:
             users_btn.press()
             await pilot.pause()
             assert tab_container.active_tab == "users"
+
+    async def test_clicking_logs_button_switches_tab(self) -> None:
+        """Test that clicking logs button switches to logs tab."""
+        app = TabTestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            tab_container = app.query_one("#tab-container", TabContainer)
+            assert tab_container.active_tab == "jobs"
+
+            # Click logs button
+            logs_btn = app.query_one("#tab-logs", Button)
+            logs_btn.press()
+            await pilot.pause()
+            assert tab_container.active_tab == "logs"
 
     async def test_jobs_button_removes_active_from_other_buttons(self) -> None:
         """Test that switching removes active class from other buttons."""
