@@ -6,13 +6,53 @@ Output goes to both stdout and file.
 
 import sys
 from collections.abc import Callable
+from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from loguru import logger
 
 if TYPE_CHECKING:
     import loguru
+
+
+class LoguruLevel(Protocol):
+    """Protocol for loguru level object."""
+
+    name: str
+
+
+class LoguruRecord(Protocol):
+    """Protocol for loguru record dictionary."""
+
+    def __getitem__(self, key: str) -> object:
+        """Allow dictionary-like access to record fields."""
+        ...
+
+    @property
+    def level(self) -> LoguruLevel:
+        """Log level object."""
+        ...
+
+    @property
+    def message(self) -> str:
+        """Log message string."""
+        ...
+
+    @property
+    def time(self) -> datetime:
+        """Log timestamp."""
+        ...
+
+
+class LoguruMessage(Protocol):
+    """Protocol for loguru message object passed to sinks."""
+
+    @property
+    def record(self) -> LoguruRecord:
+        """Access the log record."""
+        ...
+
 
 # Remove default handler
 logger.remove()

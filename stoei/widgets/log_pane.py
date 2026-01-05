@@ -1,10 +1,13 @@
 """Log pane widget for displaying application logs in the TUI."""
 
 from datetime import datetime
-from typing import ClassVar
+from typing import TYPE_CHECKING, ClassVar
 
 from rich.text import Text
 from textual.widgets import RichLog
+
+if TYPE_CHECKING:
+    pass
 
 
 class LogPane(RichLog):
@@ -90,14 +93,19 @@ class LogPane(RichLog):
             message: Loguru message object.
         """
         # Extract record from loguru message
+        # Type narrowing: we know this is a LoguruMessage at runtime
+        if not hasattr(message, "record"):
+            return
         record = message.record  # type: ignore[union-attr]
-        level = record["level"].name
-        msg = record["message"]
-        timestamp = record["time"].replace(tzinfo=None)
+        level_obj = record["level"]  # type: ignore[index]
+        level = level_obj.name  # type: ignore[union-attr]
+        msg = record["message"]  # type: ignore[index]
+        timestamp_obj = record["time"]  # type: ignore[index]
+        timestamp = timestamp_obj.replace(tzinfo=None)  # type: ignore[union-attr]
 
         # Call from app thread if available
         try:
-            self.app.call_from_thread(self.add_log, level, msg, timestamp)
+            self.app.call_from_thread(self.add_log, level, str(msg), timestamp)
         except RuntimeError:
             # Not in a thread context, call directly
-            self.add_log(level, msg, timestamp)
+            self.add_log(level, str(msg), timestamp)
