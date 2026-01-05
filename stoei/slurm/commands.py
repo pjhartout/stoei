@@ -3,7 +3,7 @@
 import subprocess
 
 from stoei.logger import get_logger
-from stoei.slurm.formatters import format_job_info, format_sacct_job_info
+from stoei.slurm.formatters import format_job_info, format_node_info, format_sacct_job_info
 from stoei.slurm.parser import (
     parse_sacct_job_output,
     parse_sacct_output,
@@ -477,6 +477,41 @@ def get_cluster_nodes() -> tuple[list[dict[str, str]], str | None]:
     return nodes, None
 
 
+def get_node_info(node_name: str) -> tuple[str, str | None]:
+    """Get detailed node information using scontrol.
+
+    Args:
+        node_name: The node name to query.
+
+    Returns:
+        Tuple of (formatted node info, optional error message).
+    """
+    try:
+        scontrol = resolve_executable("scontrol")
+        command = [scontrol, "show", "node", node_name]
+        logger.debug(f"Running command: {' '.join(command)}")
+
+        result, error = _run_subprocess_command(command, timeout=10, command_name="scontrol")
+        if error or result is None:
+            return "", error or "Unknown error"
+
+        if result.returncode != 0:
+            error_msg = result.stderr.strip() or "Node not found or invalid node name"
+            logger.warning(f"scontrol returned error for node {node_name}: {error_msg}")
+            return "", f"scontrol error: {error_msg}"
+
+        raw_output = result.stdout.strip()
+        if not raw_output:
+            return "", "No information available for this node"
+
+        logger.info(f"Successfully retrieved info for node {node_name}")
+        return format_node_info(raw_output), None
+
+    except Exception as exc:
+        logger.exception(f"Error getting node info for {node_name}")
+        return "", f"Error: {exc}"
+
+
 def get_all_users_jobs() -> list[tuple[str, ...]]:
     """Return all running/pending jobs from squeue (all users).
 
@@ -488,7 +523,7 @@ def get_all_users_jobs() -> list[tuple[str, ...]]:
         command = [
             squeue,
             "-o",
-            "%.10i|%.15j|%.8u|%.8T|%.10M|%.4D|%.12R|%t",
+            "%.10i|%.15j|%.8u|%.8T|%.10M|%.4D|%.12R|%b",
             "-a",  # Show all partitions
         ]
         logger.debug("Running squeue command for all users")
