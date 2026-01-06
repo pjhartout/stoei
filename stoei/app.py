@@ -666,6 +666,14 @@ class SlurmMonitor(App[None]):
             elif event.tab_name == "users":
                 # Always update when switching to users tab
                 self._update_user_overview()
+                # Focus the users table to enable arrow key navigation
+                try:
+                    user_tab = self.query_one("#user-overview", UserOverviewTab)
+                    users_table = user_tab.query_one("#users_table", DataTable)
+                    users_table.focus()
+                    logger.debug("Focused users table for arrow key navigation")
+                except Exception as exc:
+                    logger.debug(f"Failed to focus users table: {exc}")
             elif event.tab_name == "logs":
                 # Focus the log pane when switching to logs tab
                 try:
