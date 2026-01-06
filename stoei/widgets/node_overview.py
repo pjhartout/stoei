@@ -22,6 +22,7 @@ class NodeInfo:
     gpus_total: int
     partitions: str
     reason: str = ""
+    gpu_types: str = ""
 
     @property
     def cpu_usage_pct(self) -> float:
@@ -92,6 +93,7 @@ class NodeOverviewTab(VerticalScroll):
             "Mem%",
             "GPUs",
             "GPU%",
+            "GPU Types",
             "Partitions",
         )
         # If we already have nodes data, update the table
@@ -132,15 +134,21 @@ class NodeOverviewTab(VerticalScroll):
                 gpu_display = f"{node.gpus_alloc}/{node.gpus_total}"
                 gpu_pct = node.gpu_usage_pct
                 gpu_pct_str = self._format_pct(gpu_pct)
+                gpu_types_display = node.gpu_types if node.gpu_types else "N/A"
             else:
                 gpu_display = "N/A"
                 gpu_pct_str = "N/A"
+                gpu_types_display = "N/A"
 
             # Format state with color
             state_display = self._format_state(node.state)
 
+            # Ensure all fields have valid values
+            node_name = node.name if node.name else "N/A"
+            partitions_display = node.partitions if node.partitions else "N/A"
+
             nodes_table.add_row(
-                node.name,
+                node_name,
                 state_display,
                 cpu_display,
                 cpu_pct_str,
@@ -148,7 +156,8 @@ class NodeOverviewTab(VerticalScroll):
                 mem_pct_str,
                 gpu_display,
                 gpu_pct_str,
-                node.partitions,
+                gpu_types_display,
+                partitions_display,
             )
 
         # Restore cursor position

@@ -378,6 +378,62 @@ class TestCalculateClusterStats:
         # Generic "gpu" type is not tracked when specific types exist
         assert "gpu" not in stats.gpus_by_type
 
+    def test_parse_node_infos_with_gpu_types(self, app: SlurmMonitor) -> None:
+        """Test parsing node infos with GPU type information."""
+        app._cluster_nodes = [
+            {
+                "NodeName": "node01",
+                "State": "ALLOCATED",
+                "CPUTot": "16",
+                "CPUAlloc": "8",
+                "RealMemory": "65536",
+                "AllocMem": "32768",
+                "Gres": "gpu:a100:4",
+                "Partitions": "gpu",
+            },
+            {
+                "NodeName": "node02",
+                "State": "IDLE",
+                "CPUTot": "16",
+                "CPUAlloc": "0",
+                "RealMemory": "65536",
+                "AllocMem": "0",
+                "Gres": "gpu:h200:8(S:0-1)",
+                "Partitions": "gpu",
+            },
+            {
+                "NodeName": "node03",
+                "State": "MIXED",
+                "CPUTot": "16",
+                "CPUAlloc": "8",
+                "RealMemory": "65536",
+                "AllocMem": "32768",
+                "Gres": "gpu:4",
+                "AllocTRES": "cpu=8,mem=32768M,gres/gpu=2",
+                "Partitions": "gpu",
+            },
+        ]
+        node_infos = app._parse_node_infos()
+        assert len(node_infos) == 3
+
+        # Check first node with A100 GPUs
+        assert node_infos[0].name == "node01"
+        assert node_infos[0].gpus_total == 4
+        assert node_infos[0].gpus_alloc == 4
+        assert node_infos[0].gpu_types == "4x A100"
+
+        # Check second node with H200 GPUs
+        assert node_infos[1].name == "node02"
+        assert node_infos[1].gpus_total == 8
+        assert node_infos[1].gpus_alloc == 0
+        assert node_infos[1].gpu_types == "8x H200"
+
+        # Check third node with generic GPUs
+        assert node_infos[2].name == "node03"
+        assert node_infos[2].gpus_total == 4
+        assert node_infos[2].gpus_alloc == 2  # From AllocTRES for MIXED state
+        assert node_infos[2].gpu_types == "4x GPU"
+
     def test_calculate_stats_invalid_cpu_values(self, app: SlurmMonitor) -> None:
         """Test calculating stats with invalid CPU values."""
         app._cluster_nodes = [

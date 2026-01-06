@@ -507,7 +507,7 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.error(f"Failed to update node overview: {exc}", exc_info=True)
 
-    def _parse_node_infos(self) -> list[NodeInfo]:
+    def _parse_node_infos(self) -> list[NodeInfo]:  # noqa: PLR0912, PLR0915
         """Parse cluster node data into NodeInfo objects.
 
         Returns:
@@ -516,10 +516,15 @@ class SlurmMonitor(App[None]):
         node_infos: list[NodeInfo] = []
 
         for node_data in self._cluster_nodes:
-            node_name = node_data.get("NodeName", "")
-            state = node_data.get("State", "")
-            partitions = node_data.get("Partitions", "")
-            reason = node_data.get("Reason", "")
+            node_name = node_data.get("NodeName", "").strip()
+            # Skip nodes with empty names
+            if not node_name:
+                logger.warning("Skipping node with empty name")
+                continue
+
+            state = node_data.get("State", "").strip() or "UNKNOWN"
+            partitions = node_data.get("Partitions", "").strip() or "N/A"
+            reason = node_data.get("Reason", "").strip()
 
             # Parse CPUs
             cpus_total = int(node_data.get("CPUTot", "0") or "0")
@@ -531,19 +536,64 @@ class SlurmMonitor(App[None]):
             mem_total_gb = mem_total_mb / 1024.0
             mem_alloc_gb = mem_alloc_mb / 1024.0
 
-            # Parse GPUs
+            # Parse GPUs - use TRES data first (more accurate), fallback to Gres
             gpus_total = 0
             gpus_alloc = 0
+            gpu_types_str = ""
+
+            cfg_tres = node_data.get("CfgTRES", "")
+            alloc_tres = node_data.get("AllocTRES", "")
             gres = node_data.get("Gres", "")
-            if "gpu:" in gres.lower():
-                gpu_match = re.search(r"gpu(?::[^:,]+)*:(\d+)", gres, re.IGNORECASE)
-                if gpu_match:
-                    try:
-                        gpus_total = int(gpu_match.group(1))
-                        if "ALLOCATED" in state.upper() or "MIXED" in state.upper():
-                            gpus_alloc = gpus_total
-                    except ValueError:
-                        pass
+
+            # Parse total GPUs from CfgTRES (preferred) or Gres (fallback)
+            gpu_type_counts_dict: dict[str, int] = {}
+            has_specific_types = False
+
+            if cfg_tres:
+                # Parse CfgTRES for total GPUs by type
+                gpu_entries = self._parse_gpu_entries(cfg_tres)
+                has_specific_types = any(gpu_type != "gpu" for gpu_type, _ in gpu_entries)
+
+                # Process entries: only count specific types if they exist, otherwise count generic
+                for gpu_type, gpu_count in gpu_entries:
+                    if has_specific_types and gpu_type == "gpu":
+                        # Skip generic if we have specific types
+                        continue
+                    gpu_type_upper = gpu_type.upper()
+                    gpu_type_counts_dict[gpu_type_upper] = gpu_type_counts_dict.get(gpu_type_upper, 0) + gpu_count
+                    gpus_total += gpu_count
+            elif "gpu:" in gres.lower():
+                # Fallback to Gres field if no CfgTRES
+                # Format can be: gpu:a100:4, gpu:h200:8(S:0-1), gpu:4, or multiple types
+                gpu_type_counts: list[tuple[str, int]] = []
+
+                # Match patterns like: gpu:type:count or gpu:count
+                # Also handle socket info like (S:0-1)
+                gpu_pattern = re.compile(r"gpu(?::([^:(),]+))?:(\d+)(?:\([^)]+\))?", re.IGNORECASE)
+                for match in gpu_pattern.finditer(gres):
+                    gpu_type = match.group(1) if match.group(1) else "GPU"
+                    gpu_count = int(match.group(2))
+                    gpu_type_counts.append((gpu_type.upper(), gpu_count))
+                    gpus_total += gpu_count
+                    gpu_type_counts_dict[gpu_type.upper()] = gpu_type_counts_dict.get(gpu_type.upper(), 0) + gpu_count
+
+            # Format GPU types string (e.g., "8x H200" or "4x A100, 2x V100")
+            if gpu_type_counts_dict:
+                gpu_type_strs = [f"{count}x {gpu_type}" for gpu_type, count in sorted(gpu_type_counts_dict.items())]
+                gpu_types_str = ", ".join(gpu_type_strs)
+
+            # Parse allocated GPUs from AllocTRES or state-based logic
+            if alloc_tres:
+                # Parse AllocTRES for allocated GPUs
+                alloc_entries = self._parse_gpu_entries(alloc_tres)
+                for gpu_type, gpu_count in alloc_entries:
+                    if has_specific_types and gpu_type == "gpu":
+                        continue
+                    gpus_alloc += gpu_count
+            elif gpus_total > 0:
+                # Fallback to state-based allocation if no AllocTRES
+                if "ALLOCATED" in state.upper():
+                    gpus_alloc = gpus_total
 
             node_infos.append(
                 NodeInfo(
@@ -557,6 +607,7 @@ class SlurmMonitor(App[None]):
                     gpus_total=gpus_total,
                     partitions=partitions,
                     reason=reason,
+                    gpu_types=gpu_types_str,
                 )
             )
 
@@ -604,6 +655,14 @@ class SlurmMonitor(App[None]):
             elif event.tab_name == "nodes":
                 # Always update when switching to nodes tab
                 self._update_node_overview()
+                # Focus the nodes table to enable arrow key navigation
+                try:
+                    node_tab = self.query_one("#node-overview", NodeOverviewTab)
+                    nodes_table = node_tab.query_one("#nodes_table", DataTable)
+                    nodes_table.focus()
+                    logger.debug("Focused nodes table for arrow key navigation")
+                except Exception as exc:
+                    logger.debug(f"Failed to focus nodes table: {exc}")
             elif event.tab_name == "users":
                 # Always update when switching to users tab
                 self._update_user_overview()
