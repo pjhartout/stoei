@@ -4,7 +4,7 @@ import contextlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import ClassVar
+from typing import ClassVar, TypedDict
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
@@ -22,6 +22,17 @@ class UserStats:
     total_gpus: int
     total_nodes: int
     gpu_types: str = ""
+
+
+class _UserDataDict(TypedDict):
+    """Internal dictionary structure for aggregating user statistics."""
+
+    job_count: int
+    total_cpus: int
+    total_memory_gb: float
+    total_gpus: int
+    total_nodes: int
+    gpu_types: dict[str, int]
 
 
 class UserOverviewTab(VerticalScroll):
@@ -166,7 +177,135 @@ class UserOverviewTab(VerticalScroll):
         return cpus, memory_gb, gpu_entries
 
     @staticmethod
-    def aggregate_user_stats(jobs: list[tuple[str, ...]]) -> list[UserStats]:  # noqa: PLR0912
+    def _parse_node_count(nodes_str: str) -> int:
+        """Parse node count from nodes string.
+
+        Args:
+            nodes_str: Node string in format "4" or "4-8".
+
+        Returns:
+            Number of nodes.
+        """
+        range_parts_count = 2
+        try:
+            if "-" in nodes_str:
+                # Range like "4-8" means 5 nodes
+                parts = nodes_str.split("-")
+                if len(parts) == range_parts_count:
+                    start = int(parts[0])
+                    end = int(parts[1])
+                    return end - start + 1
+            return int(nodes_str)
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _process_gpu_entries(
+        user_data: _UserDataDict,
+        gpu_entries: list[tuple[str, int]],
+    ) -> None:
+        """Process GPU entries and update user data.
+
+        Args:
+            user_data: User data dictionary to update.
+            gpu_entries: List of (gpu_type, gpu_count) tuples.
+        """
+        # Check if we have specific types (non-generic)
+        has_specific_types = any(gpu_type != "gpu" for gpu_type, _ in gpu_entries)
+
+        # Process entries: only count specific types if they exist, otherwise count generic
+        for gpu_type, gpu_count in gpu_entries:
+            if has_specific_types and gpu_type == "gpu":
+                # Skip generic if we have specific types
+                continue
+            gpu_type_upper = gpu_type.upper()
+            gpu_types_dict = user_data["gpu_types"]
+            if isinstance(gpu_types_dict, dict):
+                gpu_types_dict[gpu_type_upper] += gpu_count
+            user_data["total_gpus"] += gpu_count
+
+    @staticmethod
+    def _process_job_for_user(
+        user_data: _UserDataDict,
+        job: tuple[str, ...],
+        nodes_index: int,
+        tres_index: int,
+    ) -> None:
+        """Process a single job and update user data.
+
+        Args:
+            user_data: User data dictionary to update.
+            job: Job tuple from squeue.
+            nodes_index: Index of nodes in job tuple.
+            tres_index: Index of TRES in job tuple.
+        """
+        user_data["job_count"] += 1
+
+        # Parse nodes (format: "4" or "4-8")
+        nodes_str = job[nodes_index].strip() if len(job) > nodes_index else "0"
+        node_count = UserOverviewTab._parse_node_count(nodes_str)
+        user_data["total_nodes"] += node_count
+
+        # Parse TRES for CPU, memory, and GPU information
+        tres_str = job[tres_index].strip() if len(job) > tres_index else ""
+        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+
+        # Use TRES CPU count if available, otherwise estimate from nodes
+        if cpus > 0:
+            user_data["total_cpus"] += cpus
+        else:
+            # Fallback: estimate CPUs from nodes (1 CPU per node)
+            user_data["total_cpus"] += node_count
+
+        # Add memory from TRES
+        user_data["total_memory_gb"] += memory_gb
+
+        # Process GPU entries
+        UserOverviewTab._process_gpu_entries(user_data, gpu_entries)
+
+    @staticmethod
+    def _format_gpu_types(gpu_types_dict: dict[str, int]) -> str:
+        """Format GPU types dictionary into a string.
+
+        Args:
+            gpu_types_dict: Dictionary mapping GPU type to count.
+
+        Returns:
+            Formatted string like "8x H200" or "4x A100, 2x V100".
+        """
+        if not gpu_types_dict:
+            return ""
+        gpu_type_strs = [f"{count}x {gpu_type}" for gpu_type, count in sorted(gpu_types_dict.items())]
+        return ", ".join(gpu_type_strs)
+
+    @staticmethod
+    def _convert_to_user_stats(user_data: dict[str, _UserDataDict]) -> list[UserStats]:
+        """Convert user data dictionary to list of UserStats objects.
+
+        Args:
+            user_data: Dictionary mapping username to user data.
+
+        Returns:
+            List of UserStats objects.
+        """
+        user_stats: list[UserStats] = []
+        for username, data in user_data.items():
+            gpu_types_str = UserOverviewTab._format_gpu_types(data["gpu_types"])
+            user_stats.append(
+                UserStats(
+                    username=username,
+                    job_count=int(data["job_count"]),
+                    total_cpus=int(data["total_cpus"]),
+                    total_memory_gb=data["total_memory_gb"],
+                    total_gpus=int(data["total_gpus"]),
+                    total_nodes=int(data["total_nodes"]),
+                    gpu_types=gpu_types_str,
+                )
+            )
+        return user_stats
+
+    @staticmethod
+    def aggregate_user_stats(jobs: list[tuple[str, ...]]) -> list[UserStats]:
         """Aggregate job data into user statistics.
 
         Args:
@@ -181,10 +320,10 @@ class UserOverviewTab(VerticalScroll):
         username_index = 2
         nodes_index = 5
         tres_index = 7  # Optional 8th field
-        range_parts_count = 2
 
-        user_data: dict[str, dict[str, int | float | dict[str, int]]] = defaultdict(
-            lambda: {
+        def _default_user_data() -> _UserDataDict:
+            """Create default user data dictionary."""
+            return {
                 "job_count": 0,
                 "total_cpus": 0,
                 "total_memory_gb": 0.0,
@@ -192,7 +331,8 @@ class UserOverviewTab(VerticalScroll):
                 "total_nodes": 0,
                 "gpu_types": defaultdict(int),
             }
-        )
+
+        user_data: dict[str, _UserDataDict] = defaultdict(_default_user_data)
 
         for job in jobs:
             if len(job) < min_job_fields:
@@ -202,77 +342,11 @@ class UserOverviewTab(VerticalScroll):
             if not username:
                 continue
 
-            user_data[username]["job_count"] += 1
-
-            # Parse nodes (format: "4" or "4-8")
-            nodes_str = job[nodes_index].strip() if len(job) > nodes_index else "0"
-            try:
-                if "-" in nodes_str:
-                    # Range like "4-8" means 5 nodes
-                    parts = nodes_str.split("-")
-                    if len(parts) == range_parts_count:
-                        start = int(parts[0])
-                        end = int(parts[1])
-                        node_count = end - start + 1
-                    else:
-                        node_count = int(nodes_str)
-                else:
-                    node_count = int(nodes_str)
-            except ValueError:
-                node_count = 0
-
-            user_data[username]["total_nodes"] += node_count
-
-            # Parse TRES for CPU, memory, and GPU information
-            tres_str = job[tres_index].strip() if len(job) > tres_index else ""
-            cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
-
-            # Use TRES CPU count if available, otherwise estimate from nodes
-            if cpus > 0:
-                user_data[username]["total_cpus"] += cpus
-            else:
-                # Fallback: estimate CPUs from nodes (1 CPU per node)
-                user_data[username]["total_cpus"] += node_count
-
-            # Add memory from TRES
-            user_data[username]["total_memory_gb"] += memory_gb
-
-            # Process GPU entries - track by type
-            # Check if we have specific types (non-generic)
-            has_specific_types = any(gpu_type != "gpu" for gpu_type, _ in gpu_entries)
-
-            # Process entries: only count specific types if they exist, otherwise count generic
-            for gpu_type, gpu_count in gpu_entries:
-                if has_specific_types and gpu_type == "gpu":
-                    # Skip generic if we have specific types
-                    continue
-                gpu_type_upper = gpu_type.upper()
-                gpu_types_dict = user_data[username]["gpu_types"]
-                if isinstance(gpu_types_dict, dict):
-                    gpu_types_dict[gpu_type_upper] += gpu_count
-                user_data[username]["total_gpus"] += gpu_count
-
-        # Convert to UserStats objects
-        user_stats: list[UserStats] = []
-        for username, data in user_data.items():
-            # Format GPU types string (e.g., "8x H200" or "4x A100, 2x V100")
-            gpu_types_dict = data["gpu_types"]
-            gpu_type_strs: list[str] = []
-            if isinstance(gpu_types_dict, dict) and gpu_types_dict:
-                for gpu_type, count in sorted(gpu_types_dict.items()):
-                    gpu_type_strs.append(f"{count}x {gpu_type}")
-            gpu_types_str = ", ".join(gpu_type_strs)
-
-            user_stats.append(
-                UserStats(
-                    username=username,
-                    job_count=int(data["job_count"]),
-                    total_cpus=int(data["total_cpus"]),
-                    total_memory_gb=data["total_memory_gb"],
-                    total_gpus=int(data["total_gpus"]),
-                    total_nodes=int(data["total_nodes"]),
-                    gpu_types=gpu_types_str,
-                )
+            UserOverviewTab._process_job_for_user(
+                user_data[username],
+                job,
+                nodes_index,
+                tres_index,
             )
 
-        return user_stats
+        return UserOverviewTab._convert_to_user_stats(user_data)
