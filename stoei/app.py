@@ -39,6 +39,9 @@ STYLES_DIR = Path(__file__).parent / "styles"
 # Refresh interval in seconds (increased for better performance)
 REFRESH_INTERVAL = 5.0
 
+# Minimum window width to show sidebar (sidebar is 30 wide, need space for content)
+MIN_WIDTH_FOR_SIDEBAR = 100
+
 
 class SlurmMonitor(App[None]):
     """Textual TUI app for monitoring SLURM jobs."""
@@ -75,6 +78,7 @@ class SlurmMonitor(App[None]):
         self._log_sink_id: int | None = None
         self._cluster_nodes: list[dict[str, str]] = []
         self._all_users_jobs: list[tuple[str, ...]] = []
+        self._is_narrow: bool = False
         logger.info("Initializing SlurmMonitor app")
 
     def compose(self) -> ComposeResult:
@@ -300,6 +304,9 @@ class SlurmMonitor(App[None]):
                 logger.debug("Focused jobs table")
             except Exception as exc:
                 logger.warning(f"Failed to focus jobs table: {exc}")
+
+        # Check initial window size and adjust layout
+        self._check_window_size()
 
     def _format_state(self, state: str, category: JobState) -> str:
         """Format job state with color coding.
@@ -927,6 +934,42 @@ class SlurmMonitor(App[None]):
         """
         if event.button.id == "cancel-job-btn":
             self.action_cancel_job()
+
+    def _check_window_size(self) -> None:
+        """Check window size and adjust layout accordingly."""
+        try:
+            width = self.size.width
+            # Hide sidebar if window is narrower than threshold
+            # Sidebar is 30 wide, so we need at least MIN_WIDTH_FOR_SIDEBAR for comfortable viewing
+            is_narrow = width < MIN_WIDTH_FOR_SIDEBAR
+
+            if is_narrow != self._is_narrow:
+                self._is_narrow = is_narrow
+                self._update_responsive_layout()
+
+        except Exception as exc:
+            logger.debug(f"Failed to check window size: {exc}")
+
+    def _update_responsive_layout(self) -> None:
+        """Update layout based on window size."""
+        try:
+            # Update sidebar visibility
+            sidebar = self.query_one("#cluster-sidebar", ClusterSidebar)
+            if self._is_narrow:
+                sidebar.add_class("narrow")
+            else:
+                sidebar.remove_class("narrow")
+
+            # Update tab compact mode
+            tab_container = self.query_one("#tab-container", TabContainer)
+            tab_container.set_compact(self._is_narrow)
+
+        except Exception as exc:
+            logger.debug(f"Failed to update responsive layout: {exc}")
+
+    def on_resize(self) -> None:
+        """Handle window resize events."""
+        self._check_window_size()
 
     async def action_quit(self) -> None:
         """Quit the application."""

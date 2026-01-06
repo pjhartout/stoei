@@ -147,3 +147,46 @@ class TestTabContainer:
             tab_container.switch_tab("jobs")
             assert "active" in jobs_btn.classes
             assert "active" not in nodes_btn.classes
+
+    async def test_set_compact_mode(self) -> None:
+        """Test setting compact mode for tabs."""
+        app = TabTestApp()
+        async with app.run_test(size=(80, 24)):
+            tab_container = app.query_one("#tab-container", TabContainer)
+
+            # Initially not compact
+            jobs_btn = app.query_one("#tab-jobs", Button)
+            assert jobs_btn.label == "📋 My Jobs"
+            assert "compact" not in jobs_btn.classes
+
+            # Set to compact
+            tab_container.set_compact(True)
+            assert jobs_btn.label == "Jobs"
+            assert "compact" in jobs_btn.classes
+
+            # Check all buttons are compact
+            nodes_btn = app.query_one("#tab-nodes", Button)
+            users_btn = app.query_one("#tab-users", Button)
+            logs_btn = app.query_one("#tab-logs", Button)
+            assert nodes_btn.label == "Nodes"
+            assert users_btn.label == "Users"
+            assert logs_btn.label == "Logs"
+
+            # Set back to normal
+            tab_container.set_compact(False)
+            assert jobs_btn.label == "📋 My Jobs"
+            assert "compact" not in jobs_btn.classes
+
+    async def test_set_compact_mode_idempotent(self) -> None:
+        """Test that setting compact mode multiple times doesn't cause issues."""
+        app = TabTestApp()
+        async with app.run_test(size=(80, 24)):
+            tab_container = app.query_one("#tab-container", TabContainer)
+
+            # Set to compact twice
+            tab_container.set_compact(True)
+            tab_container.set_compact(True)
+
+            jobs_btn = app.query_one("#tab-jobs", Button)
+            assert jobs_btn.label == "Jobs"
+            assert "compact" in jobs_btn.classes

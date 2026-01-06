@@ -54,6 +54,11 @@ Footer > .footer--description {
     height: 1fr;
 }
 
+/* Hide sidebar when window is too narrow (less than 100 characters) */
+#cluster-sidebar.narrow {
+    display: none;
+}
+
 #content-area {
     width: 1fr;
     height: 1fr;

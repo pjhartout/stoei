@@ -35,22 +35,24 @@ class TabContainer(Container):
     }
 
     #tab-header {
-        height: auto;
+        height: 1;
         width: 100%;
         border-bottom: heavy ansi_blue;
         background: ansi_black;
     }
 
     #tab-buttons {
-        height: auto;
+        height: 1;
         width: 100%;
     }
 
     .tab-button {
         width: 1fr;
+        height: 1;
         border: none;
         background: ansi_black;
         color: ansi_cyan;
+        padding: 0;
     }
 
     .tab-button:hover {
@@ -60,6 +62,12 @@ class TabContainer(Container):
     .tab-button.active {
         background: ansi_blue;
         color: ansi_bright_white;
+    }
+
+    /* Compact tabs for narrow windows */
+    .tab-button.compact {
+        min-width: 8;
+        padding: 0 1;
     }
 
     #tab-content {
@@ -73,6 +81,13 @@ class TabContainer(Container):
         super().__init__(*args, **kwargs)
         self._active_tab: str = "jobs"
         self._tabs: dict[str, Container] = {}
+        self._is_compact: bool = False
+        self._tab_labels: dict[str, tuple[str, str]] = {
+            "tab-jobs": ("📋 My Jobs", "Jobs"),
+            "tab-nodes": ("🖥️  Nodes", "Nodes"),
+            "tab-users": ("👥 Users", "Users"),
+            "tab-logs": ("📝 Logs", "Logs"),
+        }
 
     def compose(self) -> ComposeResult:
         """Create the tab container layout."""
@@ -143,3 +158,26 @@ class TabContainer(Container):
     def active_tab(self) -> str:
         """Get the currently active tab name."""
         return self._active_tab
+
+    def set_compact(self, compact: bool) -> None:
+        """Set compact mode for tabs (shorter labels, no emojis).
+
+        Args:
+            compact: Whether to use compact mode.
+        """
+        if self._is_compact == compact:
+            return
+
+        self._is_compact = compact
+
+        try:
+            for btn_id, (full_label, compact_label) in self._tab_labels.items():
+                btn = self.query_one(f"#{btn_id}", Button)
+                if compact:
+                    btn.label = compact_label
+                    btn.add_class("compact")
+                else:
+                    btn.label = full_label
+                    btn.remove_class("compact")
+        except Exception as exc:
+            logger.debug(f"Failed to update tab labels: {exc}")
