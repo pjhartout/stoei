@@ -1,5 +1,6 @@
 """SLURM command execution."""
 
+import re
 import subprocess
 
 from stoei.logger import get_logger
@@ -517,13 +518,14 @@ def get_all_users_jobs() -> list[tuple[str, ...]]:
 
     Returns:
         List of tuples containing job information (JobID, Name, User, State, Time, Nodes, NodeList, TRES).
+        TRES is fetched separately using scontrol since squeue doesn't support it in format.
     """
     try:
         squeue = resolve_executable("squeue")
         command = [
             squeue,
             "-o",
-            "%.10i|%.15j|%.8u|%.8T|%.10M|%.4D|%.12R|%b",
+            "%.10i|%.15j|%.8u|%.8T|%.10M|%.4D|%.12R",
             "-a",  # Show all partitions
         ]
         logger.debug("Running squeue command for all users")
@@ -551,4 +553,49 @@ def get_all_users_jobs() -> list[tuple[str, ...]]:
 
     jobs = parse_squeue_output(result.stdout)
     logger.debug(f"Found {len(jobs)} running/pending jobs (all users)")
-    return jobs
+
+    # Fetch TRES for each job using scontrol (squeue doesn't support TRES in format)
+    # Minimum fields: JobID, Name, User, State, Time, Nodes, NodeList
+    min_job_fields = 7
+    jobs_with_tres: list[tuple[str, ...]] = []
+    scontrol = resolve_executable("scontrol")
+
+    for job in jobs:
+        if len(job) < min_job_fields:
+            jobs_with_tres.append((*job, ""))  # Add empty TRES
+            continue
+
+        job_id = job[0].strip()
+        # Extract base job ID (remove array task suffix for scontrol)
+        base_job_id = job_id.split("_")[0]
+
+        # Get TRES from scontrol
+        tres = ""
+        try:
+            scontrol_cmd = [scontrol, "show", "jobid", base_job_id]
+            scontrol_result = subprocess.run(  # noqa: S603
+                scontrol_cmd,
+                capture_output=True,
+                text=True,
+                timeout=2,
+                check=False,
+            )
+            if scontrol_result.returncode == 0:
+                # Parse AllocTRES or ReqTRES from scontrol output
+                output = scontrol_result.stdout
+                # Prefer AllocTRES (for running jobs), fallback to ReqTRES (for pending)
+                alloc_match = re.search(r"AllocTRES=([^\s]+)", output)
+                if alloc_match and alloc_match.group(1) != "(null)":
+                    tres = alloc_match.group(1)
+                else:
+                    req_match = re.search(r"ReqTRES=([^\s]+)", output)
+                    if req_match:
+                        tres = req_match.group(1)
+        except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
+            # If scontrol fails, just use empty TRES
+            pass
+
+        jobs_with_tres.append((*job, tres))
+
+    logger.debug(f"Added TRES information for {len(jobs_with_tres)} jobs")
+    return jobs_with_tres

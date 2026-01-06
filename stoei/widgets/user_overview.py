@@ -21,6 +21,7 @@ class UserStats:
     total_memory_gb: float
     total_gpus: int
     total_nodes: int
+    gpu_types: str = ""
 
 
 class UserOverviewTab(VerticalScroll):
@@ -67,6 +68,7 @@ class UserOverviewTab(VerticalScroll):
             "CPUs",
             "Memory (GB)",
             "GPUs",
+            "GPU Types",
             "Nodes",
         )
         # If we already have users data, update the table
@@ -96,12 +98,14 @@ class UserOverviewTab(VerticalScroll):
         self.users = sorted_users
 
         for user in sorted_users:
+            gpu_types_display = user.gpu_types if user.gpu_types else "N/A"
             users_table.add_row(
                 user.username,
                 str(user.job_count),
                 str(user.total_cpus),
                 f"{user.total_memory_gb:.1f}",
                 str(user.total_gpus) if user.total_gpus > 0 else "0",
+                gpu_types_display,
                 str(user.total_nodes),
             )
 
@@ -111,21 +115,23 @@ class UserOverviewTab(VerticalScroll):
             users_table.move_cursor(row=new_row)
 
     @staticmethod
-    def _parse_tres(tres_str: str) -> tuple[int, float, int]:
-        """Parse TRES string to extract CPU, memory (GB), and GPU counts.
+    def _parse_tres(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
+        """Parse TRES string to extract CPU, memory (GB), and GPU entries.
 
         Args:
-            tres_str: TRES string in format like "cpu=32,mem=256G,node=4,gres/gpu=16".
+            tres_str: TRES string in format like "cpu=32,mem=256G,node=4,gres/gpu=16"
+                or "cpu=32,mem=256G,node=4,gres/gpu:h200=8".
 
         Returns:
-            Tuple of (cpus, memory_gb, gpus).
+            Tuple of (cpus, memory_gb, gpu_entries) where gpu_entries is a list of
+            (gpu_type, gpu_count) tuples.
         """
         cpus = 0
         memory_gb = 0.0
-        gpus = 0
+        gpu_entries: list[tuple[str, int]] = []
 
         if not tres_str or tres_str.strip() == "":
-            return cpus, memory_gb, gpus
+            return cpus, memory_gb, gpu_entries
 
         # Parse CPU count
         cpu_match = re.search(r"cpu=(\d+)", tres_str)
@@ -146,16 +152,21 @@ class UserOverviewTab(VerticalScroll):
             except ValueError:
                 pass
 
-        # Parse GPUs (format: gres/gpu=X)
-        gpu_match = re.search(r"gres/gpu=(\d+)", tres_str, re.IGNORECASE)
-        if gpu_match:
-            with contextlib.suppress(ValueError):
-                gpus = int(gpu_match.group(1))
+        # Parse GPUs - handle both generic (gres/gpu=X) and typed (gres/gpu:type=X) formats
+        # Pattern matches: gres/gpu:type=X or gres/gpu=X
+        gpu_pattern = re.compile(r"gres/gpu(?::([^=,]+))?=(\d+)", re.IGNORECASE)
+        for match in gpu_pattern.finditer(tres_str):
+            gpu_type = match.group(1) if match.group(1) else "gpu"
+            try:
+                gpu_count = int(match.group(2))
+                gpu_entries.append((gpu_type, gpu_count))
+            except ValueError:
+                pass
 
-        return cpus, memory_gb, gpus
+        return cpus, memory_gb, gpu_entries
 
     @staticmethod
-    def aggregate_user_stats(jobs: list[tuple[str, ...]]) -> list[UserStats]:
+    def aggregate_user_stats(jobs: list[tuple[str, ...]]) -> list[UserStats]:  # noqa: PLR0912
         """Aggregate job data into user statistics.
 
         Args:
@@ -172,13 +183,14 @@ class UserOverviewTab(VerticalScroll):
         tres_index = 7  # Optional 8th field
         range_parts_count = 2
 
-        user_data: dict[str, dict[str, int | float]] = defaultdict(
+        user_data: dict[str, dict[str, int | float | dict[str, int]]] = defaultdict(
             lambda: {
                 "job_count": 0,
                 "total_cpus": 0,
                 "total_memory_gb": 0.0,
                 "total_gpus": 0,
                 "total_nodes": 0,
+                "gpu_types": defaultdict(int),
             }
         )
 
@@ -213,7 +225,7 @@ class UserOverviewTab(VerticalScroll):
 
             # Parse TRES for CPU, memory, and GPU information
             tres_str = job[tres_index].strip() if len(job) > tres_index else ""
-            cpus, memory_gb, gpus = UserOverviewTab._parse_tres(tres_str)
+            cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
 
             # Use TRES CPU count if available, otherwise estimate from nodes
             if cpus > 0:
@@ -222,13 +234,35 @@ class UserOverviewTab(VerticalScroll):
                 # Fallback: estimate CPUs from nodes (1 CPU per node)
                 user_data[username]["total_cpus"] += node_count
 
-            # Add memory and GPUs from TRES
+            # Add memory from TRES
             user_data[username]["total_memory_gb"] += memory_gb
-            user_data[username]["total_gpus"] += gpus
+
+            # Process GPU entries - track by type
+            # Check if we have specific types (non-generic)
+            has_specific_types = any(gpu_type != "gpu" for gpu_type, _ in gpu_entries)
+
+            # Process entries: only count specific types if they exist, otherwise count generic
+            for gpu_type, gpu_count in gpu_entries:
+                if has_specific_types and gpu_type == "gpu":
+                    # Skip generic if we have specific types
+                    continue
+                gpu_type_upper = gpu_type.upper()
+                gpu_types_dict = user_data[username]["gpu_types"]
+                if isinstance(gpu_types_dict, dict):
+                    gpu_types_dict[gpu_type_upper] += gpu_count
+                user_data[username]["total_gpus"] += gpu_count
 
         # Convert to UserStats objects
         user_stats: list[UserStats] = []
         for username, data in user_data.items():
+            # Format GPU types string (e.g., "8x H200" or "4x A100, 2x V100")
+            gpu_types_dict = data["gpu_types"]
+            gpu_type_strs: list[str] = []
+            if isinstance(gpu_types_dict, dict) and gpu_types_dict:
+                for gpu_type, count in sorted(gpu_types_dict.items()):
+                    gpu_type_strs.append(f"{count}x {gpu_type}")
+            gpu_types_str = ", ".join(gpu_type_strs)
+
             user_stats.append(
                 UserStats(
                     username=username,
@@ -237,6 +271,7 @@ class UserOverviewTab(VerticalScroll):
                     total_memory_gb=data["total_memory_gb"],
                     total_gpus=int(data["total_gpus"]),
                     total_nodes=int(data["total_nodes"]),
+                    gpu_types=gpu_types_str,
                 )
             )
 
