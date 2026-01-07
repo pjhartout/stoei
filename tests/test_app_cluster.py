@@ -43,6 +43,7 @@ class TestAppClusterIntegration:
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
+            patch.object(app, "_start_initial_load_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 # Mock cluster nodes data
