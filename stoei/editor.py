@@ -9,23 +9,28 @@ from stoei.logger import get_logger
 
 logger = get_logger(__name__)
 
-# Default editors to try if $EDITOR is not set
-DEFAULT_EDITORS = ["less", "more", "vim", "nano", "vi", "cat"]
+# Default editors to try if $EDITOR is not set or not found
+# Prioritize vim and nano as they are common interactive editors
+DEFAULT_EDITORS = ["vim", "nano", "vi"]
 
 
 def get_editor() -> str | None:
     """Get the user's preferred editor.
 
     Checks $EDITOR environment variable first, then falls back to common editors.
+    If $EDITOR is set but not found, warns and falls back to vim or nano.
 
     Returns:
         Path to editor executable, or None if no editor found.
     """
     # First check $EDITOR environment variable
     editor = os.environ.get("EDITOR")
-    if editor and shutil.which(editor):
-        logger.debug(f"Using $EDITOR: {editor}")
-        return editor
+    if editor:
+        if shutil.which(editor):
+            logger.debug(f"Using $EDITOR: {editor}")
+            return editor
+        # $EDITOR is set but not found - warn and fall back
+        logger.warning(f"$EDITOR is set to '{editor}' but not found, using fallback editor")
 
     # Fall back to common editors
     for ed in DEFAULT_EDITORS:
@@ -75,7 +80,7 @@ def open_in_editor(filepath: str | None) -> tuple[bool, str]:  # noqa: PLR0911
     # Get editor
     editor = get_editor()
     if not editor:
-        error_msg = "No editor available. Set $EDITOR environment variable."
+        error_msg = "No editor available. Set $EDITOR environment variable or install vim/nano."
         logger.error(error_msg)
         return False, error_msg
 
