@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import ClassVar
 
 from rich.markup import escape
-from textual.app import ComposeResult
+from textual.app import ComposeResult, SuspendNotSupported
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Input, Static
@@ -117,8 +117,10 @@ class LogViewerScreen(Screen[None]):
         numbered_lines = []
         for i, line in enumerate(lines):
             line_num = start_line + i
-            # Use dim style for line numbers, content is already escaped
-            numbered_lines.append(f"[dim]{line_num:>{width}}[/dim] │ {line}")
+            # Defensive escape: ensure line content is safe for Rich markup
+            # escape() is idempotent, so already-escaped content is unchanged
+            safe_line = escape(line)
+            numbered_lines.append(f"[dim]{line_num:>{width}}[/dim] │ {safe_line}")
 
         return "\n".join(numbered_lines)
 
@@ -290,13 +292,18 @@ class LogViewerScreen(Screen[None]):
             return
 
         logger.info(f"Opening {self.filepath} in external editor")
-        with self.app.suspend():
-            success, message = open_in_editor(self.filepath)
+        try:
+            with self.app.suspend():
+                success, message = open_in_editor(self.filepath)
 
-        if success:
-            self.app.notify("Opened in editor")
-        else:
-            self.app.notify(f"Failed: {message}", severity="error")
+            if success:
+                self.app.notify("Opened in editor")
+            else:
+                self.app.notify(f"Failed: {message}", severity="error")
+        except SuspendNotSupported:
+            error_msg = "Cannot suspend app in this environment (terminal not available)"
+            logger.warning(error_msg)
+            self.app.notify(error_msg, severity="error")
 
     def action_scroll_top(self) -> None:
         """Scroll to the top of the log content."""
@@ -462,7 +469,10 @@ class LogViewerScreen(Screen[None]):
             pattern = re.compile(re.escape(self._search_term), re.IGNORECASE)
 
             def highlight_match(match: re.Match[str]) -> str:
-                return f"[on yellow]{match.group()}[/on yellow]"
+                # Re-escape the matched text to prevent breaking Rich markup
+                # This handles cases where the match contains markup-like characters
+                matched_text = escape(match.group())
+                return f"[on yellow]{matched_text}[/on yellow]"
 
             highlighted_content = pattern.sub(highlight_match, escaped_content)
 
