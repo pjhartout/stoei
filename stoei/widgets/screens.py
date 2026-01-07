@@ -1,5 +1,6 @@
 """Full-screen screens for job information display."""
 
+import contextlib
 from pathlib import Path
 from typing import ClassVar
 
@@ -556,7 +557,11 @@ class CancelConfirmScreen(Screen[bool]):
 
     def on_mount(self) -> None:
         """Focus the abort button by default (safer option)."""
-        self.query_one("#abort-cancel-btn", Button).focus()
+        try:
+            self.query_one("#abort-cancel-btn", Button).focus()
+        except Exception as exc:
+            # Widget may not be ready yet, ignore
+            logger.debug(f"Could not focus abort button on mount: {exc}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle button press."""
@@ -569,56 +574,75 @@ class CancelConfirmScreen(Screen[bool]):
         """Abort the cancellation (Escape key)."""
         self.dismiss(False)
 
+    def action_confirm(self) -> None:
+        """Confirm the cancellation (Enter key)."""
+        self.action_activate_focused()
+
     def action_activate_focused(self) -> None:
         """Activate the currently focused button (Enter key)."""
-        focused = self.focused
-        if isinstance(focused, Button):
-            focused.press()
-        else:
-            # Fallback: if nothing is focused, default to abort (safer)
-            self.dismiss(False)
+        try:
+            focused = self.focused
+            if isinstance(focused, Button):
+                focused.press()
+            else:
+                # Fallback: if nothing is focused, default to abort (safer)
+                self.dismiss(False)
+        except Exception as exc:
+            # Screen may be dismissing or button may not exist
+            logger.debug(f"Could not activate focused button - screen may be dismissing: {exc}")
+            # Default to abort (safer option)
+            with contextlib.suppress(Exception):
+                self.dismiss(False)
 
     def action_focus_next(self) -> None:
         """Focus the next button (right arrow or tab)."""
-        buttons = [
-            self.query_one("#confirm-cancel-btn", Button),
-            self.query_one("#abort-cancel-btn", Button),
-        ]
-        focused = self.focused
-        current_idx = None
-        for idx, btn in enumerate(buttons):
-            if btn is focused:
-                current_idx = idx
-                break
+        try:
+            buttons = [
+                self.query_one("#confirm-cancel-btn", Button),
+                self.query_one("#abort-cancel-btn", Button),
+            ]
+            focused = self.focused
+            current_idx = None
+            for idx, btn in enumerate(buttons):
+                if btn is focused:
+                    current_idx = idx
+                    break
 
-        if current_idx is None:
-            # No button focused, focus the first one
-            buttons[0].focus()
-        else:
-            # Focus the next button (wraps around)
-            next_idx = (current_idx + 1) % len(buttons)
-            buttons[next_idx].focus()
+            if current_idx is None:
+                # No button focused, focus the first one
+                buttons[0].focus()
+            else:
+                # Focus the next button (wraps around)
+                next_idx = (current_idx + 1) % len(buttons)
+                buttons[next_idx].focus()
+        except Exception as exc:
+            # Screen may be dismissing or widgets may not exist
+            logger.debug(f"Could not focus next button - screen may be dismissing: {exc}")
 
     def action_focus_previous(self) -> None:
         """Focus the previous button (left arrow or shift+tab)."""
-        buttons = [
-            self.query_one("#confirm-cancel-btn", Button),
-            self.query_one("#abort-cancel-btn", Button),
-        ]
-        focused = self.focused
-        current_idx = None
-        for idx, btn in enumerate(buttons):
-            if btn is focused:
-                current_idx = idx
-                break
+        try:
+            buttons = [
+                self.query_one("#confirm-cancel-btn", Button),
+                self.query_one("#abort-cancel-btn", Button),
+            ]
+            focused = self.focused
+            current_idx = None
+            for idx, btn in enumerate(buttons):
+                if btn is focused:
+                    current_idx = idx
+                    break
 
-        if current_idx is None:
-            # No button focused, focus the last one
-            buttons[-1].focus()
-        else:
-            # Focus the previous button (wraps around)
-            prev_idx = (current_idx - 1) % len(buttons)
-            buttons[prev_idx].focus()
+            if current_idx is None:
+                # No button focused, focus the last one
+                buttons[-1].focus()
+            else:
+                # Focus the previous button (wraps around)
+                prev_idx = (current_idx - 1) % len(buttons)
+                buttons[prev_idx].focus()
+        except Exception as exc:
+            # Screen may be dismissing or widgets may not exist
+            logger.debug(f"Could not focus previous button - screen may be dismissing: {exc}")
 
 
 class NodeInfoScreen(Screen[None]):

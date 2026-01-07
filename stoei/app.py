@@ -911,14 +911,22 @@ class SlurmMonitor(App[None]):
 
             def handle_confirmation(confirmed: bool | None) -> None:
                 if confirmed is True:
-                    success, error = cancel_job(job_id)
-                    if success:
-                        logger.info(f"Successfully cancelled job {job_id}")
-                        self.notify(f"Job {job_id} cancelled", severity="information")
-                        self._start_refresh_worker()  # Refresh to update state
-                    else:
-                        logger.error(f"Failed to cancel job {job_id}: {error}")
-                        self.notify(f"Failed to cancel: {error}", severity="error")
+                    try:
+                        success, error = cancel_job(job_id)
+                        if success:
+                            logger.info(f"Successfully cancelled job {job_id}")
+                            self.notify(f"Job {job_id} cancelled", severity="information")
+                            try:
+                                self._start_refresh_worker()  # Refresh to update state
+                            except Exception:
+                                logger.exception(f"Failed to start refresh worker after cancelling job {job_id}")
+                                # Don't fail the cancellation if refresh fails
+                        else:
+                            logger.error(f"Failed to cancel job {job_id}: {error}")
+                            self.notify(f"Failed to cancel: {error}", severity="error")
+                    except Exception as exc:
+                        logger.exception(f"Unexpected error while cancelling job {job_id}")
+                        self.notify(f"Unexpected error cancelling job: {exc}", severity="error")
 
             self.push_screen(CancelConfirmScreen(job_id, job_name), handle_confirmation)
 

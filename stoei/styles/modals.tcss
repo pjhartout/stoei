@@ -338,12 +338,14 @@ CancelConfirmScreen #cancel-button-row {
     width: 100%;
     height: auto;
     layout: horizontal;
+    align: center middle;
     margin-top: 1;
 }
 
 CancelConfirmScreen Button {
     width: 1fr;
     margin: 0 1;
+    height: 3;
 }
 
 CancelConfirmScreen #confirm-cancel-btn {
