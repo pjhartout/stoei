@@ -30,7 +30,7 @@ uvx git+https://github.com/pjhartout/stoei.git
 
 **Run a specific version:**
 ```bash
-uvx git+https://github.com/pjhartout/stoei.git@v0.2.3
+uvx git+https://github.com/pjhartout/stoei.git@v0.2.7
 ```
 
 **Benefits of using `uvx`:**
@@ -65,7 +65,7 @@ stoei
 
 **Install a specific version:**
 ```bash
-uv tool install git+https://github.com/pjhartout/stoei.git@v0.2.3
+uv tool install git+https://github.com/pjhartout/stoei.git@v0.2.7
 ```
 
 **Update to the latest version:**
@@ -93,7 +93,7 @@ pip install git+https://github.com/pjhartout/stoei.git
 Or install a specific version (see [releases](https://github.com/pjhartout/stoei/releases) for available versions):
 
 ```bash
-pip install git+https://github.com/pjhartout/stoei.git@v0.2.3
+pip install git+https://github.com/pjhartout/stoei.git@v0.2.7
 ```
 
 ### Using uv in a project
@@ -239,27 +239,38 @@ uv run ty check stoei/
 stoei/
 ├── stoei/
 │   ├── __init__.py
-│   ├── __main__.py          # Entry point
-│   ├── app.py                # Main Textual application
-│   ├── editor.py             # External editor integration
-│   ├── logging.py            # Loguru configuration
+│   ├── __main__.py              # Entry point
+│   ├── app.py                    # Main Textual application
+│   ├── editor.py                 # External editor integration
+│   ├── logger.py                 # Loguru configuration
 │   ├── slurm/
-│   │   ├── commands.py       # SLURM command execution
-│   │   ├── formatters.py     # Output formatting
-│   │   ├── parser.py         # Output parsing
-│   │   └── validation.py     # Input validation
+│   │   ├── cache.py              # Job caching and state management
+│   │   ├── commands.py           # SLURM command execution
+│   │   ├── formatters.py         # Output formatting
+│   │   ├── parser.py             # Output parsing
+│   │   └── validation.py         # Input validation
 │   ├── styles/
-│   │   ├── app.tcss          # Main app styles
-│   │   ├── modals.tcss       # Modal screen styles
-│   │   └── theme.py          # Theme configuration
+│   │   ├── app.tcss              # Main app styles
+│   │   ├── modals.tcss           # Modal screen styles
+│   │   └── theme.py              # Theme configuration
 │   └── widgets/
-│       ├── job_stats.py      # Statistics widget
-│       ├── log_pane.py       # Log display widget
-│       └── screens.py        # Modal screens
+│       ├── cluster_sidebar.py    # Cluster statistics sidebar
+│       ├── job_stats.py          # Job statistics widget
+│       ├── log_pane.py           # Log display widget
+│       ├── node_overview.py      # Node overview tab
+│       ├── screens.py            # Modal screens
+│       ├── slurm_error_screen.py # SLURM unavailable screen
+│       ├── tabs.py               # Tab container and management
+│       └── user_overview.py      # User overview tab
 ├── tests/
-│   ├── conftest.py           # Shared fixtures
-│   ├── test_slurm/           # SLURM module tests
-│   └── test_widgets/         # Widget tests
+│   ├── conftest.py               # Shared fixtures
+│   ├── mocks/                    # Mock SLURM executables
+│   ├── test_slurm/               # SLURM module tests
+│   └── test_widgets/             # Widget tests
+├── scripts/
+│   ├── release.py                # Release automation script
+│   ├── run_with_mocks.sh         # Run app with mock data
+│   └── stoei-dev                 # Development helper script
 ├── pyproject.toml
 └── README.md
 ```
@@ -273,7 +284,7 @@ Logs are stored in `~/.stoei/logs/` and kept for 1 week. Each day gets a new log
 New releases are created automatically when tags are pushed to the repository. You can install any release version by specifying the tag:
 
 ```bash
-pip install git+https://github.com/pjhartout/stoei.git@v0.2.3
+pip install git+https://github.com/pjhartout/stoei.git@v0.2.7
 ```
 
 See all available releases on the [releases page](https://github.com/pjhartout/stoei/releases).
