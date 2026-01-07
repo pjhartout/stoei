@@ -141,6 +141,29 @@ class JobCache:
         running_jobs = get_running_jobs()
         history_jobs, total_jobs, total_requeues, max_requeues = get_job_history()
 
+        # Build from fetched data
+        self._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+
+    def _build_from_data(
+        self,
+        running_jobs: list[tuple[str, ...]],
+        history_jobs: list[tuple[str, ...]],
+        total_jobs: int,
+        total_requeues: int,
+        max_requeues: int,
+    ) -> None:
+        """Build job cache from pre-fetched data.
+
+        This method is useful when data has already been fetched (e.g., during
+        step-by-step loading) to avoid duplicate SLURM command calls.
+
+        Args:
+            running_jobs: List of running/pending job tuples from squeue.
+            history_jobs: List of historical job tuples from sacct.
+            total_jobs: Total number of jobs in history.
+            total_requeues: Total number of job requeues.
+            max_requeues: Maximum requeues for any single job.
+        """
         # Build job list
         jobs: list[Job] = []
         running_job_ids: set[str] = set()
@@ -203,7 +226,7 @@ class JobCache:
             self._running_count = running_count
             self._pending_count = pending_count
 
-        logger.debug(f"Cache refreshed: {len(jobs)} jobs ({running_count} running, {pending_count} pending)")
+        logger.debug(f"Cache built: {len(jobs)} jobs ({running_count} running, {pending_count} pending)")
 
     @property
     def jobs(self) -> list[Job]:

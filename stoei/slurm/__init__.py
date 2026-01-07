@@ -1,7 +1,13 @@
 """SLURM interaction modules."""
 
 from stoei.slurm.cache import Job, JobCache, JobState
-from stoei.slurm.commands import cancel_job, get_job_history, get_job_info, get_running_jobs
+from stoei.slurm.commands import (
+    cancel_job,
+    get_all_running_jobs,
+    get_job_history,
+    get_job_info,
+    get_running_jobs,
+)
 from stoei.slurm.formatters import format_job_info, format_value
 from stoei.slurm.parser import parse_scontrol_output
 from stoei.slurm.validation import get_current_username, validate_job_id, validate_username
@@ -13,6 +19,7 @@ __all__ = [
     "cancel_job",
     "format_job_info",
     "format_value",
+    "get_all_running_jobs",
     "get_current_username",
     "get_job_history",
     "get_job_info",

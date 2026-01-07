@@ -1,6 +1,5 @@
 """SLURM command execution."""
 
-import re
 import subprocess
 import time
 
@@ -400,8 +399,11 @@ def get_running_jobs() -> list[tuple[str, ...]]:
     return jobs
 
 
-def get_job_history() -> tuple[list[tuple[str, ...]], int, int, int]:
-    """Return job history for the last 30 days (sacct).
+def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int]:
+    """Return job history for the last N days (sacct).
+
+    Args:
+        days: Number of days to look back for job history (default: 7).
 
     Returns:
         Tuple of (jobs list, total jobs count, total requeues, max requeues).
@@ -415,17 +417,17 @@ def get_job_history() -> tuple[list[tuple[str, ...]], int, int, int]:
             username,
             "--format=JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList",
             "-S",
-            "now-30days",
+            f"now-{days}days",
             "-X",
             "-P",
         ]
-        logger.debug(f"Running sacct command for user {username}")
+        logger.debug(f"Running sacct command for user {username} (last {days} days)")
 
         result = subprocess.run(  # noqa: S603
             command,
             capture_output=True,
             text=True,
-            timeout=5,
+            timeout=10,
             check=False,
         )
     except (FileNotFoundError, ValidationError):
@@ -443,7 +445,7 @@ def get_job_history() -> tuple[list[tuple[str, ...]], int, int, int]:
         return [], 0, 0, 0
 
     jobs, total_jobs, total_requeues, max_requeues = parse_sacct_output(result.stdout)
-    logger.debug(f"Found {total_jobs} jobs in history with {total_requeues} total requeues")
+    logger.debug(f"Found {total_jobs} jobs in history (last {days} days) with {total_requeues} total requeues")
     return jobs, total_jobs, total_requeues, max_requeues
 
 
@@ -562,89 +564,113 @@ def get_node_info(node_name: str) -> tuple[str, str | None]:
         return "", f"Error: {exc}"
 
 
-def get_all_users_jobs() -> list[tuple[str, ...]]:
-    """Return all running/pending jobs from squeue (all users).
+# Fixed-width column positions for squeue -O format
+# Format: JobID:20,Name:20,UserName:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
+_SQUEUE_COL_JOBID_END = 20
+_SQUEUE_COL_NAME_END = 40
+_SQUEUE_COL_USER_END = 55
+_SQUEUE_COL_STATE_END = 65
+_SQUEUE_COL_TIME_END = 77
+_SQUEUE_COL_NODES_END = 83
+_SQUEUE_COL_NODELIST_END = 113
+
+
+def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
+    """Parse a fixed-width squeue output line into a tuple.
+
+    Args:
+        line: Single line from squeue -O output.
+
+    Returns:
+        Tuple of (job_id, name, user, state, time_used, num_nodes, node_list, tres) or None.
+    """
+    if len(line) < _SQUEUE_COL_JOBID_END:
+        return None
+
+    job_id = line[0:_SQUEUE_COL_JOBID_END].strip()
+    if not job_id:
+        return None
+
+    name = line[_SQUEUE_COL_JOBID_END:_SQUEUE_COL_NAME_END].strip() if len(line) > _SQUEUE_COL_JOBID_END else ""
+    user = line[_SQUEUE_COL_NAME_END:_SQUEUE_COL_USER_END].strip() if len(line) > _SQUEUE_COL_NAME_END else ""
+    state = line[_SQUEUE_COL_USER_END:_SQUEUE_COL_STATE_END].strip() if len(line) > _SQUEUE_COL_USER_END else ""
+    time_used = line[_SQUEUE_COL_STATE_END:_SQUEUE_COL_TIME_END].strip() if len(line) > _SQUEUE_COL_STATE_END else ""
+    num_nodes = line[_SQUEUE_COL_TIME_END:_SQUEUE_COL_NODES_END].strip() if len(line) > _SQUEUE_COL_TIME_END else ""
+    node_list = (
+        line[_SQUEUE_COL_NODES_END:_SQUEUE_COL_NODELIST_END].strip() if len(line) > _SQUEUE_COL_NODES_END else ""
+    )
+    tres = line[_SQUEUE_COL_NODELIST_END:].strip() if len(line) > _SQUEUE_COL_NODELIST_END else ""
+
+    return (job_id, name, user, state, time_used, num_nodes, node_list, tres)
+
+
+def get_all_running_jobs() -> list[tuple[str, ...]]:
+    """Return all RUNNING jobs from squeue (all users) - single command, no loops.
+
+    Uses squeue's -O format with Tres field to get all data in one call.
+    Only fetches RUNNING state jobs (not PENDING) as per requirement.
 
     Returns:
         List of tuples containing job information (JobID, Name, User, State, Time, Nodes, NodeList, TRES).
-        TRES is fetched separately using scontrol since squeue doesn't support it in format.
     """
     try:
         squeue = resolve_executable("squeue")
+        # Use -O format which supports Tres field directly
+        # This eliminates the need for per-job scontrol calls
         command = [
             squeue,
-            "-o",
-            "%.10i|%.15j|%.8u|%.8T|%.10M|%.4D|%.12R",
+            "-O",
+            "JobID:20,Name:20,UserName:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
             "-a",  # Show all partitions
+            "-t",
+            "RUNNING",  # Only running jobs, not pending
+            "--noheader",
         ]
-        logger.debug("Running squeue command for all users")
+        logger.debug("Running squeue command for all running jobs (single command)")
 
         result = subprocess.run(  # noqa: S603
             command,
             capture_output=True,
             text=True,
-            timeout=10,
+            timeout=15,
             check=False,
         )
     except FileNotFoundError:
         logger.exception("Error setting up squeue command")
         return []
     except subprocess.TimeoutExpired:
-        logger.exception("Timeout getting all users jobs")
+        logger.exception("Timeout getting all running jobs")
         return []
     except subprocess.SubprocessError:
-        logger.exception("Error getting all users jobs")
+        logger.exception("Error getting all running jobs")
         return []
 
     if result.returncode != 0:
         logger.warning(f"squeue returned non-zero exit code: {result.returncode}")
         return []
 
-    jobs = parse_squeue_output(result.stdout)
-    logger.debug(f"Found {len(jobs)} running/pending jobs (all users)")
+    # Parse fixed-width format output from -O option
+    jobs: list[tuple[str, ...]] = []
+    lines = result.stdout.strip().split("\n")
 
-    # Fetch TRES for each job using scontrol (squeue doesn't support TRES in format)
-    # Minimum fields: JobID, Name, User, State, Time, Nodes, NodeList
-    min_job_fields = 7
-    jobs_with_tres: list[tuple[str, ...]] = []
-    scontrol = resolve_executable("scontrol")
-
-    for job in jobs:
-        if len(job) < min_job_fields:
-            jobs_with_tres.append((*job, ""))  # Add empty TRES
+    for line in lines:
+        if not line.strip():
             continue
 
-        job_id = job[0].strip()
-        # Extract base job ID (remove array task suffix for scontrol)
-        base_job_id = job_id.split("_")[0]
+        parsed = _parse_fixed_width_squeue_line(line)
+        if parsed:
+            jobs.append(parsed)
 
-        # Get TRES from scontrol
-        tres = ""
-        try:
-            scontrol_cmd = [scontrol, "show", "jobid", base_job_id]
-            scontrol_result = subprocess.run(  # noqa: S603
-                scontrol_cmd,
-                capture_output=True,
-                text=True,
-                timeout=2,
-                check=False,
-            )
-            if scontrol_result.returncode == 0:
-                # Parse AllocTRES or ReqTRES from scontrol output
-                output = scontrol_result.stdout
-                # Prefer AllocTRES (for running jobs), fallback to ReqTRES (for pending)
-                alloc_match = re.search(r"AllocTRES=([^\s]+)", output)
-                if alloc_match and alloc_match.group(1) != "(null)":
-                    tres = alloc_match.group(1)
-                else:
-                    req_match = re.search(r"ReqTRES=([^\s]+)", output)
-                    if req_match:
-                        tres = req_match.group(1)
-        except (subprocess.TimeoutExpired, subprocess.SubprocessError, FileNotFoundError):
-            # If scontrol fails, just use empty TRES
-            pass
+    logger.debug(f"Found {len(jobs)} running jobs (all users) with TRES in single command")
+    return jobs
 
-        jobs_with_tres.append((*job, tres))
 
-    logger.debug(f"Added TRES information for {len(jobs_with_tres)} jobs")
-    return jobs_with_tres
+def get_all_users_jobs() -> list[tuple[str, ...]]:
+    """Return all running/pending jobs from squeue (all users).
+
+    Backward compatible wrapper - now calls get_all_running_jobs().
+
+    Returns:
+        List of tuples containing job information (JobID, Name, User, State, Time, Nodes, NodeList, TRES).
+    """
+    return get_all_running_jobs()

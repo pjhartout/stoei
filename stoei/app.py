@@ -1,6 +1,7 @@
 """Main Textual TUI application for stoei."""
 
 import re
+import time
 from pathlib import Path
 from typing import ClassVar
 
@@ -16,11 +17,13 @@ from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
 from stoei.slurm.cache import JobCache, JobState
 from stoei.slurm.commands import (
     cancel_job,
-    get_all_users_jobs,
+    get_all_running_jobs,
     get_cluster_nodes,
+    get_job_history,
     get_job_info,
     get_job_log_paths,
     get_node_info,
+    get_running_jobs,
 )
 from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
@@ -33,6 +36,7 @@ from stoei.slurm.gpu_parser import (
 from stoei.slurm.validation import check_slurm_available
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
 from stoei.widgets.help_screen import HelpScreen
+from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen, NodeInfoScreen
@@ -50,6 +54,22 @@ REFRESH_INTERVAL = 5.0
 
 # Minimum window width to show sidebar (sidebar is 30 wide, need space for content)
 MIN_WIDTH_FOR_SIDEBAR = 100
+
+# Job history days (user's jobs from the last N days)
+JOB_HISTORY_DAYS = 7
+
+# Loading steps for initial data load
+LOADING_STEPS = [
+    LoadingStep("slurm_check", "Checking SLURM availability...", weight=0.5),
+    LoadingStep("cluster_nodes", "Fetching cluster nodes...", weight=2.0),
+    LoadingStep("parse_nodes", "Parsing node information...", weight=1.0),
+    LoadingStep("user_running", "Fetching your running jobs...", weight=1.0),
+    LoadingStep("user_history", "Fetching your job history (7 days)...", weight=2.0),
+    LoadingStep("all_running", "Fetching all running jobs...", weight=2.0),
+    LoadingStep("aggregate_users", "Aggregating user statistics...", weight=1.0),
+    LoadingStep("cluster_stats", "Calculating cluster statistics...", weight=1.0),
+    LoadingStep("finalize", "Finalizing...", weight=0.5),
+]
 
 
 class SlurmMonitor(App[None]):
@@ -89,6 +109,7 @@ class SlurmMonitor(App[None]):
         self._cluster_nodes: list[dict[str, str]] = []
         self._all_users_jobs: list[tuple[str, ...]] = []
         self._is_narrow: bool = False
+        self._loading_screen: LoadingScreen | None = None
         logger.info("Initializing SlurmMonitor app")
 
     def compose(self) -> ComposeResult:
@@ -130,17 +151,6 @@ class SlurmMonitor(App[None]):
 
     def on_mount(self) -> None:
         """Initialize table and start data loading."""
-        # Check SLURM availability first
-        is_available, error_msg = check_slurm_available()
-        if not is_available:
-            logger.error(f"SLURM not available: {error_msg}")
-            self.push_screen(SlurmUnavailableScreen())
-            return
-
-        # Set up log pane as a loguru sink
-        log_pane = self.query_one("#log_pane", LogPane)
-        self._log_sink_id = add_tui_sink(log_pane.sink, level="DEBUG")
-
         logger.info("Mounting application")
 
         # Hide non-default tabs initially and ensure jobs tab is visible
@@ -161,14 +171,166 @@ class SlurmMonitor(App[None]):
         jobs_table.add_columns("JobID", "Name", "State", "Time", "Nodes", "NodeList")
         logger.debug("Jobs table columns added, ready for data")
 
-        # Show loading message
-        self.notify("Loading job data...", timeout=2)
+        # Show loading screen and start step-by-step loading
+        self._loading_screen = LoadingScreen(LOADING_STEPS)
+        self.push_screen(self._loading_screen)
 
-        # Initial data load in background worker
-        self._start_refresh_worker()
+        # Start initial load in background worker
+        self._start_initial_load_worker()
+
+    def _start_initial_load_worker(self) -> None:
+        """Start background worker for initial step-by-step data load."""
+        self._refresh_worker = self.run_worker(
+            self._initial_load_async,
+            name="initial_load",
+            exclusive=True,
+            thread=True,
+        )
+
+    def _loading_update_step(self, idx: int) -> None:
+        """Update loading screen to show step starting."""
+        screen = self._loading_screen
+        if screen:
+            self.call_from_thread(lambda: screen.start_step(idx))
+
+    def _loading_complete_step(self, idx: int, msg: str | None = None) -> None:
+        """Update loading screen to show step completed."""
+        screen = self._loading_screen
+        if screen:
+            self.call_from_thread(lambda: screen.complete_step(idx, msg))
+
+    def _loading_fail_step(self, idx: int, error: str) -> None:
+        """Update loading screen to show step failed."""
+        screen = self._loading_screen
+        if screen:
+            self.call_from_thread(lambda: screen.fail_step(idx, error))
+
+    def _initial_load_async(self) -> None:
+        """Perform initial data load with step-by-step progress (runs in worker thread)."""
+        logger.info("Starting initial data load")
+
+        # Execute loading steps and collect results
+        load_result = self._execute_loading_steps()
+        if load_result is None:
+            return  # SLURM error, already handled
+
+        running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = load_result
+
+        # Build job cache from fetched data
+        self._loading_update_step(8)
+        self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+        self._loading_complete_step(8, "Ready")
+
+        # Mark loading complete and transition
+        if self._loading_screen:
+            self.call_from_thread(self._loading_screen.set_complete)
+        time.sleep(0.5)  # Small delay to show completion state
+        self.call_from_thread(self._finish_initial_load)
+
+    def _execute_loading_steps(
+        self,
+    ) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]], int, int, int] | None:
+        """Execute loading steps and return collected data.
+
+        Returns:
+            Tuple of (running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+            or None if SLURM is not available.
+        """
+        # Step 0: Check SLURM availability
+        self._loading_update_step(0)
+        is_available, error_msg = check_slurm_available()
+        if not is_available:
+            self._loading_fail_step(0, error_msg or "SLURM not available")
+            logger.error(f"SLURM not available: {error_msg}")
+            self.call_from_thread(self._show_slurm_error)
+            return None
+        self._loading_complete_step(0, "SLURM available")
+
+        # Step 1: Fetch cluster nodes
+        self._loading_update_step(1)
+        nodes, error = get_cluster_nodes()
+        if error:
+            self._loading_fail_step(1, error)
+            logger.warning(f"Failed to get cluster nodes: {error}")
+            nodes = []
+        else:
+            self._loading_complete_step(1, f"{len(nodes)} nodes")
+        self._cluster_nodes = nodes
+
+        # Step 2: Parse node information
+        self._loading_update_step(2)
+        self._loading_complete_step(2, f"{len(self._cluster_nodes)} nodes parsed")
+
+        # Step 3: Fetch user's running jobs
+        self._loading_update_step(3)
+        running_jobs = get_running_jobs()
+        self._loading_complete_step(3, f"{len(running_jobs)} running/pending")
+
+        # Step 4: Fetch user's job history (7 days)
+        self._loading_update_step(4)
+        history_jobs, total_jobs, total_requeues, max_requeues = get_job_history(days=JOB_HISTORY_DAYS)
+        self._loading_complete_step(4, f"{total_jobs} jobs in {JOB_HISTORY_DAYS} days")
+
+        # Step 5: Fetch all running jobs (for user overview)
+        self._loading_update_step(5)
+        all_running = get_all_running_jobs()
+        self._loading_complete_step(5, f"{len(all_running)} jobs")
+        self._all_users_jobs = all_running
+
+        # Step 6: Aggregate user statistics
+        self._loading_update_step(6)
+        user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
+        self._loading_complete_step(6, f"{len(user_stats)} users")
+
+        # Step 7: Calculate cluster statistics
+        self._loading_update_step(7)
+        cluster_stats = self._calculate_cluster_stats()
+        self._loading_complete_step(7, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
+
+        return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
+
+    def _show_slurm_error(self) -> None:
+        """Show SLURM unavailable error screen."""
+        if self._loading_screen:
+            self.pop_screen()
+        self.push_screen(SlurmUnavailableScreen())
+
+    def _finish_initial_load(self) -> None:
+        """Finish initial load and transition to main UI."""
+        # Pop the loading screen
+        if self._loading_screen:
+            self.pop_screen()
+            self._loading_screen = None
+
+        # Set up log pane as a loguru sink
+        log_pane = self.query_one("#log_pane", LogPane)
+        self._log_sink_id = add_tui_sink(log_pane.sink, level="DEBUG")
+
+        logger.info("Initial load complete, transitioning to main UI")
+
+        # Update all UI components
+        self._update_ui_from_cache()
+
+        # Mark initial load as complete
+        self._initial_load_complete = True
+
+        # Start auto-refresh timer
+        self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
+        logger.info(f"Auto-refresh started with interval {self.refresh_interval}s")
+
+        # Focus the jobs table
+        try:
+            jobs_table = self.query_one("#jobs_table", DataTable)
+            jobs_table.focus()
+            logger.debug("Focused jobs table")
+        except Exception as exc:
+            logger.warning(f"Failed to focus jobs table: {exc}")
+
+        # Check window size
+        self._check_window_size()
 
     def _start_refresh_worker(self) -> None:
-        """Start background worker for data refresh."""
+        """Start background worker for lightweight data refresh."""
         if self._refresh_worker is not None and self._refresh_worker.state == WorkerState.RUNNING:
             logger.debug("Refresh worker already running, skipping")
             return
@@ -181,13 +343,19 @@ class SlurmMonitor(App[None]):
         )
 
     def _refresh_data_async(self) -> None:
-        """Refresh data from SLURM (runs in background worker thread)."""
+        """Lightweight refresh of SLURM data (runs in background worker thread).
+
+        This is used for periodic refreshes after initial load.
+        Uses single commands with no loops for efficiency.
+        """
         logger.debug("Background refresh starting")
 
-        # Workers run in a separate thread, so blocking calls are safe
-        self._job_cache.refresh()
+        # Refresh user's jobs (running + 7-day history)
+        running_jobs = get_running_jobs()
+        history_jobs, total_jobs, total_requeues, max_requeues = get_job_history(days=JOB_HISTORY_DAYS)
+        self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
 
-        # Also refresh cluster nodes and all users jobs
+        # Refresh cluster nodes (single scontrol command)
         nodes, error = get_cluster_nodes()
         if error:
             logger.warning(f"Failed to get cluster nodes: {error}")
@@ -195,8 +363,9 @@ class SlurmMonitor(App[None]):
             logger.debug(f"Fetched {len(nodes)} cluster nodes")
         self._cluster_nodes = nodes if not error else []
 
-        all_jobs = get_all_users_jobs()
-        logger.debug(f"Fetched {len(all_jobs)} jobs from all users")
+        # Refresh all running jobs (single squeue command with TRES)
+        all_jobs = get_all_running_jobs()
+        logger.debug(f"Fetched {len(all_jobs)} running jobs from all users")
         self._all_users_jobs = all_jobs
 
         # Schedule UI update on main thread
@@ -301,21 +470,7 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.debug(f"Failed to update tab-specific overview: {exc}")
 
-        # Start auto-refresh timer after initial load
-        if not self._initial_load_complete:
-            self._initial_load_complete = True
-            self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
-            logger.info(f"Auto-refresh started with interval {self.refresh_interval}s")
-
-            # Focus the table to ensure it's rendered
-            try:
-                jobs_table = self.query_one("#jobs_table", DataTable)
-                jobs_table.focus()
-                logger.debug("Focused jobs table")
-            except Exception as exc:
-                logger.warning(f"Failed to focus jobs table: {exc}")
-
-        # Check initial window size and adjust layout
+        # Check window size and adjust layout
         self._check_window_size()
 
     def _format_state(self, state: str, category: JobState) -> str:
