@@ -207,6 +207,168 @@ class TestLogViewerLineNumbers:
         assert "\\[bold]" in result  # Escaped markup
         assert "[dim]" in result  # Line number markup still present
 
+    def test_format_with_line_numbers_escapes_dim_tags(self) -> None:
+        """Test that [dim] and [/dim] in content are escaped to prevent MarkupError.
+
+        This is the exact bug that caused: MarkupError: closing tag '[/dim]' does not match any open tag
+        """
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        # Content containing [dim] and [/dim] - these MUST be escaped
+        # or they'll conflict with our line number [dim]...[/dim] tags
+        content = "[dim]some dimmed text[/dim]"
+        result = screen._format_with_line_numbers(content, start_line=1)
+        # The line number [dim] should be present (our markup)
+        assert result.startswith("[dim]")
+        # The content's [dim] should be escaped
+        assert "\\[dim]" in result
+        assert "\\[/dim]" in result
+
+    def test_format_with_line_numbers_escapes_closing_dim_only(self) -> None:
+        """Test that orphan [/dim] in content is escaped."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        # Just a closing tag without opening - this was causing the MarkupError
+        content = "error output [/dim] more text"
+        result = screen._format_with_line_numbers(content, start_line=1)
+        # Our line number markup should be valid
+        assert "[dim]" in result
+        assert "[/dim]" in result
+        # The content's [/dim] should be escaped
+        assert "\\[/dim]" in result
+
+    def test_format_with_line_numbers_escapes_various_tags(self) -> None:
+        """Test that various Rich markup tags in content are escaped."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        content = "[red]error[/red] [bold]warning[/bold] [italic]info[/italic]"
+        result = screen._format_with_line_numbers(content, start_line=1)
+        # All tags should be escaped
+        assert "\\[red]" in result
+        assert "\\[/red]" in result
+        assert "\\[bold]" in result
+        assert "\\[/bold]" in result
+        assert "\\[italic]" in result
+        assert "\\[/italic]" in result
+
+    def test_format_with_line_numbers_preserves_non_markup_brackets(self) -> None:
+        """Test content with brackets that don't look like Rich markup."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        # These brackets don't look like Rich markup tags, so they're not escaped
+        content = "config['key'] = [1, 2, 3]"
+        result = screen._format_with_line_numbers(content, start_line=1)
+        # Non-markup brackets are preserved as-is (Rich doesn't escape them)
+        assert "[1, 2, 3]" in result
+        # Line numbers should still work
+        assert "[dim]1[/dim]" in result
+
+    def test_format_with_line_numbers_multiline_with_markup(self) -> None:
+        """Test multiline content where each line has markup-like characters."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        # Note: [INFO], [ERROR], [DEBUG] are NOT valid Rich markup tags,
+        # so they won't be escaped. Only [/dim] looks like a closing tag.
+        content = "[INFO] Starting\n[ERROR] Failed [/dim]\n[DEBUG] Done"
+        result = screen._format_with_line_numbers(content, start_line=1)
+        lines = result.split("\n")
+        assert len(lines) == 3
+        # Each line should have its own [dim]N[/dim] prefix
+        for line in lines:
+            assert line.startswith("[dim]")
+        # The [/dim] in content should be escaped (it looks like a closing tag)
+        assert "\\[/dim]" in result
+        # [INFO], [ERROR], [DEBUG] are not valid Rich markup, so not escaped
+        assert "[INFO]" in result
+        assert "[ERROR]" in result
+        assert "[DEBUG]" in result
+
+
+class TestLogViewerMarkupSafety:
+    """Tests to ensure LogViewerScreen handles markup-like content safely."""
+
+    def test_content_with_dim_tags_loads_without_error(self, tmp_path: Path) -> None:
+        """Test that files containing [dim] and [/dim] load without MarkupError."""
+        log_file = tmp_path / "dim_content.log"
+        # This exact content pattern caused the original MarkupError
+        log_file.write_text("[dim]dimmed output[/dim]\nmore [/dim] orphan tags\n")
+
+        screen = LogViewerScreen(str(log_file), "stderr")
+        screen._load_file()
+
+        assert screen.load_error is None
+        # Content should be escaped
+        assert "\\[dim]" in screen.file_contents
+        assert "\\[/dim]" in screen.file_contents
+
+    def test_content_with_rich_markup_loads_without_error(self, tmp_path: Path) -> None:
+        """Test that files with various Rich markup tags load safely."""
+        log_file = tmp_path / "markup_content.log"
+        log_file.write_text(
+            "[bold]Bold text[/bold]\n"
+            "[red]Red error[/red]\n"
+            "[green]Success[/green]\n"
+            "[blue on white]Styled[/blue on white]\n"
+        )
+
+        screen = LogViewerScreen(str(log_file), "stdout")
+        screen._load_file()
+
+        assert screen.load_error is None
+        # All markup should be escaped
+        assert "\\[bold]" in screen.file_contents
+        assert "\\[red]" in screen.file_contents
+        assert "\\[green]" in screen.file_contents
+
+    async def test_render_content_with_dim_tags_no_markup_error(self, tmp_path: Path) -> None:
+        """Test that rendering content with [dim]/[/dim] doesn't raise MarkupError."""
+        from textual.app import App
+        from textual.widgets import Static
+
+        log_file = tmp_path / "dim_render.log"
+        # Content that would cause MarkupError if not properly escaped
+        log_file.write_text(
+            "Normal line\n"
+            "[dim]This looks like dim markup[/dim]\n"
+            "Another line with [/dim] orphan closing tag\n"
+            "[/dim] at start of line\n"
+        )
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stderr"))
+
+        app = TestApp()
+        # This should not raise MarkupError
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            # Verify the content widget exists and renders
+            content_widget = screen.query_one("#log-content-text", Static)
+            assert content_widget is not None
+            # The render should succeed without MarkupError
+            rendered = content_widget.render()
+            assert rendered is not None
+
+    async def test_render_content_with_nested_brackets_no_error(self, tmp_path: Path) -> None:
+        """Test that content with Python-style brackets renders safely."""
+        from textual.app import App
+        from textual.widgets import Static
+
+        log_file = tmp_path / "brackets.log"
+        # Common Python output patterns that could look like markup
+        log_file.write_text(
+            "data = {'key': [1, 2, 3]}\nresult[0] = value\noptions['setting'] = True\narray[index] = [nested, list]\n"
+        )
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            content_widget = screen.query_one("#log-content-text", Static)
+            assert content_widget is not None
+            rendered = content_widget.render()
+            assert rendered is not None
+
 
 class TestLogViewerFileLoading:
     """Tests for LogViewerScreen file loading."""
@@ -428,6 +590,98 @@ class TestLogViewerScreenMethods:
         screen = LogViewerScreen("/path/to/log.out", "stdout")
         assert hasattr(screen, "_open_in_editor")
         assert callable(screen._open_in_editor)
+
+
+class TestLogViewerEditorIntegration:
+    """Tests for LogViewerScreen editor integration."""
+
+    async def test_open_in_editor_handles_suspend_not_supported(self, tmp_path: Path) -> None:
+        """Test that _open_in_editor handles SuspendNotSupported gracefully."""
+        from textual.app import App
+
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Test content\n")
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+
+            # This should not raise an exception, but should notify the user
+            # In run_test(), suspend() raises SuspendNotSupported
+            screen._open_in_editor()
+
+            # Verify that an error notification was shown
+            # The app should still be running without crashing
+            assert app.is_running
+
+    async def test_open_in_editor_with_load_error(self, tmp_path: Path) -> None:
+        """Test that _open_in_editor rejects files with load errors."""
+        from textual.app import App
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen("/nonexistent/file.log", "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+
+            # Set up load error (should already be set from _load_file)
+            assert screen.load_error is not None
+
+            # This should not attempt to open editor
+            screen._open_in_editor()
+
+            # App should still be running
+            assert app.is_running
+
+    async def test_open_in_editor_with_empty_filepath(self, tmp_path: Path) -> None:
+        """Test that _open_in_editor rejects empty filepath."""
+        from textual.app import App
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                screen = LogViewerScreen("", "stdout")
+                self.push_screen(screen)
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+
+            # This should not attempt to open editor
+            screen._open_in_editor()
+
+            # App should still be running
+            assert app.is_running
+
+    async def test_action_open_in_editor_calls_helper(self, tmp_path: Path) -> None:
+        """Test that action_open_in_editor calls _open_in_editor."""
+        from unittest.mock import patch
+
+        from textual.app import App
+
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Test content\n")
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+
+            with patch.object(screen, "_open_in_editor") as mock_open:
+                screen.action_open_in_editor()
+                mock_open.assert_called_once()
 
 
 class TestJobInfoScreenActions:
