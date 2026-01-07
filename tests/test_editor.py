@@ -30,9 +30,9 @@ class TestGetEditor:
         ):
             # First call for EDITOR returns None (not found)
             # Second call for first default editor returns path
-            mock_which.side_effect = [None, "/usr/bin/less"]
+            mock_which.side_effect = [None, "/usr/bin/vim"]
             result = get_editor()
-            assert result == "less"
+            assert result == "vim"
 
     def test_uses_first_available_default_editor(self) -> None:
         """Test that first available default editor is used."""
@@ -123,7 +123,7 @@ class TestOpenInEditor:
             success, message = open_in_editor(str(test_file))
             assert success is False
             assert "No editor available" in message
-            assert "$EDITOR" in message
+            assert "$EDITOR" in message or "vim/nano" in message
 
     def test_opens_file_successfully(self, tmp_path: Path) -> None:
         """Test that file is opened successfully in editor."""
@@ -134,17 +134,17 @@ class TestOpenInEditor:
             patch("stoei.editor.get_editor") as mock_get_editor,
             patch("subprocess.run") as mock_run,
         ):
-            mock_get_editor.return_value = "less"
+            mock_get_editor.return_value = "vim"
             mock_run.return_value = MagicMock(returncode=0)
 
             success, message = open_in_editor(str(test_file))
 
             assert success is True
             assert "Opened" in message
-            assert "less" in message
+            assert "vim" in message
             mock_run.assert_called_once()
             call_args = mock_run.call_args
-            assert call_args[0][0] == ["less", str(test_file)]
+            assert call_args[0][0] == ["vim", str(test_file)]
 
     def test_returns_error_when_editor_fails(self, tmp_path: Path) -> None:
         """Test that error is returned when editor exits with non-zero code."""
@@ -155,7 +155,7 @@ class TestOpenInEditor:
             patch("stoei.editor.get_editor") as mock_get_editor,
             patch("subprocess.run") as mock_run,
         ):
-            mock_get_editor.return_value = "less"
+            mock_get_editor.return_value = "vim"
             mock_run.return_value = MagicMock(returncode=1)
 
             success, message = open_in_editor(str(test_file))
@@ -189,7 +189,7 @@ class TestOpenInEditor:
             patch("stoei.editor.get_editor") as mock_get_editor,
             patch("subprocess.run") as mock_run,
         ):
-            mock_get_editor.return_value = "less"
+            mock_get_editor.return_value = "vim"
             mock_run.side_effect = subprocess.SubprocessError("Process error")
 
             success, message = open_in_editor(str(test_file))
@@ -206,7 +206,7 @@ class TestOpenInEditor:
             patch("stoei.editor.get_editor") as mock_get_editor,
             patch("subprocess.run") as mock_run,
         ):
-            mock_get_editor.return_value = "less"
+            mock_get_editor.return_value = "vim"
             mock_run.side_effect = OSError("OS error")
 
             success, message = open_in_editor(str(test_file))
