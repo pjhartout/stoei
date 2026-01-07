@@ -85,6 +85,7 @@ Footer > .footer--description {
     background: ansi_black;
     padding: 0 1;
     border-bottom: heavy ansi_blue;
+    align: left middle;
 }
 
 #jobs-title {
