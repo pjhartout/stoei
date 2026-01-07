@@ -253,6 +253,14 @@ class TestCancelConfirmScreen:
         binding_keys = [b[0] for b in CancelConfirmScreen.BINDINGS]
         assert "enter" in binding_keys
 
+    def test_bindings_include_navigation(self) -> None:
+        """Test that navigation bindings exist."""
+        binding_keys = [b[0] for b in CancelConfirmScreen.BINDINGS]
+        assert "left" in binding_keys
+        assert "right" in binding_keys
+        assert "tab" in binding_keys
+        assert "shift+tab" in binding_keys
+
 
 class TestJobInputScreen:
     """Tests for JobInputScreen."""
@@ -401,11 +409,23 @@ class TestCancelConfirmScreenActions:
         assert hasattr(screen, "action_cancel")
         assert callable(screen.action_cancel)
 
-    def test_action_confirm_method_exists(self) -> None:
-        """Test action_confirm method exists."""
+    def test_action_activate_focused_method_exists(self) -> None:
+        """Test action_activate_focused method exists."""
         screen = CancelConfirmScreen("12345")
-        assert hasattr(screen, "action_confirm")
-        assert callable(screen.action_confirm)
+        assert hasattr(screen, "action_activate_focused")
+        assert callable(screen.action_activate_focused)
+
+    def test_action_focus_next_method_exists(self) -> None:
+        """Test action_focus_next method exists."""
+        screen = CancelConfirmScreen("12345")
+        assert hasattr(screen, "action_focus_next")
+        assert callable(screen.action_focus_next)
+
+    def test_action_focus_previous_method_exists(self) -> None:
+        """Test action_focus_previous method exists."""
+        screen = CancelConfirmScreen("12345")
+        assert hasattr(screen, "action_focus_previous")
+        assert callable(screen.action_focus_previous)
 
 
 class TestJobInputScreenActions:

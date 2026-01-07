@@ -520,7 +520,11 @@ class CancelConfirmScreen(Screen[bool]):
 
     BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("escape", "cancel", "Cancel"),
-        ("enter", "confirm", "Confirm"),
+        ("enter", "activate_focused", "Activate"),
+        ("left", "focus_previous", "Previous"),
+        ("right", "focus_next", "Next"),
+        ("tab", "focus_next", "Next"),
+        ("shift+tab", "focus_previous", "Previous"),
     )
 
     def __init__(self, job_id: str, job_name: str | None = None) -> None:
@@ -565,9 +569,56 @@ class CancelConfirmScreen(Screen[bool]):
         """Abort the cancellation (Escape key)."""
         self.dismiss(False)
 
-    def action_confirm(self) -> None:
-        """Confirm the cancellation (Enter key)."""
-        self.dismiss(True)
+    def action_activate_focused(self) -> None:
+        """Activate the currently focused button (Enter key)."""
+        focused = self.focused
+        if isinstance(focused, Button):
+            focused.press()
+        else:
+            # Fallback: if nothing is focused, default to abort (safer)
+            self.dismiss(False)
+
+    def action_focus_next(self) -> None:
+        """Focus the next button (right arrow or tab)."""
+        buttons = [
+            self.query_one("#confirm-cancel-btn", Button),
+            self.query_one("#abort-cancel-btn", Button),
+        ]
+        focused = self.focused
+        current_idx = None
+        for idx, btn in enumerate(buttons):
+            if btn is focused:
+                current_idx = idx
+                break
+
+        if current_idx is None:
+            # No button focused, focus the first one
+            buttons[0].focus()
+        else:
+            # Focus the next button (wraps around)
+            next_idx = (current_idx + 1) % len(buttons)
+            buttons[next_idx].focus()
+
+    def action_focus_previous(self) -> None:
+        """Focus the previous button (left arrow or shift+tab)."""
+        buttons = [
+            self.query_one("#confirm-cancel-btn", Button),
+            self.query_one("#abort-cancel-btn", Button),
+        ]
+        focused = self.focused
+        current_idx = None
+        for idx, btn in enumerate(buttons):
+            if btn is focused:
+                current_idx = idx
+                break
+
+        if current_idx is None:
+            # No button focused, focus the last one
+            buttons[-1].focus()
+        else:
+            # Focus the previous button (wraps around)
+            prev_idx = (current_idx - 1) % len(buttons)
+            buttons[prev_idx].focus()
 
 
 class NodeInfoScreen(Screen[None]):
