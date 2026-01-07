@@ -163,9 +163,11 @@ class TestAppClusterIntegration:
     def test_app_refresh_fetches_cluster_data(self, app: SlurmMonitor) -> None:
         """Test that app refresh fetches cluster data."""
         with (
-            patch.object(app._job_cache, "refresh"),
+            patch("stoei.app.get_running_jobs", return_value=[]),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
             patch("stoei.app.get_cluster_nodes", return_value=([{"NodeName": "node01"}], None)) as mock_nodes,
-            patch("stoei.app.get_all_users_jobs", return_value=[]) as mock_jobs,
+            patch("stoei.app.get_all_running_jobs", return_value=[]) as mock_jobs,
+            patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
         ):
             app._refresh_data_async()
@@ -175,9 +177,11 @@ class TestAppClusterIntegration:
     def test_app_handles_cluster_nodes_error(self, app: SlurmMonitor) -> None:
         """Test that app handles cluster nodes fetch errors."""
         with (
-            patch.object(app._job_cache, "refresh"),
+            patch("stoei.app.get_running_jobs", return_value=[]),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
             patch("stoei.app.get_cluster_nodes", return_value=([], "Error fetching nodes")),
-            patch("stoei.app.get_all_users_jobs", return_value=[]),
+            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
         ):
             app._refresh_data_async()

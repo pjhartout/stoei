@@ -155,23 +155,31 @@ class TestRefreshDataAsync:
         # The method should NOT be a coroutine function
         assert not inspect.iscoroutinefunction(app._refresh_data_async)
 
-    def test_refresh_data_calls_cache_refresh(self) -> None:
-        """Verify that _refresh_data_async calls the cache refresh."""
+    def test_refresh_data_calls_cache_build(self) -> None:
+        """Verify that _refresh_data_async calls the cache _build_from_data."""
         app = SlurmMonitor()
 
         with (
-            patch.object(app._job_cache, "refresh") as mock_refresh,
+            patch("stoei.app.get_running_jobs", return_value=[]),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_cluster_nodes", return_value=([], None)),
+            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch.object(app._job_cache, "_build_from_data") as mock_build,
             patch.object(app, "call_from_thread"),
         ):
             app._refresh_data_async()
-            mock_refresh.assert_called_once()
+            mock_build.assert_called_once()
 
     def test_refresh_data_schedules_ui_update(self) -> None:
         """Verify that _refresh_data_async schedules UI update on main thread."""
         app = SlurmMonitor()
 
         with (
-            patch.object(app._job_cache, "refresh"),
+            patch("stoei.app.get_running_jobs", return_value=[]),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_cluster_nodes", return_value=([], None)),
+            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread") as mock_call_from_thread,
         ):
             app._refresh_data_async()
@@ -184,23 +192,28 @@ class TestRefreshDataAsync:
         app = SlurmMonitor()
 
         with (
-            patch.object(app._job_cache, "refresh"),
+            patch("stoei.app.get_running_jobs", return_value=[]),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)) as mock_get_nodes,
+            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
         ):
             app._refresh_data_async()
             mock_get_nodes.assert_called_once()
 
     def test_refresh_data_fetches_all_users_jobs(self) -> None:
-        """Verify that _refresh_data_async fetches all users jobs."""
+        """Verify that _refresh_data_async fetches all running jobs."""
         from unittest.mock import patch
 
         app = SlurmMonitor()
 
         with (
-            patch.object(app._job_cache, "refresh"),
+            patch("stoei.app.get_running_jobs", return_value=[]),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_users_jobs", return_value=[]) as mock_get_jobs,
+            patch("stoei.app.get_all_running_jobs", return_value=[]) as mock_get_jobs,
+            patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
         ):
             app._refresh_data_async()
@@ -213,9 +226,11 @@ class TestRefreshDataAsync:
         app = SlurmMonitor()
 
         with (
-            patch.object(app._job_cache, "refresh"),
+            patch("stoei.app.get_running_jobs", return_value=[]),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
             patch("stoei.app.get_cluster_nodes", return_value=([], "Error message")),
-            patch("stoei.app.get_all_users_jobs", return_value=[]),
+            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
         ):
             # Should not raise an error
