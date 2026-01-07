@@ -10,6 +10,13 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Static
 
+from stoei.slurm.gpu_parser import (
+    aggregate_gpu_counts,
+    calculate_total_gpus,
+    format_gpu_types,
+    parse_gpu_entries,
+)
+
 
 @dataclass
 class UserStats:
@@ -139,10 +146,9 @@ class UserOverviewTab(VerticalScroll):
         """
         cpus = 0
         memory_gb = 0.0
-        gpu_entries: list[tuple[str, int]] = []
 
         if not tres_str or tres_str.strip() == "":
-            return cpus, memory_gb, gpu_entries
+            return cpus, memory_gb, []
 
         # Parse CPU count
         cpu_match = re.search(r"cpu=(\d+)", tres_str)
@@ -163,16 +169,8 @@ class UserOverviewTab(VerticalScroll):
             except ValueError:
                 pass
 
-        # Parse GPUs - handle both generic (gres/gpu=X) and typed (gres/gpu:type=X) formats
-        # Pattern matches: gres/gpu:type=X or gres/gpu=X
-        gpu_pattern = re.compile(r"gres/gpu(?::([^=,]+))?=(\d+)", re.IGNORECASE)
-        for match in gpu_pattern.finditer(tres_str):
-            gpu_type = match.group(1) if match.group(1) else "gpu"
-            try:
-                gpu_count = int(match.group(2))
-                gpu_entries.append((gpu_type, gpu_count))
-            except ValueError:
-                pass
+        # Use shared GPU parser
+        gpu_entries = parse_gpu_entries(tres_str)
 
         return cpus, memory_gb, gpu_entries
 
@@ -210,19 +208,15 @@ class UserOverviewTab(VerticalScroll):
             user_data: User data dictionary to update.
             gpu_entries: List of (gpu_type, gpu_count) tuples.
         """
-        # Check if we have specific types (non-generic)
-        has_specific_types = any(gpu_type != "gpu" for gpu_type, _ in gpu_entries)
+        # Use shared GPU parser functions
+        gpu_counts = aggregate_gpu_counts(gpu_entries)
 
-        # Process entries: only count specific types if they exist, otherwise count generic
-        for gpu_type, gpu_count in gpu_entries:
-            if has_specific_types and gpu_type == "gpu":
-                # Skip generic if we have specific types
-                continue
-            gpu_type_upper = gpu_type.upper()
-            gpu_types_dict = user_data["gpu_types"]
-            if isinstance(gpu_types_dict, dict):
-                gpu_types_dict[gpu_type_upper] += gpu_count
-            user_data["total_gpus"] += gpu_count
+        gpu_types_dict = user_data["gpu_types"]
+        if isinstance(gpu_types_dict, dict):
+            for gpu_type, count in gpu_counts.items():
+                gpu_types_dict[gpu_type] += count
+
+        user_data["total_gpus"] += calculate_total_gpus(gpu_entries)
 
     @staticmethod
     def _process_job_for_user(
@@ -273,10 +267,7 @@ class UserOverviewTab(VerticalScroll):
         Returns:
             Formatted string like "8x H200" or "4x A100, 2x V100".
         """
-        if not gpu_types_dict:
-            return ""
-        gpu_type_strs = [f"{count}x {gpu_type}" for gpu_type, count in sorted(gpu_types_dict.items())]
-        return ", ".join(gpu_type_strs)
+        return format_gpu_types(gpu_types_dict)
 
     @staticmethod
     def _convert_to_user_stats(user_data: dict[str, _UserDataDict]) -> list[UserStats]:

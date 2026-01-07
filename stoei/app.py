@@ -22,8 +22,17 @@ from stoei.slurm.commands import (
     get_job_log_paths,
     get_node_info,
 )
+from stoei.slurm.gpu_parser import (
+    aggregate_gpu_counts,
+    calculate_total_gpus,
+    format_gpu_types,
+    has_specific_gpu_types,
+    parse_gpu_entries,
+    parse_gpu_from_gres,
+)
 from stoei.slurm.validation import check_slurm_available
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
+from stoei.widgets.help_screen import HelpScreen
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen, NodeInfoScreen
@@ -65,6 +74,7 @@ class SlurmMonitor(App[None]):
         ("left", "previous_tab", "Previous Tab"),
         ("right", "next_tab", "Next Tab"),
         ("shift+tab", "previous_tab", "Previous Tab"),
+        ("question_mark", "show_help", "Help"),
     )
 
     def __init__(self) -> None:
@@ -386,41 +396,20 @@ class SlurmMonitor(App[None]):
         except ValueError:
             pass
 
-    def _parse_gpu_entries(self, tres_string: str) -> list[tuple[str, int]]:
-        """Parse GPU entries from TRES string.
-
-        Args:
-            tres_string: TRES string (CfgTRES or AllocTRES).
-
-        Returns:
-            List of (gpu_type, gpu_count) tuples.
-        """
-        gpu_total_pattern = re.compile(r"gres/gpu(?::([^=,]+))?=(\d+)", re.IGNORECASE)
-        gpu_entries: list[tuple[str, int]] = []
-        for match in gpu_total_pattern.finditer(tres_string):
-            gpu_type = match.group(1) if match.group(1) else "gpu"
-            try:
-                gpu_count = int(match.group(2))
-                gpu_entries.append((gpu_type, gpu_count))
-            except ValueError:
-                pass
-        return gpu_entries
-
-    def _process_gpu_entries(self, gpu_entries: list[tuple[str, int]], stats: ClusterStats, is_allocated: bool) -> None:
-        """Process GPU entries and update stats.
+    def _process_gpu_entries_for_stats(
+        self, gpu_entries: list[tuple[str, int]], stats: ClusterStats, is_allocated: bool
+    ) -> None:
+        """Process GPU entries and update cluster stats.
 
         Args:
             gpu_entries: List of (gpu_type, gpu_count) tuples.
             stats: ClusterStats object to update.
             is_allocated: Whether these are allocated GPUs.
         """
-        # Check if we have specific types (non-generic)
-        has_specific_types = any(gpu_type != "gpu" for gpu_type, _ in gpu_entries)
+        has_specific = has_specific_gpu_types(gpu_entries)
 
-        # Process entries: only count specific types if they exist, otherwise count generic
         for gpu_type, gpu_count in gpu_entries:
-            if has_specific_types and gpu_type == "gpu":
-                # Skip generic if we have specific types
+            if has_specific and gpu_type.lower() == "gpu":
                 continue
             current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
             if is_allocated:
@@ -439,24 +428,17 @@ class SlurmMonitor(App[None]):
             stats: ClusterStats object to update.
         """
         gres = node_data.get("Gres", "")
-        if "gpu:" in gres.lower():
-            # Try to extract GPU count and type from Gres field
-            # Format is usually like "gpu:4" or "gpu:a100:4"
-            gpu_match = re.search(r"gpu(?::([^:,]+))?:(\d+)", gres, re.IGNORECASE)
-            if gpu_match:
-                try:
-                    gpu_type = gpu_match.group(1) if gpu_match.group(1) else "gpu"
-                    gpu_count = int(gpu_match.group(2))
-                    current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
-                    stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
-                    stats.total_gpus += gpu_count
-                    # Estimate allocated GPUs (rough)
-                    if "ALLOCATED" in state or "MIXED" in state:
-                        current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
-                        stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
-                        stats.allocated_gpus += gpu_count
-                except ValueError:
-                    pass
+        gpu_entries = parse_gpu_from_gres(gres)
+
+        for gpu_type, gpu_count in gpu_entries:
+            current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
+            stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
+            stats.total_gpus += gpu_count
+            # Estimate allocated GPUs based on node state
+            if "ALLOCATED" in state or "MIXED" in state:
+                current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
+                stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
+                stats.allocated_gpus += gpu_count
 
     def _calculate_cluster_stats(self) -> ClusterStats:
         """Calculate cluster statistics from node data.
@@ -488,15 +470,14 @@ class SlurmMonitor(App[None]):
             alloc_tres = node_data.get("AllocTRES", "")
 
             # Parse CfgTRES for total GPUs by type
-            # Format: "gres/gpu=8,gres/gpu:h200=8" or "gres/gpu:a100:4"
             # Note: If both generic (gres/gpu=8) and specific (gres/gpu:h200=8) exist,
             # they represent the same GPUs, so we only count specific types to avoid double-counting
-            gpu_entries = self._parse_gpu_entries(cfg_tres)
-            self._process_gpu_entries(gpu_entries, stats, is_allocated=False)
+            gpu_entries = parse_gpu_entries(cfg_tres)
+            self._process_gpu_entries_for_stats(gpu_entries, stats, is_allocated=False)
 
             # Parse AllocTRES for allocated GPUs by type
-            alloc_entries = self._parse_gpu_entries(alloc_tres)
-            self._process_gpu_entries(alloc_entries, stats, is_allocated=True)
+            alloc_entries = parse_gpu_entries(alloc_tres)
+            self._process_gpu_entries_for_stats(alloc_entries, stats, is_allocated=True)
 
             # Fallback: if no TRES data, try parsing Gres field
             if not cfg_tres and not alloc_tres:
@@ -514,7 +495,7 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.error(f"Failed to update node overview: {exc}", exc_info=True)
 
-    def _parse_node_infos(self) -> list[NodeInfo]:  # noqa: PLR0912, PLR0915
+    def _parse_node_infos(self) -> list[NodeInfo]:
         """Parse cluster node data into NodeInfo objects.
 
         Returns:
@@ -554,49 +535,23 @@ class SlurmMonitor(App[None]):
 
             # Parse total GPUs from CfgTRES (preferred) or Gres (fallback)
             gpu_type_counts_dict: dict[str, int] = {}
-            has_specific_types = False
 
             if cfg_tres:
-                # Parse CfgTRES for total GPUs by type
-                gpu_entries = self._parse_gpu_entries(cfg_tres)
-                has_specific_types = any(gpu_type != "gpu" for gpu_type, _ in gpu_entries)
-
-                # Process entries: only count specific types if they exist, otherwise count generic
-                for gpu_type, gpu_count in gpu_entries:
-                    if has_specific_types and gpu_type == "gpu":
-                        # Skip generic if we have specific types
-                        continue
-                    gpu_type_upper = gpu_type.upper()
-                    gpu_type_counts_dict[gpu_type_upper] = gpu_type_counts_dict.get(gpu_type_upper, 0) + gpu_count
-                    gpus_total += gpu_count
+                gpu_entries = parse_gpu_entries(cfg_tres)
+                gpu_type_counts_dict = aggregate_gpu_counts(gpu_entries)
+                gpus_total = calculate_total_gpus(gpu_entries)
             elif "gpu:" in gres.lower():
-                # Fallback to Gres field if no CfgTRES
-                # Format can be: gpu:a100:4, gpu:h200:8(S:0-1), gpu:4, or multiple types
-                gpu_type_counts: list[tuple[str, int]] = []
-
-                # Match patterns like: gpu:type:count or gpu:count
-                # Also handle socket info like (S:0-1)
-                gpu_pattern = re.compile(r"gpu(?::([^:(),]+))?:(\d+)(?:\([^)]+\))?", re.IGNORECASE)
-                for match in gpu_pattern.finditer(gres):
-                    gpu_type = match.group(1) if match.group(1) else "GPU"
-                    gpu_count = int(match.group(2))
-                    gpu_type_counts.append((gpu_type.upper(), gpu_count))
-                    gpus_total += gpu_count
-                    gpu_type_counts_dict[gpu_type.upper()] = gpu_type_counts_dict.get(gpu_type.upper(), 0) + gpu_count
+                gpu_entries = parse_gpu_from_gres(gres)
+                gpu_type_counts_dict = aggregate_gpu_counts(gpu_entries)
+                gpus_total = calculate_total_gpus(gpu_entries)
 
             # Format GPU types string (e.g., "8x H200" or "4x A100, 2x V100")
-            if gpu_type_counts_dict:
-                gpu_type_strs = [f"{count}x {gpu_type}" for gpu_type, count in sorted(gpu_type_counts_dict.items())]
-                gpu_types_str = ", ".join(gpu_type_strs)
+            gpu_types_str = format_gpu_types(gpu_type_counts_dict)
 
             # Parse allocated GPUs from AllocTRES or state-based logic
             if alloc_tres:
-                # Parse AllocTRES for allocated GPUs
-                alloc_entries = self._parse_gpu_entries(alloc_tres)
-                for gpu_type, gpu_count in alloc_entries:
-                    if has_specific_types and gpu_type == "gpu":
-                        continue
-                    gpus_alloc += gpu_count
+                alloc_entries = parse_gpu_entries(alloc_tres)
+                gpus_alloc = calculate_total_gpus(alloc_entries)
             elif gpus_total > 0:
                 # Fallback to state-based allocation if no AllocTRES
                 if "ALLOCATED" in state.upper():
@@ -765,6 +720,11 @@ class SlurmMonitor(App[None]):
         if event.key == "tab" and event.name == "tab":
             event.prevent_default()
             self.action_next_tab()
+
+    def action_show_help(self) -> None:
+        """Show help screen with keybindings."""
+        logger.debug("Showing help screen")
+        self.push_screen(HelpScreen())
 
     def action_show_job_info(self) -> None:
         """Show job info dialog."""
