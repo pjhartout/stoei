@@ -478,3 +478,93 @@ class TestCommandErrorPaths:
             output, error = _run_sacct_for_job("99999")
             assert output == ""
             assert error is not None
+
+
+class TestRunWithRetry:
+    """Tests for _run_with_retry function."""
+
+    def test_succeeds_on_first_try(self) -> None:
+        """Test that successful command returns immediately."""
+        from stoei.slurm.commands import _run_with_retry
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = "success"
+        mock_result.stderr = ""
+
+        with patch("subprocess.run", return_value=mock_result):
+            result, error = _run_with_retry(
+                ["test", "cmd"],
+                timeout=5,
+                command_name="test",
+                max_retries=3,
+                initial_delay=0.01,
+            )
+            assert result is not None
+            assert result.returncode == 0
+            assert error is None
+
+    def test_retries_on_failure(self) -> None:
+        """Test that command is retried on failure."""
+        from stoei.slurm.commands import _run_with_retry
+
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stdout = ""
+        fail_result.stderr = "error"
+
+        success_result = MagicMock()
+        success_result.returncode = 0
+        success_result.stdout = "success"
+        success_result.stderr = ""
+
+        # Fail twice, then succeed
+        with patch("subprocess.run", side_effect=[fail_result, fail_result, success_result]):
+            result, error = _run_with_retry(
+                ["test", "cmd"],
+                timeout=5,
+                command_name="test",
+                max_retries=3,
+                initial_delay=0.01,
+                backoff_factor=1.0,
+            )
+            assert result is not None
+            assert result.returncode == 0
+            assert error is None
+
+    def test_gives_up_after_max_retries(self) -> None:
+        """Test that command fails after max retries."""
+        from stoei.slurm.commands import _run_with_retry
+
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stdout = ""
+        fail_result.stderr = "persistent error"
+
+        with patch("subprocess.run", return_value=fail_result):
+            result, error = _run_with_retry(
+                ["test", "cmd"],
+                timeout=5,
+                command_name="test",
+                max_retries=2,
+                initial_delay=0.01,
+                backoff_factor=1.0,
+            )
+            assert result is None
+            assert error is not None
+
+    def test_no_retry_on_file_not_found(self) -> None:
+        """Test that FileNotFoundError is not retried."""
+        from stoei.slurm.commands import _run_with_retry
+
+        with patch("subprocess.run", side_effect=FileNotFoundError("command not found")):
+            result, error = _run_with_retry(
+                ["nonexistent", "cmd"],
+                timeout=5,
+                command_name="test",
+                max_retries=3,
+                initial_delay=0.01,
+            )
+            assert result is None
+            assert error is not None
+            assert "not found" in error.lower()

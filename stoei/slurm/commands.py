@@ -2,6 +2,7 @@
 
 import re
 import subprocess
+import time
 
 from stoei.logger import get_logger
 from stoei.slurm.formatters import format_job_info, format_node_info, format_sacct_job_info
@@ -18,6 +19,11 @@ from stoei.slurm.validation import (
     resolve_executable,
     validate_job_id,
 )
+
+# Default retry configuration
+DEFAULT_MAX_RETRIES = 3
+DEFAULT_BACKOFF_FACTOR = 1.5
+DEFAULT_INITIAL_DELAY = 0.5
 
 logger = get_logger(__name__)
 
@@ -82,6 +88,56 @@ def _run_subprocess_command(
         return None, f"Error running {command_name}"
     else:
         return result, None
+
+
+def _run_with_retry(  # noqa: PLR0913
+    command: list[str],
+    timeout: int,
+    command_name: str,
+    max_retries: int = DEFAULT_MAX_RETRIES,
+    backoff_factor: float = DEFAULT_BACKOFF_FACTOR,
+    initial_delay: float = DEFAULT_INITIAL_DELAY,
+) -> tuple[subprocess.CompletedProcess[str] | None, str | None]:
+    """Run a subprocess command with exponential backoff retry.
+
+    Args:
+        command: The command to run.
+        timeout: Command timeout in seconds.
+        command_name: Name of the command for error messages.
+        max_retries: Maximum number of retry attempts (default: 3).
+        backoff_factor: Factor to multiply delay by after each retry (default: 1.5).
+        initial_delay: Initial delay in seconds before first retry (default: 0.5).
+
+    Returns:
+        Tuple of (result, optional error message). Result is None on error.
+    """
+    last_error: str | None = None
+    delay = initial_delay
+
+    for attempt in range(max_retries + 1):
+        result, error = _run_subprocess_command(command, timeout, command_name)
+
+        if result is not None and result.returncode == 0:
+            if attempt > 0:
+                logger.debug(f"{command_name} succeeded on attempt {attempt + 1}")
+            return result, None
+
+        # Check if error is retryable
+        if error and ("not found" in error.lower()):
+            # File not found is not retryable
+            return result, error
+
+        last_error = (
+            error if error else f"{command_name} failed with return code {result.returncode if result else 'unknown'}"
+        )
+
+        if attempt < max_retries:
+            logger.debug(f"{command_name} failed (attempt {attempt + 1}/{max_retries + 1}), retrying in {delay:.1f}s")
+            time.sleep(delay)
+            delay *= backoff_factor
+
+    logger.warning(f"{command_name} failed after {max_retries + 1} attempts: {last_error}")
+    return None, last_error
 
 
 def _run_scontrol_for_job(job_id: str) -> tuple[str, str | None]:
@@ -439,30 +495,23 @@ def cancel_job(job_id: str) -> tuple[bool, str | None]:
 def get_cluster_nodes() -> tuple[list[dict[str, str]], str | None]:
     """Get information about all cluster nodes.
 
+    Uses retry logic with exponential backoff for transient failures.
+
     Returns:
         Tuple of (list of node info dictionaries, optional error message).
     """
     try:
         scontrol = resolve_executable("scontrol")
-        command = [scontrol, "show", "nodes"]
-        logger.debug(f"Running command: {' '.join(command)}")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
-    except FileNotFoundError:
+    except (FileNotFoundError, ValidationError):
         logger.exception("scontrol not found")
         return [], "scontrol not found"
-    except subprocess.TimeoutExpired:
-        logger.exception("Timeout getting cluster nodes")
-        return [], "Command timed out"
-    except subprocess.SubprocessError:
-        logger.exception("Error running scontrol")
-        return [], "Error running scontrol"
+
+    command = [scontrol, "show", "nodes"]
+    logger.debug(f"Running command: {' '.join(command)}")
+
+    result, error = _run_with_retry(command, timeout=15, command_name="scontrol show nodes")
+    if error or result is None:
+        return [], error or "Unknown error"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Failed to get cluster nodes"

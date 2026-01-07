@@ -296,6 +296,39 @@ LogViewerScreen #log-content-scroll:focus {
     border: tall ansi_green;
 }
 
+LogViewerScreen #log-search-container {
+    width: 100%;
+    height: auto;
+    padding: 0 2;
+    background: ansi_black;
+    border-bottom: solid ansi_bright_black;
+    layout: horizontal;
+    align: left middle;
+}
+
+LogViewerScreen #log-search-container.hidden {
+    display: none;
+}
+
+LogViewerScreen #log-search-input {
+    width: 1fr;
+    max-width: 50;
+    border: tall ansi_cyan;
+    background: $background;
+}
+
+LogViewerScreen #log-search-input:focus {
+    border: tall ansi_bright_cyan;
+}
+
+LogViewerScreen #log-search-status {
+    width: auto;
+    min-width: 8;
+    padding: 0 1;
+    content-align: right middle;
+    color: ansi_bright_black;
+}
+
 /* Cancel Confirmation Screen */
 CancelConfirmScreen {
     layout: vertical;
@@ -420,4 +453,76 @@ SlurmUnavailableScreen #quit-button {
 
 SlurmUnavailableScreen #quit-button:focus {
     border: tall ansi_bright_cyan;
+}
+
+/* Help Screen */
+HelpScreen {
+    layout: vertical;
+    align: center middle;
+    background: $background;
+}
+
+HelpScreen #help-container {
+    width: 70;
+    height: 80%;
+    max-height: 40;
+    padding: 0;
+    background: ansi_black;
+    border: double ansi_magenta;
+}
+
+HelpScreen #help-header {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: ansi_black;
+    border-bottom: heavy ansi_magenta;
+}
+
+HelpScreen #help-title {
+    width: 100%;
+    content-align: center middle;
+    color: ansi_magenta;
+    text-style: bold;
+}
+
+HelpScreen #help-content {
+    height: 1fr;
+    padding: 1 2;
+    background: $background;
+}
+
+HelpScreen #help-text {
+    width: 100%;
+    color: $foreground;
+}
+
+HelpScreen #help-footer {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: ansi_black;
+    border-top: solid ansi_bright_black;
+    layout: horizontal;
+    align: center middle;
+}
+
+HelpScreen #help-hint {
+    width: 1fr;
+    content-align: left middle;
+    color: ansi_bright_black;
+}
+
+HelpScreen #help-close-button {
+    width: auto;
+    min-width: 12;
+    background: ansi_bright_black;
+}
+
+HelpScreen #help-close-button:focus {
+    border: tall ansi_bright_cyan;
+}
+
+HelpScreen #help-content:focus {
+    border: tall ansi_magenta;
 }
