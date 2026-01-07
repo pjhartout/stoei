@@ -91,6 +91,24 @@ class TestLogViewerScreen:
         screen = LogViewerScreen("/path/to/log.out", "stdout")
         assert screen.truncated is False
 
+    def test_init_line_numbers_enabled(self) -> None:
+        """Test that line numbers are enabled by default."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert screen._show_line_numbers is True
+
+    def test_init_start_line(self) -> None:
+        """Test that start line is 1 initially."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert screen._start_line == 1
+
+    def test_init_search_state(self) -> None:
+        """Test that search state is initialized correctly."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert screen._search_term == ""
+        assert screen._search_active is False
+        assert screen._match_lines == []
+        assert screen._current_match_index == -1
+
     def test_bindings_defined(self) -> None:
         """Test that bindings are defined."""
         assert len(LogViewerScreen.BINDINGS) > 0
@@ -109,6 +127,86 @@ class TestLogViewerScreen:
         binding_keys = [b[0] for b in LogViewerScreen.BINDINGS]
         assert "e" in binding_keys  # open in editor
 
+    def test_bindings_include_line_numbers(self) -> None:
+        """Test that line numbers toggle binding exists."""
+        binding_keys = [b[0] for b in LogViewerScreen.BINDINGS]
+        assert "l" in binding_keys  # toggle line numbers
+
+    def test_bindings_include_search(self) -> None:
+        """Test that search bindings exist."""
+        binding_keys = [b[0] for b in LogViewerScreen.BINDINGS]
+        assert "slash" in binding_keys  # search
+        assert "n" in binding_keys  # next match
+        assert "N" in binding_keys  # previous match
+
+
+class TestLogViewerLineNumbers:
+    """Tests for LogViewerScreen line number functionality."""
+
+    def test_format_with_line_numbers_basic(self) -> None:
+        """Test basic line number formatting."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        content = "line1\nline2\nline3"
+        result = screen._format_with_line_numbers(content, start_line=1)
+        assert "[dim]1[/dim] │ line1" in result
+        assert "[dim]2[/dim] │ line2" in result
+        assert "[dim]3[/dim] │ line3" in result
+
+    def test_format_with_line_numbers_start_offset(self) -> None:
+        """Test line number formatting with start offset."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        content = "lineA\nlineB"
+        result = screen._format_with_line_numbers(content, start_line=50)
+        assert "[dim]50[/dim] │ lineA" in result
+        assert "[dim]51[/dim] │ lineB" in result
+
+    def test_format_with_line_numbers_padding(self) -> None:
+        """Test line number padding for multi-digit lines."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        # Create content that ends at line 100+
+        content = "line1\nline2"
+        result = screen._format_with_line_numbers(content, start_line=99)
+        # Should have proper padding for 3-digit numbers
+        assert "[dim] 99[/dim] │ line1" in result
+        assert "[dim]100[/dim] │ line2" in result
+
+    def test_format_with_line_numbers_empty(self) -> None:
+        """Test line number formatting with empty content."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        result = screen._format_with_line_numbers("", start_line=1)
+        assert result == ""
+
+    def test_get_display_content_with_line_numbers(self) -> None:
+        """Test _get_display_content with line numbers enabled."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        screen._raw_contents = "line1\nline2"
+        screen._show_line_numbers = True
+        screen._start_line = 1
+        result = screen._get_display_content()
+        assert "[dim]1[/dim] │" in result
+
+    def test_get_display_content_without_line_numbers(self) -> None:
+        """Test _get_display_content with line numbers disabled."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        screen._raw_contents = "line1\nline2"
+        screen._show_line_numbers = False
+        screen._start_line = 1
+        result = screen._get_display_content()
+        assert "[dim]" not in result
+        assert "line1" in result
+
+    def test_get_display_content_escapes_markup(self) -> None:
+        """Test that _get_display_content escapes markup characters."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        screen._raw_contents = "[bold]not bold[/bold]"
+        screen._show_line_numbers = True
+        screen._start_line = 1
+        result = screen._get_display_content()
+        # The [bold] should be escaped (Rich escape uses single backslash)
+        # and [dim] for line numbers should still work
+        assert "\\[bold]" in result  # Escaped markup
+        assert "[dim]" in result  # Line number markup still present
+
 
 class TestLogViewerFileLoading:
     """Tests for LogViewerScreen file loading."""
@@ -126,8 +224,19 @@ class TestLogViewerFileLoading:
         screen = LogViewerScreen(str(temp_log_file), "stdout")
         screen._load_file()
         assert screen.load_error is None
+        # Should have line numbers by default
+        assert "[dim]" in screen.file_contents
         assert "Line 0" in screen.file_contents
         assert "Line 99" in screen.file_contents
+
+    def test_load_file_success_with_line_numbers(self, temp_log_file: Path) -> None:
+        """Test that _load_file includes line numbers."""
+        screen = LogViewerScreen(str(temp_log_file), "stdout")
+        screen._load_file()
+        assert screen.load_error is None
+        # Check for line number formatting
+        assert "[dim]" in screen.file_contents
+        assert "│" in screen.file_contents
 
     def test_load_file_not_found(self, tmp_path: Path) -> None:
         """Test _load_file with non-existent file."""
@@ -171,8 +280,9 @@ class TestLogViewerFileLoading:
         assert "File truncated" in screen.file_contents
         # Should contain lines from the end
         assert "This is a test line" in screen.file_contents
-        # Content should be significantly smaller than original
-        assert len(screen.file_contents) < len(content)
+        # Raw content should be significantly smaller than original
+        # (file_contents may be larger due to line number markup)
+        assert len(screen._raw_contents) < len(content)
 
     def test_load_file_small_not_truncated(self, temp_log_file: Path) -> None:
         """Test _load_file does not truncate small files."""
@@ -398,6 +508,30 @@ class TestLogViewerScreenActions:
         screen = LogViewerScreen("/path/to/log.out", "stdout")
         assert hasattr(screen, "action_reload")
         assert callable(screen.action_reload)
+
+    def test_action_toggle_line_numbers_method_exists(self) -> None:
+        """Test action_toggle_line_numbers method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_toggle_line_numbers")
+        assert callable(screen.action_toggle_line_numbers)
+
+    def test_action_start_search_method_exists(self) -> None:
+        """Test action_start_search method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_start_search")
+        assert callable(screen.action_start_search)
+
+    def test_action_next_match_method_exists(self) -> None:
+        """Test action_next_match method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_next_match")
+        assert callable(screen.action_next_match)
+
+    def test_action_previous_match_method_exists(self) -> None:
+        """Test action_previous_match method exists."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert hasattr(screen, "action_previous_match")
+        assert callable(screen.action_previous_match)
 
 
 class TestCancelConfirmScreenActions:
