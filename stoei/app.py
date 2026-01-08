@@ -761,6 +761,7 @@ class SlurmMonitor(App[None]):
             active_tab.display = True
 
             # Update the tab content if needed (always update when switching to ensure data is shown)
+            # Defer heavy operations to avoid blocking the tab switch
             if event.tab_name == "jobs":
                 # Focus the jobs table to enable arrow key navigation
                 try:
@@ -770,8 +771,8 @@ class SlurmMonitor(App[None]):
                 except Exception as exc:
                     logger.debug(f"Failed to focus jobs table: {exc}")
             elif event.tab_name == "nodes":
-                # Always update when switching to nodes tab
-                self._update_node_overview()
+                # Defer heavy update to avoid blocking tab switch
+                self.call_later(self._update_node_overview)
                 # Focus the nodes table to enable arrow key navigation
                 try:
                     node_tab = self.query_one("#node-overview", NodeOverviewTab)
@@ -781,8 +782,8 @@ class SlurmMonitor(App[None]):
                 except Exception as exc:
                     logger.debug(f"Failed to focus nodes table: {exc}")
             elif event.tab_name == "users":
-                # Always update when switching to users tab
-                self._update_user_overview()
+                # Defer heavy update to avoid blocking tab switch
+                self.call_later(self._update_user_overview)
                 # Focus the users table to enable arrow key navigation
                 try:
                     user_tab = self.query_one("#user-overview", UserOverviewTab)
