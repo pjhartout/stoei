@@ -14,7 +14,7 @@ from textual.widgets.data_table import RowKey
 from textual.worker import Worker, WorkerState
 
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
-from stoei.slurm.cache import JobCache, JobState
+from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
     cancel_job,
     get_all_running_jobs,
@@ -36,6 +36,7 @@ from stoei.slurm.gpu_parser import (
 from stoei.slurm.validation import check_slurm_available
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
 from stoei.widgets.help_screen import HelpScreen
+from stoei.widgets.loading_indicator import LoadingIndicator
 from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
@@ -96,6 +97,7 @@ class SlurmMonitor(App[None]):
         ("shift+tab", "previous_tab", "Previous Tab"),
         ("question_mark", "show_help", "Help"),
     )
+    JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList")
 
     def __init__(self) -> None:
         """Initialize the SLURM monitor app."""
@@ -110,7 +112,7 @@ class SlurmMonitor(App[None]):
         self._all_users_jobs: list[tuple[str, ...]] = []
         self._is_narrow: bool = False
         self._loading_screen: LoadingScreen | None = None
-        logger.info("Initializing SlurmMonitor app")
+        self._job_row_keys: dict[str, RowKey] = {}
 
     def compose(self) -> ComposeResult:
         """Create the UI layout.
@@ -119,6 +121,7 @@ class SlurmMonitor(App[None]):
             The widgets that make up the application UI.
         """
         yield Header(show_clock=True)
+        yield LoadingIndicator(id="loading-indicator")
 
         with Horizontal(id="main-container"):
             # Main content area with tabs
@@ -263,18 +266,34 @@ class SlurmMonitor(App[None]):
 
         # Step 3: Fetch user's running jobs
         self._loading_update_step(3)
-        running_jobs = get_running_jobs()
-        self._loading_complete_step(3, f"{len(running_jobs)} running/pending")
+        running_jobs, error = get_running_jobs()
+        if error:
+            self._loading_fail_step(3, error)
+            logger.warning(f"Failed to get running jobs: {error}")
+            # Non-fatal during initial load, just empty
+            running_jobs = []
+        else:
+            self._loading_complete_step(3, f"{len(running_jobs)} running/pending")
 
         # Step 4: Fetch user's job history (7 days)
         self._loading_update_step(4)
-        history_jobs, total_jobs, total_requeues, max_requeues = get_job_history(days=JOB_HISTORY_DAYS)
-        self._loading_complete_step(4, f"{total_jobs} jobs in {JOB_HISTORY_DAYS} days")
+        history_jobs, total_jobs, total_requeues, max_requeues, error = get_job_history(days=JOB_HISTORY_DAYS)
+        if error:
+            self._loading_fail_step(4, error)
+            logger.warning(f"Failed to get job history: {error}")
+            history_jobs, total_jobs, total_requeues, max_requeues = [], 0, 0, 0
+        else:
+            self._loading_complete_step(4, f"{total_jobs} jobs in {JOB_HISTORY_DAYS} days")
 
         # Step 5: Fetch all running jobs (for user overview)
         self._loading_update_step(5)
-        all_running = get_all_running_jobs()
-        self._loading_complete_step(5, f"{len(all_running)} jobs")
+        all_running, error = get_all_running_jobs()
+        if error:
+            self._loading_fail_step(5, error)
+            logger.warning(f"Failed to get all running jobs: {error}")
+            all_running = []
+        else:
+            self._loading_complete_step(5, f"{len(all_running)} jobs")
         self._all_users_jobs = all_running
 
         # Step 6: Aggregate user statistics
@@ -349,27 +368,69 @@ class SlurmMonitor(App[None]):
         Uses single commands with no loops for efficiency.
         """
         logger.debug("Background refresh starting")
+        self.call_from_thread(lambda: self._set_loading_indicator(True))
 
-        # Refresh user's jobs (running + 7-day history)
-        running_jobs = get_running_jobs()
-        history_jobs, total_jobs, total_requeues, max_requeues = get_job_history(days=JOB_HISTORY_DAYS)
-        self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+        try:
+            # Refresh user's jobs (running + 7-day history)
+            # Use separate try/except blocks to prevent partial failures from stopping everything
+            # but generally we want to update the cache only if we have data
 
-        # Refresh cluster nodes (single scontrol command)
-        nodes, error = get_cluster_nodes()
-        if error:
-            logger.warning(f"Failed to get cluster nodes: {error}")
-        else:
-            logger.debug(f"Fetched {len(nodes)} cluster nodes")
-        self._cluster_nodes = nodes if not error else []
+            # Get running jobs
+            running_jobs, r_error = get_running_jobs()
+            if r_error:
+                logger.warning(f"Failed to refresh running jobs: {r_error}")
+                # Keep old data for running jobs if failed, OR maybe we should skip cache update entirely?
+                # For now, let's skip cache update if ANY critical part fails to avoid inconsistencies
+                running_jobs = None
 
-        # Refresh all running jobs (single squeue command with TRES)
-        all_jobs = get_all_running_jobs()
-        logger.debug(f"Fetched {len(all_jobs)} running jobs from all users")
-        self._all_users_jobs = all_jobs
+            # Get history
+            history_jobs, total_jobs, total_requeues, max_requeues, h_error = get_job_history(days=JOB_HISTORY_DAYS)
+            if h_error:
+                logger.warning(f"Failed to refresh job history: {h_error}")
+                history_jobs = None
 
-        # Schedule UI update on main thread
-        self.call_from_thread(self._update_ui_from_cache)
+            # Only update job cache if both succeeded
+            # This implements the "failover" behavior: if data fetch fails, we keep the old data displayed
+            if running_jobs is not None and history_jobs is not None:
+                self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+            else:
+                self.call_from_thread(
+                    lambda: self.notify("Partial refresh failure - keeping old data", severity="warning")
+                )
+
+            # Refresh cluster nodes (single scontrol command)
+            nodes, error = get_cluster_nodes()
+            if error:
+                logger.warning(f"Failed to get cluster nodes: {error}")
+                # Keep existing nodes on error
+            else:
+                logger.debug(f"Fetched {len(nodes)} cluster nodes")
+                self._cluster_nodes = nodes
+
+            # Refresh all running jobs (single squeue command with TRES)
+            all_jobs, error = get_all_running_jobs()
+            if error:
+                logger.warning(f"Failed to get all running jobs: {error}")
+                # Keep existing jobs on error
+            else:
+                logger.debug(f"Fetched {len(all_jobs)} running jobs from all users")
+                self._all_users_jobs = all_jobs
+
+            # Schedule UI update on main thread
+            self.call_from_thread(self._update_ui_from_cache)
+
+        except Exception:
+            logger.exception("Error during refresh")
+        finally:
+            self.call_from_thread(lambda: self._set_loading_indicator(False))
+
+    def _set_loading_indicator(self, active: bool) -> None:
+        """Safely toggle the global loading indicator spinner."""
+        try:
+            indicator = self.query_one(LoadingIndicator)
+            indicator.loading = active
+        except Exception as exc:
+            logger.debug(f"Failed to toggle loading indicator: {exc}")
 
     def _update_jobs_table(self, jobs_table: DataTable) -> None:
         """Update the jobs table with cached job data.
@@ -377,68 +438,156 @@ class SlurmMonitor(App[None]):
         Args:
             jobs_table: The DataTable widget to update.
         """
-        # Save cursor position before clearing
         cursor_row = jobs_table.cursor_row
+        cursor_job_id = self._job_id_from_row_index(jobs_table, cursor_row)
 
-        # Clear existing rows but keep columns
-        jobs_table.clear(columns=False)
-
-        # Add jobs from cache with state-based styling
         jobs = self._job_cache.jobs
-        logger.debug(f"Updating UI with {len(jobs)} jobs from cache")
-        rows_added = 0
-        for job in jobs:
+        desired_job_ids = {job.job_id for job in jobs}
+
+        removed_rows = self._remove_missing_job_rows(jobs_table, desired_job_ids)
+        rows_changed = self._upsert_job_rows(jobs_table, jobs)
+
+        cursor_restored = self._restore_jobs_table_cursor(jobs_table, cursor_row, cursor_job_id)
+        jobs_table.display = jobs_table.row_count > 0
+        if not cursor_restored and jobs_table.row_count == 0:
+            jobs_table.cursor_type = "row"
+
+        logger.debug(
+            f"Jobs table reconciled: {jobs_table.row_count} rows, {rows_changed} updates, {removed_rows} removals"
+        )
+
+    def _remove_missing_job_rows(self, jobs_table: DataTable, desired_job_ids: set[str]) -> int:
+        """Remove rows that are no longer present in the latest data."""
+        removed = 0
+        for job_id in list(self._job_row_keys):
+            if job_id in desired_job_ids:
+                continue
+            row_key = self._job_row_keys.pop(job_id)
             try:
-                # Apply state-based row styling using Rich markup
-                state_display = self._format_state(job.state, job.state_category)
-                jobs_table.add_row(
-                    job.job_id,
-                    job.name,
-                    state_display,
-                    job.time,
-                    job.nodes,
-                    job.node_list,
-                )
-                rows_added += 1
-            except Exception:
-                logger.exception(f"Failed to add job {job.job_id} to table")
-        logger.debug(f"Added {rows_added} rows to jobs table (table now has {jobs_table.row_count} rows)")
+                jobs_table.remove_row(row_key)
+                removed += 1
+            except Exception as exc:
+                logger.debug(f"Failed to remove row for {job_id}: {exc}")
+        return removed
 
-        # Ensure table is properly displayed and visible
-        if rows_added > 0:
-            logger.debug(f"Table has {jobs_table.row_count} rows, columns: {list(jobs_table.columns.keys())}")
-
-        # Restore cursor position if possible
-        cursor_restored = False
-        if cursor_row is not None and jobs_table.row_count > 0:
-            new_row = min(cursor_row, jobs_table.row_count - 1)
-            jobs_table.move_cursor(row=new_row)
-            cursor_restored = True
-
-        # Force a refresh and ensure table is visible
-        if jobs_table.row_count > 0:
-            jobs_table.display = True
-            # Ensure table is mounted and has proper size
-            if jobs_table.is_attached:
-                # Ensure parent containers are properly sized
+    def _upsert_job_rows(self, jobs_table: DataTable, jobs: list[Job]) -> int:
+        """Insert new rows and update existing ones with the latest job data."""
+        changes = 0
+        for job in jobs:
+            row_values = self._job_row_values(job)
+            row_key = self._job_row_keys.get(job.job_id)
+            if row_key is None:
                 try:
-                    jobs_tab = self.query_one("#tab-jobs-content", Container)
-                    if jobs_tab.is_attached:
-                        jobs_tab.refresh(layout=True)
-                except Exception as exc:
-                    logger.debug(f"Failed to refresh jobs tab container: {exc}")
-                # Force layout recalculation for the table
-                jobs_table.refresh(layout=True)
-                # Move cursor to first row only if we didn't restore a position
-                if jobs_table.row_count > 0 and not cursor_restored:
-                    jobs_table.move_cursor(row=0)
-                logger.debug(
-                    f"Table refreshed: {jobs_table.row_count} rows, "
-                    f"size={jobs_table.size}, visible={jobs_table.visible}, "
-                    f"display={jobs_table.display}"
-                )
+                    new_key = jobs_table.add_row(*row_values)
+                    self._job_row_keys[job.job_id] = new_key
+                    changes += 1
+                except Exception:
+                    logger.exception(f"Failed to add job {job.job_id} to table")
+                continue
+            current_row = self._safe_get_row(jobs_table, row_key)
+            if current_row is None or len(current_row) != len(row_values):
+                if self._replace_job_row(jobs_table, job.job_id, row_key, row_values):
+                    changes += 1
+                continue
+            if self._update_changed_cells(jobs_table, row_key, row_values, current_row, job.job_id):
+                changes += 1
+        return changes
+
+    def _safe_get_row(self, jobs_table: DataTable, row_key: RowKey) -> list[str] | None:
+        """Return row values for the provided key, handling missing rows gracefully."""
+        try:
+            return jobs_table.get_row(row_key)
+        except Exception:
+            return None
+
+    def _replace_job_row(
+        self,
+        jobs_table: DataTable,
+        job_id: str,
+        old_key: RowKey,
+        row_values: list[str],
+    ) -> bool:
+        """Replace an existing row entirely."""
+        try:
+            jobs_table.remove_row(old_key)
+        except Exception as exc:
+            logger.debug(f"Failed to remove stale row for {job_id}: {exc}")
+        try:
+            new_key = jobs_table.add_row(*row_values)
+        except Exception:
+            logger.exception(f"Failed to re-add row for {job_id}")
+            return False
+        self._job_row_keys[job_id] = new_key
+        return True
+
+    def _update_changed_cells(
+        self,
+        jobs_table: DataTable,
+        row_key: RowKey,
+        new_values: list[str],
+        existing_values: list[str],
+        job_id: str,
+    ) -> bool:
+        """Update individual cells that have changed."""
+        updated = False
+        for column_key, new_value, existing_value in zip(
+            self.JOB_TABLE_COLUMNS,
+            new_values,
+            existing_values,
+            strict=False,
+        ):
+            if new_value == existing_value:
+                continue
+            try:
+                jobs_table.update_cell(row_key, column_key, new_value)
+                updated = True
+            except Exception:
+                logger.exception(f"Failed to update {column_key} for job {job_id}")
+        return updated
+
+    def _restore_jobs_table_cursor(
+        self,
+        jobs_table: DataTable,
+        cursor_row: int | None,
+        cursor_job_id: str | None,
+    ) -> bool:
+        """Restore the cursor position after the table has been updated."""
+        if cursor_job_id and cursor_job_id in self._job_row_keys:
+            try:
+                row_index = jobs_table.get_row_index(self._job_row_keys[cursor_job_id])
+            except Exception as exc:
+                logger.debug(f"Failed to restore cursor to job {cursor_job_id}: {exc}")
             else:
-                logger.warning("Table is not attached to DOM")
+                jobs_table.move_cursor(row=row_index)
+                return True
+        if jobs_table.row_count == 0:
+            return False
+        target_row = cursor_row if cursor_row is not None else 0
+        target_row = max(0, min(target_row, jobs_table.row_count - 1))
+        jobs_table.move_cursor(row=target_row)
+        return True
+
+    def _job_row_values(self, job: Job) -> list[str]:
+        """Build the row values for a job."""
+        state_display = self._format_state(job.state, job.state_category)
+        return [
+            job.job_id,
+            job.name,
+            state_display,
+            job.time,
+            job.nodes,
+            job.node_list,
+        ]
+
+    def _job_id_from_row_index(self, jobs_table: DataTable, row_index: int | None) -> str | None:
+        """Get job ID from a row index if available."""
+        if row_index is None or row_index < 0:
+            return None
+        try:
+            row_values = jobs_table.get_row_at(row_index)
+        except Exception:
+            return None
+        return row_values[0] if row_values else None
 
     def _update_ui_from_cache(self) -> None:
         """Update UI components from cached data (must run on main thread)."""
@@ -1109,7 +1258,6 @@ class SlurmMonitor(App[None]):
 
 def main() -> None:
     """Run the SLURM monitor TUI app."""
-    logger.info("Starting stoei")
     app = SlurmMonitor()
     app.run()
     logger.info("Stoei exited")

@@ -10,16 +10,18 @@ class TestGetRunningJobs:
     def test_returns_jobs_list(self, mock_slurm_path: Path) -> None:
         from stoei.slurm.commands import get_running_jobs
 
-        jobs = get_running_jobs()
+        jobs, error = get_running_jobs()
 
+        assert error is None
         assert isinstance(jobs, list)
         assert len(jobs) >= 2  # Mock returns 2-5 random jobs
 
     def test_job_tuple_structure(self, mock_slurm_path: Path) -> None:
         from stoei.slurm.commands import get_running_jobs
 
-        jobs = get_running_jobs()
+        jobs, error = get_running_jobs()
 
+        assert error is None
         assert len(jobs) > 0
         first_job = jobs[0]
         assert isinstance(first_job, tuple)
@@ -32,8 +34,9 @@ class TestGetJobHistory:
     def test_returns_history_tuple(self, mock_slurm_path: Path) -> None:
         from stoei.slurm.commands import get_job_history
 
-        jobs, total, requeues, max_req = get_job_history()
+        jobs, total, requeues, max_req, error = get_job_history()
 
+        assert error is None
         assert isinstance(jobs, list)
         assert isinstance(total, int)
         assert isinstance(requeues, int)
@@ -42,16 +45,18 @@ class TestGetJobHistory:
     def test_history_contains_jobs(self, mock_slurm_path: Path) -> None:
         from stoei.slurm.commands import get_job_history
 
-        jobs, total, _, _ = get_job_history()
+        jobs, total, _, _, error = get_job_history()
 
+        assert error is None
         assert len(jobs) == 10  # Mock has 10 history entries
         assert total == 10
 
     def test_requeue_counts(self, mock_slurm_path: Path) -> None:
         from stoei.slurm.commands import get_job_history
 
-        _, _, requeues, max_req = get_job_history()
+        _, _, requeues, max_req, error = get_job_history()
 
+        assert error is None
         # Mock data: 0+2+0+3+0+0+1+0+0+5 = 11 total, max = 5
         assert requeues == 11
         assert max_req == 5
@@ -59,8 +64,9 @@ class TestGetJobHistory:
     def test_jobs_sorted_descending(self, mock_slurm_path: Path) -> None:
         from stoei.slurm.commands import get_job_history
 
-        jobs, _, _, _ = get_job_history()
+        jobs, _, _, _, error = get_job_history()
 
+        assert error is None
         job_ids = [int(job[0].split("_")[0]) for job in jobs]
         assert job_ids == sorted(job_ids, reverse=True)
 
@@ -335,16 +341,20 @@ class TestCommandErrorPaths:
         from stoei.slurm.commands import get_running_jobs
 
         with patch("stoei.slurm.commands.resolve_executable", side_effect=FileNotFoundError):
-            jobs = get_running_jobs()
+            jobs, error = get_running_jobs()
             assert jobs == []
+            assert error is not None
+            assert "error" in error.lower() or "not found" in error.lower()
 
     def test_get_job_history_handles_missing_sacct(self) -> None:
         from stoei.slurm.commands import get_job_history
 
         with patch("stoei.slurm.commands.resolve_executable", side_effect=FileNotFoundError):
-            jobs, total, _requeues, _max_req = get_job_history()
+            jobs, total, _requeues, _max_req, error = get_job_history()
             assert jobs == []
             assert total == 0
+            assert error is not None
+            assert "error" in error.lower() or "not found" in error.lower()
 
     def test_cancel_job_handles_missing_scancel(self) -> None:
         from stoei.slurm.commands import cancel_job
@@ -385,8 +395,10 @@ class TestCommandErrorPaths:
             patch("stoei.slurm.commands.get_current_username", return_value="testuser"),
             patch("subprocess.run", side_effect=subprocess.SubprocessError("Error")),
         ):
-            jobs = get_running_jobs()
+            jobs, error = get_running_jobs()
             assert jobs == []
+            assert error is not None
+            assert "error" in error.lower()
 
     def test_get_job_history_handles_subprocess_error(self) -> None:
         """Test handling of SubprocessError in get_job_history."""
@@ -399,9 +411,11 @@ class TestCommandErrorPaths:
             patch("stoei.slurm.commands.get_current_username", return_value="testuser"),
             patch("subprocess.run", side_effect=subprocess.SubprocessError("Error")),
         ):
-            jobs, total, _requeues, _max_req = get_job_history()
+            jobs, total, _requeues, _max_req, error = get_job_history()
             assert jobs == []
             assert total == 0
+            assert error is not None
+            assert "error" in error.lower()
 
     def test_cancel_job_handles_subprocess_error(self) -> None:
         """Test handling of SubprocessError in cancel_job."""
@@ -428,8 +442,10 @@ class TestCommandErrorPaths:
             patch("stoei.slurm.commands.get_current_username", return_value="testuser"),
             patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)),
         ):
-            jobs = get_running_jobs()
+            jobs, error = get_running_jobs()
             assert jobs == []
+            assert error is not None
+            assert "timeout" in error.lower()
 
     def test_get_job_history_handles_timeout(self) -> None:
         """Test handling of timeout in get_job_history."""
@@ -442,8 +458,10 @@ class TestCommandErrorPaths:
             patch("stoei.slurm.commands.get_current_username", return_value="testuser"),
             patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 5)),
         ):
-            jobs, _total, _requeues, _max_req = get_job_history()
+            jobs, _total, _requeues, _max_req, error = get_job_history()
             assert jobs == []
+            assert error is not None
+            assert "timeout" in error.lower()
 
     def test_scontrol_handles_nonzero_exit_code(self) -> None:
         """Test handling of non-zero exit code from scontrol."""

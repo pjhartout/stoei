@@ -4,6 +4,7 @@ Logs are stored in the logs/ folder and kept for 1 week.
 Output goes to both stdout and file.
 """
 
+import os
 import sys
 from collections.abc import Callable
 from datetime import datetime
@@ -57,8 +58,9 @@ class LoguruMessage(Protocol):
 # Remove default handler
 logger.remove()
 
-# Define log directory
-LOG_DIR = Path.home() / ".stoei" / "logs"
+# Define log directory (default logs/ under current working dir, overridable via STOEI_LOG_DIR)
+_default_log_dir = Path.cwd() / "logs"
+LOG_DIR = Path(os.environ.get("STOEI_LOG_DIR", str(_default_log_dir))).expanduser().resolve()
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # Configure stdout handler with colors (only when not in TUI mode)
@@ -91,6 +93,8 @@ logger.add(
     rotation="00:00",  # New file at midnight
     retention="1 week",  # Keep logs for 1 week
     compression="gz",  # Compress old logs
+    backtrace=True,
+    diagnose=False,
 )
 
 

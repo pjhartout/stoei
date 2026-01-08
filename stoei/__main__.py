@@ -6,6 +6,9 @@ import traceback
 from importlib.metadata import version
 
 from stoei.app import main
+from stoei.logger import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_version() -> str:
@@ -48,6 +51,7 @@ def run() -> None:
     try:
         main()
     except Exception:
+        logger.exception("Unhandled exception while running stoei")
         # Print standard Python traceback instead of Rich's fancy one
         traceback.print_exc()
         sys.exit(1)

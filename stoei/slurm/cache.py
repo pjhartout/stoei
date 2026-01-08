@@ -127,7 +127,6 @@ class JobCache:
         self._max_requeues: int = 0
         self._running_count: int = 0
         self._pending_count: int = 0
-        logger.info("JobCache initialized")
 
     def refresh(self) -> None:
         """Refresh cache from SLURM commands.
@@ -138,8 +137,15 @@ class JobCache:
         logger.debug("Refreshing job cache")
 
         # Fetch data (may be slow - runs subprocess calls)
-        running_jobs = get_running_jobs()
-        history_jobs, total_jobs, total_requeues, max_requeues = get_job_history()
+        running_jobs, r_error = get_running_jobs()
+        if r_error:
+            logger.warning(f"Failed to refresh running jobs in cache: {r_error}")
+            running_jobs = []
+
+        history_jobs, total_jobs, total_requeues, max_requeues, h_error = get_job_history()
+        if h_error:
+            logger.warning(f"Failed to refresh job history in cache: {h_error}")
+            history_jobs, total_jobs, total_requeues, max_requeues = [], 0, 0, 0
 
         # Build from fetched data
         self._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)

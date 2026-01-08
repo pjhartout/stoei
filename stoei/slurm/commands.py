@@ -355,11 +355,11 @@ def get_job_log_paths(job_id: str) -> tuple[str | None, str | None, str | None]:
     return stdout, stderr, None
 
 
-def get_running_jobs() -> list[tuple[str, ...]]:
+def get_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
     """Return running/pending jobs from squeue.
 
     Returns:
-        List of tuples containing job information.
+        Tuple of (List of tuples containing job information, optional error message).
     """
     try:
         username = get_current_username()
@@ -382,31 +382,31 @@ def get_running_jobs() -> list[tuple[str, ...]]:
         )
     except (FileNotFoundError, ValidationError):
         logger.exception("Error setting up squeue command")
-        return []
+        return [], "Error setting up squeue"
     except subprocess.TimeoutExpired:
         logger.exception("Timeout getting running jobs")
-        return []
+        return [], "Timeout getting running jobs"
     except subprocess.SubprocessError:
         logger.exception("Error getting running jobs")
-        return []
+        return [], "Error getting running jobs"
 
     if result.returncode != 0:
         logger.warning(f"squeue returned non-zero exit code: {result.returncode}")
-        return []
+        return [], f"squeue error: {result.stderr}"
 
     jobs = parse_squeue_output(result.stdout)
     logger.debug(f"Found {len(jobs)} running/pending jobs")
-    return jobs
+    return jobs, None
 
 
-def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int]:
+def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int, str | None]:
     """Return job history for the last N days (sacct).
 
     Args:
         days: Number of days to look back for job history (default: 7).
 
     Returns:
-        Tuple of (jobs list, total jobs count, total requeues, max requeues).
+        Tuple of (jobs list, total jobs count, total requeues, max requeues, optional error message).
     """
     try:
         username = get_current_username()
@@ -432,21 +432,21 @@ def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int
         )
     except (FileNotFoundError, ValidationError):
         logger.exception("Error setting up sacct command")
-        return [], 0, 0, 0
+        return [], 0, 0, 0, "Error setting up sacct"
     except subprocess.TimeoutExpired:
         logger.exception("Timeout getting job history")
-        return [], 0, 0, 0
+        return [], 0, 0, 0, "Timeout getting job history"
     except subprocess.SubprocessError:
         logger.exception("Error getting job history")
-        return [], 0, 0, 0
+        return [], 0, 0, 0, "Error getting job history"
 
     if result.returncode != 0:
         logger.warning(f"sacct returned non-zero exit code: {result.returncode}")
-        return [], 0, 0, 0
+        return [], 0, 0, 0, f"sacct error: {result.stderr}"
 
     jobs, total_jobs, total_requeues, max_requeues = parse_sacct_output(result.stdout)
     logger.debug(f"Found {total_jobs} jobs in history (last {days} days) with {total_requeues} total requeues")
-    return jobs, total_jobs, total_requeues, max_requeues
+    return jobs, total_jobs, total_requeues, max_requeues, None
 
 
 def cancel_job(job_id: str) -> tuple[bool, str | None]:
@@ -604,14 +604,14 @@ def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
     return (job_id, name, user, state, time_used, num_nodes, node_list, tres)
 
 
-def get_all_running_jobs() -> list[tuple[str, ...]]:
+def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
     """Return all RUNNING jobs from squeue (all users) - single command, no loops.
 
     Uses squeue's -O format with Tres field to get all data in one call.
     Only fetches RUNNING state jobs (not PENDING) as per requirement.
 
     Returns:
-        List of tuples containing job information (JobID, Name, User, State, Time, Nodes, NodeList, TRES).
+        Tuple of (List of tuples containing job information, optional error message).
     """
     try:
         squeue = resolve_executable("squeue")
@@ -637,17 +637,17 @@ def get_all_running_jobs() -> list[tuple[str, ...]]:
         )
     except FileNotFoundError:
         logger.exception("Error setting up squeue command")
-        return []
+        return [], "squeue not found"
     except subprocess.TimeoutExpired:
         logger.exception("Timeout getting all running jobs")
-        return []
+        return [], "Timeout getting all running jobs"
     except subprocess.SubprocessError:
         logger.exception("Error getting all running jobs")
-        return []
+        return [], "Error getting all running jobs"
 
     if result.returncode != 0:
         logger.warning(f"squeue returned non-zero exit code: {result.returncode}")
-        return []
+        return [], f"squeue error: {result.stderr}"
 
     # Parse fixed-width format output from -O option
     jobs: list[tuple[str, ...]] = []
@@ -662,15 +662,15 @@ def get_all_running_jobs() -> list[tuple[str, ...]]:
             jobs.append(parsed)
 
     logger.debug(f"Found {len(jobs)} running jobs (all users) with TRES in single command")
-    return jobs
+    return jobs, None
 
 
-def get_all_users_jobs() -> list[tuple[str, ...]]:
+def get_all_users_jobs() -> tuple[list[tuple[str, ...]], str | None]:
     """Return all running/pending jobs from squeue (all users).
 
     Backward compatible wrapper - now calls get_all_running_jobs().
 
     Returns:
-        List of tuples containing job information (JobID, Name, User, State, Time, Nodes, NodeList, TRES).
+        Tuple of (List of tuples containing job information, optional error message).
     """
     return get_all_running_jobs()

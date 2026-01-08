@@ -139,9 +139,10 @@ class TestClusterDataIntegration:
         """Test getting all users jobs with mock SLURM."""
         from stoei.slurm.commands import get_all_users_jobs
 
-        jobs = get_all_users_jobs()
+        jobs, error = get_all_users_jobs()
         assert isinstance(jobs, list)
         # Mock may return empty or populated list
+        assert error is None or isinstance(error, str)
 
     def test_cluster_stats_calculation(self, mock_slurm_path: Path) -> None:
         """Test calculating cluster stats from node data."""

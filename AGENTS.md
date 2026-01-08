@@ -23,6 +23,8 @@ I want a full `pytest`-based test suite. I want to make extensive use of fixture
 
 I want to run this test suite on each push and opened PR on github workflows. I also want to have precommit hook to check for uv formatting and ty respecting the project rules.
 
+Keep unit tests under `tests/unit/` and place integration/user-flow tests under `tests/integration/`. Integration tests should simulate user actions (e.g., via `app.run_test()`) and live alongside other integration helpers in that folder.
+
 **Important**: Always run tests (`uv run pytest`) after making any code changes to ensure everything still works correctly.
 
 **Important**: Do NOT run interactive commands like `stoei` itself during development/testing as it is a TUI application that requires user interaction. If you must run it for verification, always use `timeout` to interrupt it after 10 seconds (e.g., `timeout 10 stoei`). Prefer using the pytest test suite for verification instead.

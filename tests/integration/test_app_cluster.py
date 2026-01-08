@@ -171,12 +171,13 @@ class TestAppClusterIntegration:
     def test_app_refresh_fetches_cluster_data(self, app: SlurmMonitor) -> None:
         """Test that app refresh fetches cluster data."""
         with (
-            patch("stoei.app.get_running_jobs", return_value=[]),
-            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([{"NodeName": "node01"}], None)) as mock_nodes,
-            patch("stoei.app.get_all_running_jobs", return_value=[]) as mock_jobs,
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)) as mock_jobs,
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
+            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
             mock_nodes.assert_called_once()

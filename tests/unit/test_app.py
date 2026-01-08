@@ -160,12 +160,13 @@ class TestRefreshDataAsync:
         app = SlurmMonitor()
 
         with (
-            patch("stoei.app.get_running_jobs", return_value=[]),
-            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
             patch.object(app._job_cache, "_build_from_data") as mock_build,
             patch.object(app, "call_from_thread"),
+            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
             mock_build.assert_called_once()
@@ -175,15 +176,20 @@ class TestRefreshDataAsync:
         app = SlurmMonitor()
 
         with (
-            patch("stoei.app.get_running_jobs", return_value=[]),
-            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread") as mock_call_from_thread,
+            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
-            mock_call_from_thread.assert_called_once_with(app._update_ui_from_cache)
+            # It's called multiple times (for loading indicator, notify, and update), we check update is one of them
+            # mock_call_from_thread.assert_any_call(app._update_ui_from_cache)
+            # Or better, check that it's called with the update method
+            calls = [call.args[0] for call in mock_call_from_thread.call_args_list if call.args]
+            assert app._update_ui_from_cache in calls
 
     def test_refresh_data_fetches_cluster_nodes(self) -> None:
         """Verify that _refresh_data_async fetches cluster nodes."""
@@ -192,12 +198,13 @@ class TestRefreshDataAsync:
         app = SlurmMonitor()
 
         with (
-            patch("stoei.app.get_running_jobs", return_value=[]),
-            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)) as mock_get_nodes,
-            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
+            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
             mock_get_nodes.assert_called_once()
@@ -209,12 +216,13 @@ class TestRefreshDataAsync:
         app = SlurmMonitor()
 
         with (
-            patch("stoei.app.get_running_jobs", return_value=[]),
-            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=[]) as mock_get_jobs,
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)) as mock_get_jobs,
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
+            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
             mock_get_jobs.assert_called_once()
@@ -226,12 +234,13 @@ class TestRefreshDataAsync:
         app = SlurmMonitor()
 
         with (
-            patch("stoei.app.get_running_jobs", return_value=[]),
-            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], "Error message")),
-            patch("stoei.app.get_all_running_jobs", return_value=[]),
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "call_from_thread"),
+            patch.object(app, "query_one"),
         ):
             # Should not raise an error
             app._refresh_data_async()

@@ -3,6 +3,7 @@
 
 import argparse
 import random
+import sys
 
 # Constants for parsing
 MIN_JOB_FIELDS_WITH_USER = 7
@@ -154,53 +155,109 @@ MOCK_JOBS_USER_ONLY = [
 ]
 
 
+def print_fixed_width(jobs):
+    """Print jobs in fixed width format compatible with -O."""
+    # JobID:20,Name:20,UserName:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
+    for job in jobs:
+        if len(job) < MIN_JOB_FIELDS_WITH_USER:
+            continue
+            
+        job_id, name, user, state, time, nodes, nodelist = job[:MIN_JOB_FIELDS_WITH_USER]
+        tres = job[7] if len(job) >= MIN_JOB_FIELDS_WITH_TRES else ""
+        
+        # Pad fields to match expected fixed width
+        line = (
+            f"{job_id:<20}"
+            f"{name:<20}"
+            f"{user:<15}"
+            f"{state:<10}"
+            f"{time:<12}"
+            f"{nodes:<6}"
+            f"{nodelist:<30}"
+            f"{tres}"
+        )
+        print(line)
+
+
 def main() -> None:
     """Main entry point for mock squeue command."""
     parser = argparse.ArgumentParser()
     parser.add_argument("-u", "--user", default=None)
     parser.add_argument("-o", "--format", default=None)
+    parser.add_argument("-O", "--Format", default=None) # Add support for -O
     parser.add_argument("-a", "--all", action="store_true")
+    parser.add_argument("-t", "--states", default=None) # Add support for -t
+    parser.add_argument("--noheader", action="store_true") # Add support for --noheader
+    
     args = parser.parse_args()
 
-    # Determine format - check if user field is in format string
-    has_user_field = args.format and "%.8u" in args.format
-    is_all_users = args.all or (not args.user and has_user_field)
+    # Determine mode
+    is_fixed_width = args.Format is not None
+    
+    # Filter states if specified
+    allowed_states = args.states.split(",") if args.states else None
 
-    # Check if TRES field is in format (indicated by %t)
-    has_tres_field = args.format and "%t" in args.format
-
-    if is_all_users and has_user_field:
-        # All users format with user field
-        if has_tres_field:
-            print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)|TRES")
-        else:
-            print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)")
+    # Get job pool
+    if is_fixed_width:
+        # Fixed width mode implies full job details including TRES
         jobs = MOCK_JOBS_ALL_USERS
     else:
-        # User-specific format without user field
-        print("     JOBID|        JOBNAME|   STATE|      TIME|   NODES|      NODELIST")
-        jobs = MOCK_JOBS_USER_ONLY
+        # Legacy/Simple mode
+        # Determine format - check if user field is in format string
+        has_user_field = args.format and "%.8u" in args.format
+        is_all_users = args.all or (not args.user and has_user_field)
+        
+        if is_all_users and has_user_field:
+            jobs = MOCK_JOBS_ALL_USERS
+        else:
+            jobs = MOCK_JOBS_USER_ONLY
+
+    # Filter by state
+    if allowed_states:
+        jobs = [j for j in jobs if any(s in j[3] for s in allowed_states)] # Index 3 is STATE in both lists
 
     # Filter by user if specified
-    if args.user and has_user_field:
-        jobs = [job for job in jobs if len(job) > MIN_USER_INDEX and job[MIN_USER_INDEX] == args.user]
-    elif args.user and not has_user_field:
-        # For user-specific format, just return some jobs
-        jobs = MOCK_JOBS_USER_ONLY
+    if args.user:
+        # In MOCK_JOBS_ALL_USERS, user is at index 2
+        # In MOCK_JOBS_USER_ONLY, no user field (so -u logic is just selection)
+        if jobs == MOCK_JOBS_ALL_USERS:
+             jobs = [job for job in jobs if len(job) > MIN_USER_INDEX and job[MIN_USER_INDEX] == args.user]
+        # else: user only jobs are just returned as is for that user
 
     # Randomly select some jobs to simulate dynamic queue
-    num_jobs = random.randint(MIN_RANDOM_JOBS, min(len(jobs), MAX_RANDOM_JOBS))  # noqa: S311
-    selected_jobs = random.sample(jobs, num_jobs)
+    # Ensure at least some jobs if available
+    if not jobs:
+        selected_jobs = []
+    else:
+        num_jobs = random.randint(min(len(jobs), MIN_RANDOM_JOBS), min(len(jobs), MAX_RANDOM_JOBS))  # noqa: S311
+        selected_jobs = random.sample(jobs, num_jobs)
+
+    if is_fixed_width:
+        print_fixed_width(selected_jobs)
+        return
+
+    # Regular output formatting
+    has_user_field = args.format and "%.8u" in args.format
+    has_tres_field = args.format and "%t" in args.format
+    
+    if not args.noheader:
+        if jobs == MOCK_JOBS_ALL_USERS:
+             if has_tres_field:
+                print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)|TRES")
+             else:
+                print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)")
+        else:
+             print("     JOBID|        JOBNAME|   STATE|      TIME|   NODES|      NODELIST")
 
     for job in selected_jobs:
-        if has_user_field and len(job) >= MIN_JOB_FIELDS_WITH_USER:
+        if jobs == MOCK_JOBS_ALL_USERS:
             job_id, name, user, state, time, nodes, nodelist = job[:MIN_JOB_FIELDS_WITH_USER]
             if has_tres_field and len(job) >= MIN_JOB_FIELDS_WITH_TRES:
                 tres = job[7]
                 print(f"{job_id:>10}|{name:>15}|{user:>8}|{state:>8}|{time:>10}|{nodes:>4}|{nodelist:>12}|{tres}")
             else:
                 print(f"{job_id:>10}|{name:>15}|{user:>8}|{state:>8}|{time:>10}|{nodes:>4}|{nodelist:>12}")
-        elif len(job) >= MIN_JOB_FIELDS_WITHOUT_USER:
+        else:
             job_id, name, state, time, nodes, nodelist = job[:MIN_JOB_FIELDS_WITHOUT_USER]
             print(f"{job_id:>10}|{name:>15}|{state:>8}|{time:>10}|{nodes:>7}|{nodelist:>14}")
 

@@ -4,6 +4,7 @@ from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar
 
 from rich.text import Text
+from textual.message_pump import NoActiveAppError
 from textual.widgets import RichLog
 
 if TYPE_CHECKING:
@@ -82,6 +83,11 @@ class LogPane(RichLog):
         log_text.append(f"[{level_upper:^8}] ", style=color)
         log_text.append(message)
 
+        try:
+            _ = self.app
+        except (LookupError, RuntimeError, NoActiveAppError):
+            return
+
         self.write(log_text)
 
     def sink(self, message: object) -> None:
@@ -105,7 +111,14 @@ class LogPane(RichLog):
 
         # Call from app thread if available
         try:
-            self.app.call_from_thread(self.add_log, level, str(msg), timestamp)
-        except RuntimeError:
-            # Not in a thread context, call directly
+            app = self.app
+        except (LookupError, RuntimeError, NoActiveAppError):
+            app = None
+
+        if app is not None:
+            try:
+                app.call_from_thread(self.add_log, level, str(msg), timestamp)
+            except RuntimeError:
+                self.add_log(level, str(msg), timestamp)
+        else:
             self.add_log(level, str(msg), timestamp)

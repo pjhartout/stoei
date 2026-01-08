@@ -39,12 +39,14 @@ class TestGetAllUsersJobs:
 
     def test_returns_jobs_list(self, mock_slurm_path: Path) -> None:
         """Test that get_all_users_jobs returns a list of job tuples."""
-        jobs = get_all_users_jobs()
+        jobs, error = get_all_users_jobs()
+        assert error is None
         assert isinstance(jobs, list)
 
     def test_job_tuple_structure(self, mock_slurm_path: Path) -> None:
         """Test that job tuples have the expected structure."""
-        jobs = get_all_users_jobs()
+        jobs, error = get_all_users_jobs()
+        assert error is None
         if len(jobs) > 0:
             first_job = jobs[0]
             assert isinstance(first_job, tuple)
@@ -53,7 +55,8 @@ class TestGetAllUsersJobs:
 
     def test_jobs_contain_user_field(self, mock_slurm_path: Path) -> None:
         """Test that jobs contain user information."""
-        jobs = get_all_users_jobs()
+        jobs, error = get_all_users_jobs()
+        assert error is None
         if len(jobs) > 0:
             # Third field should be user (index 2)
             assert len(jobs[0]) > 2
@@ -62,5 +65,8 @@ class TestGetAllUsersJobs:
 
     def test_empty_result_returns_empty_list(self, mock_slurm_path: Path) -> None:
         """Test that empty squeue output returns empty list."""
-        jobs = get_all_users_jobs()
+        jobs, error = get_all_users_jobs()
+        # Mock may return empty or populated, both are valid
         assert isinstance(jobs, list)
+        if not jobs:
+            assert error is None  # Normal empty result

@@ -12,7 +12,8 @@ class TestCSSValidation:
     @pytest.fixture
     def styles_dir(self) -> Path:
         """Get the styles directory."""
-        return Path(__file__).parent.parent / "stoei" / "styles"
+        repo_root = Path(__file__).resolve().parents[2]
+        return repo_root / "stoei" / "styles"
 
     def test_app_tcss_is_valid(self, styles_dir: Path) -> None:
         """Test that app.tcss is valid CSS."""
