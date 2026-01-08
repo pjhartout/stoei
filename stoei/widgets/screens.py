@@ -5,7 +5,8 @@ import re
 from pathlib import Path
 from typing import ClassVar
 
-from rich.markup import escape
+from rich.markup import MarkupError
+from rich.markup import escape as rich_escape
 from textual.app import ComposeResult, SuspendNotSupported
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.screen import Screen
@@ -52,6 +53,7 @@ class LogViewerScreen(Screen[None]):
         self.truncated: bool = False
         self._start_line: int = 1  # Starting line number (for truncated files)
         self._show_line_numbers: bool = True  # Line numbers shown by default
+        self._use_markup: bool = True  # Whether to use Rich markup (fallback to False on errors)
         # Search state
         self._search_term: str = ""
         self._search_active: bool = False
@@ -83,8 +85,12 @@ class LogViewerScreen(Screen[None]):
                     yield Static(f"⚠️  {self.load_error}", id="log-error-text")
             else:
                 with VerticalScroll(id="log-content-scroll"):
-                    # Use markup=True for line number styling, but escape content properly
-                    yield Static(self.file_contents, id="log-content-text", markup=True)
+                    # Try to use markup for styled line numbers
+                    # If markup fails, fall back to plain text
+                    logger.debug(f"Composing log content widget for {self.filepath}")
+                    content, use_markup = self._get_safe_display_content()
+                    logger.debug(f"Creating Static widget with markup={use_markup}")
+                    yield Static(content, id="log-content-text", markup=use_markup)
 
             # Search bar (hidden by default)
             with Container(id="log-search-container", classes="hidden"):
@@ -97,11 +103,51 @@ class LogViewerScreen(Screen[None]):
                 yield Button("📝 Open in $EDITOR", variant="primary", id="editor-button")
                 yield Button("✕ Close", variant="default", id="log-close-button")
 
+    def _escape_markup(self, text: str) -> str:
+        """Escape Rich markup in text to prevent interpretation.
+
+        IMPORTANT: This function should only be called on RAW content (not already escaped).
+        rich_escape() is NOT idempotent, so calling this on already-escaped content will
+        cause double-escaping.
+
+        Args:
+            text: Text that may contain Rich markup (should be raw, unescaped content).
+
+        Returns:
+            Text with all markup characters escaped.
+        """
+        # Use rich's escape function which escapes [ to \[
+        return rich_escape(text)
+
+    def _format_plain_with_line_numbers(self, content: str, start_line: int = 1) -> str:
+        """Add plain line numbers to content (no markup styling).
+
+        Args:
+            content: The file content to format.
+            start_line: Starting line number (useful for truncated files).
+
+        Returns:
+            Content with line numbers prepended, no markup.
+        """
+        if not content:
+            return content
+
+        lines = content.split("\n")
+        total_lines = start_line + len(lines) - 1
+        width = len(str(total_lines))
+
+        numbered_lines = []
+        for i, line in enumerate(lines):
+            line_num = start_line + i
+            numbered_lines.append(f"{line_num:>{width}} │ {line}")
+
+        return "\n".join(numbered_lines)
+
     def _format_with_line_numbers(self, content: str, start_line: int = 1) -> str:
         """Add line numbers to content.
 
         Args:
-            content: The file content to format (should be escaped for markup safety).
+            content: The file content to format (should already be escaped for markup safety).
             start_line: Starting line number (useful for truncated files).
 
         Returns:
@@ -117,15 +163,18 @@ class LogViewerScreen(Screen[None]):
         numbered_lines = []
         for i, line in enumerate(lines):
             line_num = start_line + i
-            # Defensive escape: ensure line content is safe for Rich markup
-            # escape() is idempotent, so already-escaped content is unchanged
-            safe_line = escape(line)
-            numbered_lines.append(f"[dim]{line_num:>{width}}[/dim] │ {safe_line}")
+            # Content should already be escaped by _get_display_content() before calling this.
+            # We use it directly to avoid double-escaping (which causes issues with rich_escape).
+            # The escaping in _get_display_content() ensures all [/dim] patterns are escaped.
+            numbered_lines.append(f"[dim]{line_num:>{width}}[/dim] │ {line}")
 
         return "\n".join(numbered_lines)
 
-    def _get_display_content(self) -> str:
+    def _get_display_content(self, use_markup: bool = True) -> str:
         """Get the content to display, with or without line numbers.
+
+        Args:
+            use_markup: Whether to use Rich markup styling.
 
         Returns:
             The formatted content for display.
@@ -133,12 +182,79 @@ class LogViewerScreen(Screen[None]):
         if not self._raw_contents:
             return self._raw_contents
 
-        # Escape content to prevent markup interpretation of log content
-        escaped_content = escape(self._raw_contents)
+        if use_markup:
+            # Escape content to prevent markup interpretation of log content
+            lines = self._raw_contents.split("\n")
+            escaped_lines = [self._escape_markup(line) for line in lines]
+            escaped_content = "\n".join(escaped_lines)
 
-        if self._show_line_numbers:
-            return self._format_with_line_numbers(escaped_content, self._start_line)
-        return escaped_content
+            if self._show_line_numbers:
+                return self._format_with_line_numbers(escaped_content, self._start_line)
+            return escaped_content
+        else:
+            # Plain text mode - no escaping needed, just add line numbers
+            if self._show_line_numbers:
+                return self._format_plain_with_line_numbers(self._raw_contents, self._start_line)
+            return self._raw_contents
+
+    def _get_safe_display_content(self) -> tuple[str, bool]:
+        """Get content with fallback to plain text if markup fails.
+
+        Returns:
+            Tuple of (content, use_markup) where use_markup indicates
+            whether the content should be rendered with markup=True.
+        """
+        logger.debug(f"Getting safe display content for {self.filepath}")
+
+        if not self._raw_contents:
+            logger.debug("Raw contents empty, returning placeholder")
+            return "[bright_black](empty)[/bright_black]", True
+
+        logger.debug(f"Raw content size: {len(self._raw_contents)} bytes")
+
+        # Generate content with markup (escaped)
+        content_with_markup = self._get_display_content(use_markup=True)
+        logger.debug(f"Generated markup content size: {len(content_with_markup)} bytes")
+
+        # Add truncation header if needed
+        if self.truncated:
+            truncated_size_mb = Path(self.filepath).stat().st_size / (1024 * 1024)
+            truncate_header = (
+                f"[bold yellow]⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
+                f"of {truncated_size_mb:.1f} MB)[/bold yellow]\n"
+                f"[bright_black]{'─' * 60}[/bright_black]\n\n"
+            )
+            content_with_markup = truncate_header + content_with_markup
+            logger.debug("Added truncation header")
+
+        # Return content with markup enabled - errors will be caught at widget level
+        logger.debug("Returning content with markup=True")
+        return content_with_markup, True
+
+    def _get_plain_display_content(self) -> str:
+        """Get content as plain text without any markup.
+
+        Returns:
+            Plain text content with line numbers (if enabled).
+        """
+        logger.debug(f"Getting plain display content for {self.filepath}")
+
+        if not self._raw_contents:
+            return "(empty)"
+
+        content_plain = self._get_display_content(use_markup=False)
+
+        # Add plain truncation header if needed
+        if self.truncated:
+            truncated_size_mb = Path(self.filepath).stat().st_size / (1024 * 1024)
+            truncate_header = (
+                f"⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
+                f"of {truncated_size_mb:.1f} MB)\n"
+                f"{'─' * 60}\n\n"
+            )
+            content_plain = truncate_header + content_plain
+
+        return content_plain
 
     def _count_total_lines(self, path: Path) -> int:
         """Count total lines in a file efficiently.
@@ -162,12 +278,18 @@ class LogViewerScreen(Screen[None]):
             path: Path to the file.
             file_size: Total size of the file in bytes.
         """
+        logger.debug(f"Loading truncated file: {path} (size: {file_size} bytes)")
         self.truncated = True
-        total_line_count = self._count_total_lines(path)
 
+        logger.debug("Counting total lines in file")
+        total_line_count = self._count_total_lines(path)
+        logger.debug(f"Total line count: {total_line_count}")
+
+        logger.debug(f"Seeking to position {file_size - self.MAX_FILE_SIZE}")
         with path.open("rb") as f:
             f.seek(file_size - self.MAX_FILE_SIZE)
             tail_bytes = f.read()
+        logger.debug(f"Read {len(tail_bytes)} tail bytes")
 
         tail_text = tail_bytes.decode("utf-8", errors="replace")
         first_newline = tail_text.find("\n")
@@ -175,23 +297,19 @@ class LogViewerScreen(Screen[None]):
         if first_newline != -1:
             tail_text = tail_text[first_newline + 1 :]
             skipped_partial_lines = 1
+            logger.debug("Skipped partial first line")
 
         tail_line_count = tail_text.count("\n") + 1
         self._start_line = max(1, total_line_count - tail_line_count + 2 - skipped_partial_lines)
-
-        truncated_size_mb = file_size / (1024 * 1024)
-        truncate_header = (
-            f"[bold yellow]⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
-            f"of {truncated_size_mb:.1f} MB)[/bold yellow]\n"
-            f"[bright_black]{'─' * 60}[/bright_black]\n\n"
-        )
+        logger.debug(f"Tail contains {tail_line_count} lines, starting at line {self._start_line}")
 
         self._raw_contents = tail_text
-        escaped_content = escape(tail_text)
-        if self._show_line_numbers:
-            self.file_contents = truncate_header + self._format_with_line_numbers(escaped_content, self._start_line)
-        else:
-            self.file_contents = truncate_header + escaped_content
+        logger.debug(f"Raw contents: {len(self._raw_contents)} characters")
+
+        # Use the safe display content method
+        logger.debug("Generating display content for truncated file")
+        self.file_contents, self._use_markup = self._get_safe_display_content()
+        logger.debug(f"Display content: {len(self.file_contents)} chars, markup={self._use_markup}")
 
         logger.info(
             f"Loaded log file (truncated): {self.filepath} "
@@ -205,6 +323,7 @@ class LogViewerScreen(Screen[None]):
         For large files, only the last MAX_FILE_SIZE bytes are loaded
         to maintain UI responsiveness.
         """
+        logger.debug(f"Loading file: {self.filepath}")
         path = Path(self.filepath)
         self.truncated = False
         self._start_line = 1
@@ -221,39 +340,75 @@ class LogViewerScreen(Screen[None]):
 
         try:
             file_size = path.stat().st_size
+            logger.debug(f"File size: {file_size} bytes")
 
             if file_size == 0:
+                logger.debug("File is empty")
                 self._raw_contents = ""
                 self.file_contents = "[bright_black](empty file)[/bright_black]"
-                logger.info(f"Loaded log file: {self.filepath}")
+                self._use_markup = True
+                logger.info(f"Loaded empty log file: {self.filepath}")
                 return
 
             if file_size <= self.MAX_FILE_SIZE:
+                logger.debug(f"File within size limit ({self.MAX_FILE_SIZE} bytes), reading entire file")
+                # Read raw file content - this may contain markup-like text
                 self._raw_contents = path.read_text()
+                logger.debug(f"Read {len(self._raw_contents)} characters from file")
                 self._start_line = 1
-                self.file_contents = self._get_display_content()
+                # Generate display content
+                logger.debug("Generating display content")
+                self.file_contents, self._use_markup = self._get_safe_display_content()
+                logger.debug(f"Display content generated: {len(self.file_contents)} chars, markup={self._use_markup}")
             else:
+                logger.debug("File exceeds size limit, loading truncated")
                 self._load_truncated_file(path, file_size)
                 return
 
-            logger.info(f"Loaded log file: {self.filepath}")
+            logger.info(f"Loaded log file: {self.filepath} ({file_size} bytes)")
         except PermissionError:
             self.load_error = f"Permission denied: {self.filepath}"
             logger.warning(self.load_error)
         except OSError as exc:
             self.load_error = f"Error reading file: {exc}"
             logger.warning(self.load_error)
+        except Exception as exc:
+            self.load_error = f"Unexpected error reading file: {exc}"
+            logger.exception(f"Unexpected error loading {self.filepath}")
 
     def on_mount(self) -> None:
         """Focus the scroll area and scroll to bottom for keyboard navigation."""
+        logger.debug(f"LogViewerScreen mounted for {self.filepath}")
         try:
             scroll = self.query_one("#log-content-scroll", VerticalScroll)
             scroll.focus()
             # Scroll to bottom to show latest log entries
             self.call_after_refresh(self._scroll_to_bottom)
-        except Exception:
+            logger.debug("Scroll area focused, will scroll to bottom after refresh")
+        except Exception as exc:
             # If no scroll area (error case), focus the close button
+            logger.debug(f"No scroll area found ({exc}), focusing close button")
             self.query_one("#log-close-button", Button).focus()
+
+    def _handle_markup_error(self, error: Exception) -> None:
+        """Handle a MarkupError by switching to plain text mode.
+
+        Args:
+            error: The exception that was raised.
+        """
+        logger.warning(f"Markup error for {self.filepath}: {error}")
+        logger.info("Switching to plain text mode")
+        self._use_markup = False
+        try:
+            content_widget = self.query_one("#log-content-text", Static)
+            content_widget._render_markup = False
+            plain_content = self._get_plain_display_content()
+            logger.debug(f"Plain content size: {len(plain_content)} chars")
+            content_widget.update(plain_content)
+            self.file_contents = plain_content
+            self.app.notify("Switched to plain text mode due to markup error", severity="warning")
+        except Exception:
+            logger.exception("Failed to switch to plain text mode")
 
     def _scroll_to_bottom(self) -> None:
         """Scroll the content to the bottom."""
@@ -320,53 +475,50 @@ class LogViewerScreen(Screen[None]):
 
     def action_reload(self) -> None:
         """Reload the file contents."""
+        logger.debug(f"Reloading file: {self.filepath}")
         self._load_file()
         try:
             content_widget = self.query_one("#log-content-text", Static)
             if self.load_error:
+                logger.debug(f"Load error: {self.load_error}")
                 content_widget.update(f"⚠️  {self.load_error}")
             else:
-                # Update with markup enabled for line numbers styling
+                # Update with appropriate markup setting based on fallback state
+                logger.debug(f"Updating widget with markup={self._use_markup}")
+                content_widget._render_markup = self._use_markup
                 content_widget.update(self.file_contents)
             self.app.notify("File reloaded")
             logger.info(f"Reloaded log file: {self.filepath}")
-        except Exception as exc:
-            logger.warning(f"Failed to update content after reload: {exc}")
+        except MarkupError as exc:
+            self._handle_markup_error(exc)
+        except Exception:
+            logger.exception("Failed to update content after reload")
 
     def action_toggle_line_numbers(self) -> None:
         """Toggle line number display."""
         self._show_line_numbers = not self._show_line_numbers
+        state = "on" if self._show_line_numbers else "off"
+        logger.debug(f"Toggling line numbers: {state}")
+
         try:
             content_widget = self.query_one("#log-content-text", Static)
             if self.load_error:
+                logger.debug("Load error exists, not toggling")
                 return
 
-            # Escape content to prevent markup interpretation
-            escaped_content = escape(self._raw_contents)
-
             # Regenerate content with/without line numbers
-            if self.truncated:
-                truncated_size_mb = Path(self.filepath).stat().st_size / (1024 * 1024)
-                truncate_header = (
-                    f"[bold yellow]⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
-                    f"of {truncated_size_mb:.1f} MB)[/bold yellow]\n"
-                    f"[bright_black]{'─' * 60}[/bright_black]\n\n"
-                )
-                if self._show_line_numbers:
-                    self.file_contents = truncate_header + self._format_with_line_numbers(
-                        escaped_content, self._start_line
-                    )
-                else:
-                    self.file_contents = truncate_header + escaped_content
-            else:
-                self.file_contents = self._get_display_content()
-
+            logger.debug("Regenerating display content")
+            self.file_contents, self._use_markup = self._get_safe_display_content()
+            content_widget._render_markup = self._use_markup
+            logger.debug(f"Updating widget with {len(self.file_contents)} chars, markup={self._use_markup}")
             content_widget.update(self.file_contents)
-            state = "on" if self._show_line_numbers else "off"
+
             self.app.notify(f"Line numbers {state}")
-            logger.debug(f"Toggled line numbers: {state}")
-        except Exception as exc:
-            logger.warning(f"Failed to toggle line numbers: {exc}")
+            logger.debug(f"Line numbers toggled: {state}")
+        except MarkupError as exc:
+            self._handle_markup_error(exc)
+        except Exception:
+            logger.exception("Failed to toggle line numbers")
 
     def action_close(self) -> None:
         """Close the modal."""
@@ -457,22 +609,37 @@ class LogViewerScreen(Screen[None]):
 
     def _highlight_matches(self) -> None:
         """Highlight search matches in the display."""
+        logger.debug(f"Highlighting matches for search term: {self._search_term}")
+
         if not self._search_term:
+            logger.debug("No search term, skipping highlight")
+            return
+
+        # If we're not using markup, we can't highlight - just show the content
+        if not self._use_markup:
+            logger.debug("Markup disabled, refreshing display without highlights")
+            self._refresh_display()
             return
 
         try:
             content_widget = self.query_one("#log-content-text", Static)
             # Regenerate content with highlighted search term
-            escaped_content = escape(self._raw_contents)
+            # Escape line-by-line for consistency
+            logger.debug("Escaping content for highlighting")
+            lines = self._raw_contents.split("\n")
+            escaped_lines = [self._escape_markup(line) for line in lines]
+            escaped_content = "\n".join(escaped_lines)
 
             # Highlight matches (case-insensitive)
-            pattern = re.compile(re.escape(self._search_term), re.IGNORECASE)
+            # Search in the escaped content, but the search term itself doesn't need escaping
+            # since we're looking for literal text
+            search_escaped = self._escape_markup(self._search_term)
+            pattern = re.compile(re.escape(search_escaped), re.IGNORECASE)
+            logger.debug(f"Searching for pattern: {pattern.pattern}")
 
             def highlight_match(match: re.Match[str]) -> str:
-                # Re-escape the matched text to prevent breaking Rich markup
-                # This handles cases where the match contains markup-like characters
-                matched_text = escape(match.group())
-                return f"[on yellow]{matched_text}[/on yellow]"
+                # The matched text is already escaped, just wrap it
+                return f"[on yellow]{match.group()}[/on yellow]"
 
             highlighted_content = pattern.sub(highlight_match, escaped_content)
 
@@ -490,29 +657,31 @@ class LogViewerScreen(Screen[None]):
                 )
                 display_content = truncate_header + display_content
 
+            logger.debug(f"Updating widget with highlighted content ({len(display_content)} chars)")
             content_widget.update(display_content)
             self.file_contents = display_content
-        except Exception as exc:
-            logger.warning(f"Failed to highlight matches: {exc}")
+        except MarkupError as exc:
+            logger.warning(f"Markup error during highlighting: {exc}")
+            self._handle_markup_error(exc)
+        except Exception:
+            logger.exception("Failed to highlight matches")
+            # On any error, just refresh without highlights
+            self._refresh_display()
 
     def _refresh_display(self) -> None:
         """Refresh the display content without search highlights."""
+        logger.debug("Refreshing display")
         try:
             content_widget = self.query_one("#log-content-text", Static)
-            self.file_contents = self._get_display_content()
-
-            if self.truncated:
-                truncated_size_mb = Path(self.filepath).stat().st_size / (1024 * 1024)
-                truncate_header = (
-                    f"[bold yellow]⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
-                    f"of {truncated_size_mb:.1f} MB)[/bold yellow]\n"
-                    f"[bright_black]{'─' * 60}[/bright_black]\n\n"
-                )
-                self.file_contents = truncate_header + self.file_contents
-
+            self.file_contents, self._use_markup = self._get_safe_display_content()
+            logger.debug(f"Got content: {len(self.file_contents)} chars, markup={self._use_markup}")
+            content_widget._render_markup = self._use_markup
             content_widget.update(self.file_contents)
-        except Exception as exc:
-            logger.warning(f"Failed to refresh display: {exc}")
+            logger.debug("Display refreshed")
+        except MarkupError as exc:
+            self._handle_markup_error(exc)
+        except Exception:
+            logger.exception("Failed to refresh display")
 
     def _scroll_to_match(self) -> None:
         """Scroll to the current match."""

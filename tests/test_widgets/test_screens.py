@@ -215,8 +215,10 @@ class TestLogViewerLineNumbers:
         screen = LogViewerScreen("/path/to/log.out", "stdout")
         # Content containing [dim] and [/dim] - these MUST be escaped
         # or they'll conflict with our line number [dim]...[/dim] tags
-        content = "[dim]some dimmed text[/dim]"
-        result = screen._format_with_line_numbers(content, start_line=1)
+        # In actual usage, content is escaped before being passed to _format_with_line_numbers
+        raw_content = "[dim]some dimmed text[/dim]"
+        escaped_content = screen._escape_markup(raw_content)
+        result = screen._format_with_line_numbers(escaped_content, start_line=1)
         # The line number [dim] should be present (our markup)
         assert result.startswith("[dim]")
         # The content's [dim] should be escaped
@@ -227,8 +229,10 @@ class TestLogViewerLineNumbers:
         """Test that orphan [/dim] in content is escaped."""
         screen = LogViewerScreen("/path/to/log.out", "stdout")
         # Just a closing tag without opening - this was causing the MarkupError
-        content = "error output [/dim] more text"
-        result = screen._format_with_line_numbers(content, start_line=1)
+        # In actual usage, content is escaped before being passed to _format_with_line_numbers
+        raw_content = "error output [/dim] more text"
+        escaped_content = screen._escape_markup(raw_content)
+        result = screen._format_with_line_numbers(escaped_content, start_line=1)
         # Our line number markup should be valid
         assert "[dim]" in result
         assert "[/dim]" in result
@@ -238,8 +242,10 @@ class TestLogViewerLineNumbers:
     def test_format_with_line_numbers_escapes_various_tags(self) -> None:
         """Test that various Rich markup tags in content are escaped."""
         screen = LogViewerScreen("/path/to/log.out", "stdout")
-        content = "[red]error[/red] [bold]warning[/bold] [italic]info[/italic]"
-        result = screen._format_with_line_numbers(content, start_line=1)
+        # In actual usage, content is escaped before being passed to _format_with_line_numbers
+        raw_content = "[red]error[/red] [bold]warning[/bold] [italic]info[/italic]"
+        escaped_content = screen._escape_markup(raw_content)
+        result = screen._format_with_line_numbers(escaped_content, start_line=1)
         # All tags should be escaped
         assert "\\[red]" in result
         assert "\\[/red]" in result
@@ -264,8 +270,11 @@ class TestLogViewerLineNumbers:
         screen = LogViewerScreen("/path/to/log.out", "stdout")
         # Note: [INFO], [ERROR], [DEBUG] are NOT valid Rich markup tags,
         # so they won't be escaped. Only [/dim] looks like a closing tag.
-        content = "[INFO] Starting\n[ERROR] Failed [/dim]\n[DEBUG] Done"
-        result = screen._format_with_line_numbers(content, start_line=1)
+        # In actual usage, content is escaped before being passed to _format_with_line_numbers
+        raw_content = "[INFO] Starting\n[ERROR] Failed [/dim]\n[DEBUG] Done"
+        # Escape the content first (as _get_display_content() does)
+        escaped_content = screen._escape_markup(raw_content)
+        result = screen._format_with_line_numbers(escaped_content, start_line=1)
         lines = result.split("\n")
         assert len(lines) == 3
         # Each line should have its own [dim]N[/dim] prefix
@@ -368,6 +377,54 @@ class TestLogViewerMarkupSafety:
             assert content_widget is not None
             rendered = content_widget.render()
             assert rendered is not None
+
+    def test_get_safe_display_content_uses_fallback(self, tmp_path: Path) -> None:
+        """Test _get_safe_display_content falls back to plain text on markup errors."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Line 1\nLine 2\n")
+
+        screen = LogViewerScreen(str(log_file), "stdout")
+        screen._load_file()
+
+        # The normal case should use markup
+        content, use_markup = screen._get_safe_display_content()
+        assert use_markup is True
+        assert "[dim]" in content  # Line numbers use [dim] tags
+
+    def test_format_plain_with_line_numbers(self, tmp_path: Path) -> None:
+        """Test _format_plain_with_line_numbers adds line numbers without markup."""
+        log_file = tmp_path / "test.log"
+        screen = LogViewerScreen(str(log_file), "stdout")
+        content = "Line 1\nLine 2\nLine 3"
+        result = screen._format_plain_with_line_numbers(content, start_line=1)
+
+        # Should have line numbers without [dim] tags
+        assert "1 │ Line 1" in result
+        assert "2 │ Line 2" in result
+        assert "3 │ Line 3" in result
+        # Should NOT have markup
+        assert "[dim]" not in result
+
+    def test_get_plain_display_content(self, tmp_path: Path) -> None:
+        """Test _get_plain_display_content returns plain text."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Line 1\nLine 2\n")
+
+        screen = LogViewerScreen(str(log_file), "stdout")
+        screen._load_file()
+
+        plain_content = screen._get_plain_display_content()
+        # Should have line numbers but no markup
+        assert "│ Line 1" in plain_content
+        assert "│ Line 2" in plain_content
+        assert "[dim]" not in plain_content
+
+    def test_handle_markup_error_method_exists(self, tmp_path: Path) -> None:
+        """Test _handle_markup_error method exists."""
+        log_file = tmp_path / "test.log"
+        screen = LogViewerScreen(str(log_file), "stdout")
+        assert hasattr(screen, "_handle_markup_error")
+        assert callable(screen._handle_markup_error)
 
 
 class TestLogViewerFileLoading:

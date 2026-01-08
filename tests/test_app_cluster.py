@@ -101,7 +101,7 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 app._cluster_nodes = [
                     {
                         "NodeName": "node01",
@@ -116,6 +116,8 @@ class TestAppClusterIntegration:
 
                 event = TabSwitched("nodes")
                 app.on_tab_switched(event)
+                # Wait for deferred update to complete
+                await pilot.pause()
 
                 node_tab = app.query_one("#node-overview", NodeOverviewTab)
                 # Should have nodes data
@@ -129,7 +131,7 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 app._all_users_jobs = [
                     ("12345", "job1", "user1", "RUNNING", "00:05:00", "1", "node01"),
                     ("12346", "job2", "user2", "PENDING", "00:00:00", "2", "node02"),
@@ -137,6 +139,8 @@ class TestAppClusterIntegration:
 
                 event = TabSwitched("users")
                 app.on_tab_switched(event)
+                # Wait for deferred update to complete
+                await pilot.pause()
 
                 user_tab = app.query_one("#user-overview", UserOverviewTab)
                 # Should have users data
