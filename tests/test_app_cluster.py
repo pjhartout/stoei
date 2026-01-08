@@ -100,6 +100,7 @@ class TestAppClusterIntegration:
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
+            patch.object(app, "_start_initial_load_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 app._cluster_nodes = [
@@ -117,6 +118,8 @@ class TestAppClusterIntegration:
                 event = TabSwitched("nodes")
                 app.on_tab_switched(event)
                 # Wait for deferred update to complete
+                await pilot.pause()
+                # Give a bit more time for call_later to execute
                 await pilot.pause()
 
                 node_tab = app.query_one("#node-overview", NodeOverviewTab)

@@ -22,6 +22,8 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra dev
+        env:
+          UV_PYTHON: "3.11"
 
       - name: Verify ruff is installed
         run: uv run ruff --version
@@ -47,6 +49,8 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra dev
+        env:
+          UV_PYTHON: "3.11"
 
       - name: Verify ty is installed
         run: uv run ty --version
@@ -72,6 +76,8 @@ jobs:
 
       - name: Install dependencies
         run: uv sync --extra dev
+        env:
+          UV_PYTHON: ${{ matrix.python-version }}
 
       - name: Run tests with coverage
         run: uv run pytest --cov=stoei --cov-report=xml --cov-report=term-missing
