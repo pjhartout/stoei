@@ -1,21 +1,26 @@
 """Full-screen screens for job information display."""
 
+import asyncio
 import contextlib
 import re
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import ClassVar
 
 from rich.markup import MarkupError
-from rich.markup import escape as rich_escape
 from textual.app import ComposeResult, SuspendNotSupported
 from textual.containers import Container, Vertical, VerticalScroll
 from textual.screen import Screen
+from textual.timer import Timer
 from textual.widgets import Button, Input, Static
 
 from stoei.editor import open_in_editor
 from stoei.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Timeout for file loading operations (in seconds)
+FILE_LOAD_TIMEOUT = 1.0
 
 
 class LogViewerScreen(Screen[None]):
@@ -36,6 +41,9 @@ class LogViewerScreen(Screen[None]):
 
     # Maximum file size to load (in bytes) - larger files are truncated from the start
     MAX_FILE_SIZE: ClassVar[int] = 512 * 1024  # 512 KB
+
+    # Spinner frames for loading indicator
+    SPINNER_FRAMES: ClassVar[tuple[str, ...]] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
     def __init__(self, filepath: str, log_type: str) -> None:
         """Initialize the log viewer screen.
@@ -59,6 +67,11 @@ class LogViewerScreen(Screen[None]):
         self._search_active: bool = False
         self._match_lines: list[int] = []  # Line numbers with matches
         self._current_match_index: int = -1
+        # Loading state
+        self._is_loading: bool = True
+        self._spinner_frame: int = 0
+        self._spinner_timer: Timer | None = None
+        self._load_timed_out: bool = False
 
     def compose(self) -> ComposeResult:
         """Create the log viewer layout.
@@ -66,9 +79,7 @@ class LogViewerScreen(Screen[None]):
         Yields:
             The widgets that make up the log viewer.
         """
-        # Load file contents
-        self._load_file()
-
+        # Don't load file in compose - do it asynchronously in on_mount
         with Vertical(id="log-viewer-container"):
             with Container(id="log-viewer-header"):
                 yield Static(
@@ -80,17 +91,20 @@ class LogViewerScreen(Screen[None]):
                     id="log-viewer-path",
                 )
 
-            if self.load_error:
-                with Container(id="log-error-container"):
-                    yield Static(f"⚠️  {self.load_error}", id="log-error-text")
-            else:
-                with VerticalScroll(id="log-content-scroll"):
-                    # Try to use markup for styled line numbers
-                    # If markup fails, fall back to plain text
-                    logger.debug(f"Composing log content widget for {self.filepath}")
-                    content, use_markup = self._get_safe_display_content()
-                    logger.debug(f"Creating Static widget with markup={use_markup}")
-                    yield Static(content, id="log-content-text", markup=use_markup)
+            # Loading indicator (visible initially)
+            with Container(id="log-loading-container"):
+                yield Static(
+                    f"{self.SPINNER_FRAMES[0]} Loading file...",
+                    id="log-loading-spinner",
+                )
+
+            # Error container (hidden initially)
+            with Container(id="log-error-container", classes="hidden"):
+                yield Static("", id="log-error-text")
+
+            # Content scroll (hidden initially)
+            with VerticalScroll(id="log-content-scroll", classes="hidden"):
+                yield Static("", id="log-content-text", markup=True)
 
             # Search bar (hidden by default)
             with Container(id="log-search-container", classes="hidden"):
@@ -107,17 +121,22 @@ class LogViewerScreen(Screen[None]):
         """Escape Rich markup in text to prevent interpretation.
 
         IMPORTANT: This function should only be called on RAW content (not already escaped).
-        rich_escape() is NOT idempotent, so calling this on already-escaped content will
-        cause double-escaping.
+        This escapes ALL opening brackets to prevent markup interpretation.
+
+        Note: We cannot use rich_escape() here because it only escapes brackets that look
+        like valid Rich markup tags (e.g., [bold]). Unmatched brackets like ['value are
+        NOT escaped by rich_escape(), but they can still cause MarkupError when parsed
+        by Textual/Rich because the parser tries to interpret them as tags with attributes.
 
         Args:
             text: Text that may contain Rich markup (should be raw, unescaped content).
 
         Returns:
-            Text with all markup characters escaped.
+            Text with all opening brackets escaped.
         """
-        # Use rich's escape function which escapes [ to \[
-        return rich_escape(text)
+        # Escape ALL opening brackets to prevent any markup interpretation
+        # This is more aggressive than rich_escape() but necessary for safety
+        return text.replace("[", "\\[")
 
     def _format_plain_with_line_numbers(self, content: str, start_line: int = 1) -> str:
         """Add plain line numbers to content (no markup styling).
@@ -377,18 +396,94 @@ class LogViewerScreen(Screen[None]):
             logger.exception(f"Unexpected error loading {self.filepath}")
 
     def on_mount(self) -> None:
-        """Focus the scroll area and scroll to bottom for keyboard navigation."""
+        """Start loading the file asynchronously with a spinner."""
         logger.debug(f"LogViewerScreen mounted for {self.filepath}")
+        # Start spinner animation
+        self._spinner_timer = self.set_interval(0.1, self._animate_spinner)
+        # Start async file loading
+        self.run_worker(self._async_load_file(), exclusive=True)
+
+    def _animate_spinner(self) -> None:
+        """Animate the loading spinner."""
+        if not self._is_loading:
+            return
+        self._spinner_frame = (self._spinner_frame + 1) % len(self.SPINNER_FRAMES)
         try:
-            scroll = self.query_one("#log-content-scroll", VerticalScroll)
-            scroll.focus()
-            # Scroll to bottom to show latest log entries
-            self.call_after_refresh(self._scroll_to_bottom)
-            logger.debug("Scroll area focused, will scroll to bottom after refresh")
+            spinner = self.query_one("#log-loading-spinner", Static)
+            spinner.update(f"{self.SPINNER_FRAMES[self._spinner_frame]} Loading file...")
         except Exception as exc:
-            # If no scroll area (error case), focus the close button
-            logger.debug(f"No scroll area found ({exc}), focusing close button")
-            self.query_one("#log-close-button", Button).focus()
+            logger.debug(f"Spinner update failed: {exc}")
+
+    async def _async_load_file(self) -> None:
+        """Load file asynchronously with timeout."""
+        logger.debug(f"Starting async file load for {self.filepath}")
+        loop = asyncio.get_running_loop()
+
+        try:
+            # Run file loading in a thread pool with timeout
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                try:
+                    await asyncio.wait_for(
+                        loop.run_in_executor(executor, self._load_file),
+                        timeout=FILE_LOAD_TIMEOUT,
+                    )
+                    logger.debug(f"File loaded successfully: {self.filepath}")
+                except TimeoutError:
+                    self._load_timed_out = True
+                    self.load_error = (
+                        f"File loading timed out after {FILE_LOAD_TIMEOUT}s. "
+                        "The file may be on a slow filesystem. Press 'r' to retry."
+                    )
+                    logger.warning(f"File loading timed out for {self.filepath}")
+        except Exception as exc:
+            self.load_error = f"Unexpected error: {exc}"
+            logger.exception(f"Error loading file: {self.filepath}")
+        finally:
+            self._is_loading = False
+            # Stop spinner
+            if self._spinner_timer:
+                self._spinner_timer.stop()
+                self._spinner_timer = None
+            # Update UI - we're already on the main event loop
+            self._on_load_complete()
+
+    def _on_load_complete(self) -> None:
+        """Called when file loading completes (success or failure)."""
+        logger.debug(f"Load complete for {self.filepath}, error={self.load_error}")
+
+        try:
+            # Hide loading indicator
+            loading_container = self.query_one("#log-loading-container", Container)
+            loading_container.add_class("hidden")
+
+            if self.load_error:
+                # Show error
+                error_container = self.query_one("#log-error-container", Container)
+                error_container.remove_class("hidden")
+                error_text = self.query_one("#log-error-text", Static)
+                error_text.update(f"⚠️  {self.load_error}")
+                # Focus close button
+                self.query_one("#log-close-button", Button).focus()
+                # Show notification for timeout
+                if self._load_timed_out:
+                    self.app.notify(
+                        "File loading timed out. Press 'r' to retry.",
+                        severity="warning",
+                        timeout=5,
+                    )
+            else:
+                # Show content
+                content_scroll = self.query_one("#log-content-scroll", VerticalScroll)
+                content_scroll.remove_class("hidden")
+                content_widget = self.query_one("#log-content-text", Static)
+                content_widget._render_markup = self._use_markup
+                content_widget.update(self.file_contents)
+                # Focus scroll area and scroll to bottom
+                content_scroll.focus()
+                self.call_after_refresh(self._scroll_to_bottom)
+                logger.debug("Content displayed, scrolling to bottom")
+        except Exception:
+            logger.exception("Error updating UI after load")
 
     def _handle_markup_error(self, error: Exception) -> None:
         """Handle a MarkupError by switching to plain text mode.
@@ -474,21 +569,102 @@ class LogViewerScreen(Screen[None]):
         self._scroll_to_bottom()
 
     def action_reload(self) -> None:
-        """Reload the file contents."""
+        """Reload the file contents asynchronously."""
         logger.debug(f"Reloading file: {self.filepath}")
-        self._load_file()
+        # Reset state for reload
+        self._is_loading = True
+        self._load_timed_out = False
+        self.load_error = None
+
         try:
-            content_widget = self.query_one("#log-content-text", Static)
+            # Show loading indicator
+            loading_container = self.query_one("#log-loading-container", Container)
+            loading_container.remove_class("hidden")
+            # Hide content/error
+            content_scroll = self.query_one("#log-content-scroll", VerticalScroll)
+            content_scroll.add_class("hidden")
+            error_container = self.query_one("#log-error-container", Container)
+            error_container.add_class("hidden")
+        except Exception as exc:
+            logger.debug(f"Failed to update UI state for reload: {exc}")
+
+        # Restart spinner
+        if self._spinner_timer:
+            self._spinner_timer.stop()
+        self._spinner_timer = self.set_interval(0.1, self._animate_spinner)
+
+        # Start async reload
+        self.run_worker(self._async_reload_file(), exclusive=True)
+        self.app.notify("Reloading file...", timeout=2)
+
+    async def _async_reload_file(self) -> None:
+        """Reload file asynchronously with timeout."""
+        logger.debug(f"Starting async reload for {self.filepath}")
+        loop = asyncio.get_running_loop()
+
+        try:
+            with ThreadPoolExecutor(max_workers=1) as executor:
+                try:
+                    await asyncio.wait_for(
+                        loop.run_in_executor(executor, self._load_file),
+                        timeout=FILE_LOAD_TIMEOUT,
+                    )
+                    logger.debug(f"File reloaded successfully: {self.filepath}")
+                except TimeoutError:
+                    self._load_timed_out = True
+                    self.load_error = (
+                        f"File loading timed out after {FILE_LOAD_TIMEOUT}s. "
+                        "The file may be on a slow filesystem. Press 'r' to retry."
+                    )
+                    logger.warning(f"File reload timed out for {self.filepath}")
+        except Exception as exc:
+            self.load_error = f"Unexpected error: {exc}"
+            logger.exception(f"Error reloading file: {self.filepath}")
+        finally:
+            self._is_loading = False
+            if self._spinner_timer:
+                self._spinner_timer.stop()
+                self._spinner_timer = None
+            # Update UI - we're already on the main event loop
+            self._on_reload_complete()
+
+    def _on_reload_complete(self) -> None:
+        """Called when file reload completes."""
+        logger.debug(f"Reload complete for {self.filepath}, error={self.load_error}")
+
+        try:
+            # Hide loading indicator
+            loading_container = self.query_one("#log-loading-container", Container)
+            loading_container.add_class("hidden")
+
             if self.load_error:
-                logger.debug(f"Load error: {self.load_error}")
-                content_widget.update(f"⚠️  {self.load_error}")
+                # Show error
+                error_container = self.query_one("#log-error-container", Container)
+                error_container.remove_class("hidden")
+                error_text = self.query_one("#log-error-text", Static)
+                error_text.update(f"⚠️  {self.load_error}")
+                # Hide content
+                content_scroll = self.query_one("#log-content-scroll", VerticalScroll)
+                content_scroll.add_class("hidden")
+                self.query_one("#log-close-button", Button).focus()
+                if self._load_timed_out:
+                    self.app.notify(
+                        "File reload timed out. Press 'r' to retry.",
+                        severity="warning",
+                        timeout=5,
+                    )
             else:
-                # Update with appropriate markup setting based on fallback state
-                logger.debug(f"Updating widget with markup={self._use_markup}")
+                # Show content
+                error_container = self.query_one("#log-error-container", Container)
+                error_container.add_class("hidden")
+                content_scroll = self.query_one("#log-content-scroll", VerticalScroll)
+                content_scroll.remove_class("hidden")
+                content_widget = self.query_one("#log-content-text", Static)
                 content_widget._render_markup = self._use_markup
                 content_widget.update(self.file_contents)
-            self.app.notify("File reloaded")
-            logger.info(f"Reloaded log file: {self.filepath}")
+                content_scroll.focus()
+                self.app.notify("File reloaded")
+                logger.info(f"Reloaded log file: {self.filepath}")
         except MarkupError as exc:
             self._handle_markup_error(exc)
         except Exception:

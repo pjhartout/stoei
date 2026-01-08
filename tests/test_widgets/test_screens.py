@@ -426,6 +426,60 @@ class TestLogViewerMarkupSafety:
         assert hasattr(screen, "_handle_markup_error")
         assert callable(screen._handle_markup_error)
 
+    async def test_render_command_with_python_list_overrides_no_error(self, tmp_path: Path) -> None:
+        """Test that content with Python list command arguments renders safely.
+
+        Regression test for issue where command-line arguments like:
+        --overrides=['model.hidden_size=80', 'training.max_epochs=10']
+        caused MarkupError because rich_escape() doesn't escape unmatched brackets.
+        """
+        from textual.app import App
+        from textual.widgets import Static
+
+        log_file = tmp_path / "slurm_command.log"
+        # This exact pattern caused the original MarkupError
+        log_file.write_text(
+            "python train.py --overrides=['model.hidden_size=80', "
+            "'training.accumulate_grad_batches=6', 'training.schedule_type=cosine', "
+            "'training.validate_before_training=false', 'training.max_epochs=10', "
+            "'compute.devices=1', 'logs.wandb.name=gpu_4g_4t1d']\n"
+        )
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stderr"))
+
+        app = TestApp()
+        # This should not raise MarkupError
+        async with app.run_test(size=(120, 30)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            content_widget = screen.query_one("#log-content-text", Static)
+            assert content_widget is not None
+            rendered = content_widget.render()
+            assert rendered is not None
+
+    def test_escape_markup_escapes_all_brackets(self, tmp_path: Path) -> None:
+        """Test that _escape_markup escapes ALL opening brackets.
+
+        Unlike rich_escape(), which only escapes brackets that look like valid
+        Rich markup tags, our _escape_markup() must escape ALL brackets to prevent
+        MarkupError from unmatched brackets being interpreted as tag attributes.
+        """
+        log_file = tmp_path / "test.log"
+        screen = LogViewerScreen(str(log_file), "stdout")
+
+        # Test cases that rich_escape() would NOT escape (unmatched brackets)
+        test_cases = [
+            ("['value", "\\['value"),  # Python list start
+            ("data['key", "data\\['key"),  # Dict access
+            ("[tag=80, other", "\\[tag=80, other"),  # Unmatched attribute-like
+        ]
+
+        for input_text, expected in test_cases:
+            result = screen._escape_markup(input_text)
+            assert result == expected, f"Failed for input: {input_text}"
+
 
 class TestLogViewerFileLoading:
     """Tests for LogViewerScreen file loading."""
@@ -881,6 +935,79 @@ class TestJobInputScreenActions:
         screen = JobInputScreen()
         assert hasattr(screen, "action_cancel")
         assert callable(screen.action_cancel)
+
+
+class TestLogViewerAsyncLoading:
+    """Tests for LogViewerScreen async loading behavior."""
+
+    def test_init_loading_state(self) -> None:
+        """Test that loading state is initialized correctly."""
+        screen = LogViewerScreen("/path/to/log.out", "stdout")
+        assert screen._is_loading is True
+        assert screen._load_timed_out is False
+        assert screen._spinner_timer is None
+
+    async def test_async_load_shows_loading_indicator(self, tmp_path: Path) -> None:
+        """Test that loading indicator is shown initially."""
+        from textual.app import App
+
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Test content\n")
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            # Wait for async loading to complete
+            await pilot.pause()
+            screen = app.screen
+            # After loading completes, loading container should be hidden
+            loading_container = screen.query_one("#log-loading-container")
+            assert "hidden" in loading_container.classes
+
+    async def test_async_load_shows_content_after_load(self, tmp_path: Path) -> None:
+        """Test that content is shown after loading completes."""
+        from textual.app import App
+        from textual.widgets import Static
+
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Test content line 1\nTest content line 2\n")
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen(str(log_file), "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            # Content should be visible
+            content_scroll = screen.query_one("#log-content-scroll")
+            assert "hidden" not in content_scroll.classes
+            # Content should contain the file data
+            content_widget = screen.query_one("#log-content-text", Static)
+            assert content_widget is not None
+
+    async def test_async_load_handles_missing_file(self, tmp_path: Path) -> None:
+        """Test that missing file shows error after async load."""
+        from textual.app import App
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(LogViewerScreen("/nonexistent/file.log", "stdout"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            # Error container should be visible
+            error_container = screen.query_one("#log-error-container")
+            assert "hidden" not in error_container.classes
+            # Content scroll should be hidden
+            content_scroll = screen.query_one("#log-content-scroll")
+            assert "hidden" in content_scroll.classes
 
 
 class TestScreensInApp:
