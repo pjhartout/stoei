@@ -124,8 +124,9 @@ class SlurmMonitor(App[None]):
         Yields:
             The widgets that make up the application UI.
         """
-        yield Header(show_clock=True)
-        yield LoadingIndicator(id="loading-indicator")
+        with Horizontal(id="header-wrapper"):
+            yield Header(show_clock=True)
+            yield LoadingIndicator(id="loading-indicator")
 
         with Horizontal(id="main-container"):
             # Main content area with tabs
