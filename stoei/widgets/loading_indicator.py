@@ -43,6 +43,8 @@ class LoadingIndicator(Static):
         super().__init__("", **kwargs)
         self._spinner_frame = 0
         self._timer: Timer | None = None
+        # Hidden until actively spinning so it doesn't reserve layout space
+        self.display = False
 
     def watch_loading(self, loading: bool) -> None:
         """Watch the loading reactive."""
