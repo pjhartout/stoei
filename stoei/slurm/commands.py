@@ -605,10 +605,10 @@ def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
 
 
 def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
-    """Return all RUNNING jobs from squeue (all users) - single command, no loops.
+    """Return all RUNNING and PENDING jobs from squeue (all users) - single command, no loops.
 
     Uses squeue's -O format with Tres field to get all data in one call.
-    Only fetches RUNNING state jobs (not PENDING) as per requirement.
+    Fetches both RUNNING and PENDING jobs so queued jobs are included.
 
     Returns:
         Tuple of (List of tuples containing job information, optional error message).
@@ -623,10 +623,10 @@ def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
             "JobID:20,Name:20,UserName:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
             "-a",  # Show all partitions
             "-t",
-            "RUNNING",  # Only running jobs, not pending
+            "RUNNING,PENDING",
             "--noheader",
         ]
-        logger.debug("Running squeue command for all running jobs (single command)")
+        logger.debug("Running squeue command for all active jobs (running+pending) (single command)")
 
         result = subprocess.run(  # noqa: S603
             command,
@@ -661,7 +661,7 @@ def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
         if parsed:
             jobs.append(parsed)
 
-    logger.debug(f"Found {len(jobs)} running jobs (all users) with TRES in single command")
+    logger.debug(f"Found {len(jobs)} active jobs (all users) with TRES in single command")
     return jobs, None
 
 
