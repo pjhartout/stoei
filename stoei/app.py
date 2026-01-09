@@ -5,12 +5,13 @@ import time
 from pathlib import Path
 from typing import ClassVar
 
+from rich.console import RenderableType
 from textual.app import App, ComposeResult
 from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.timer import Timer
 from textual.widgets import Button, DataTable, Footer, Header, Static
-from textual.widgets.data_table import RowKey
+from textual.widgets.data_table import ColumnKey, RowKey
 from textual.worker import Worker, WorkerState
 
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
@@ -114,6 +115,9 @@ class SlurmMonitor(App[None]):
         self._is_narrow: bool = False
         self._loading_screen: LoadingScreen | None = None
         self._job_row_keys: dict[str, RowKey] = {}
+        self._job_table_column_keys: list[ColumnKey] = []
+        self._last_history_jobs: list[tuple[str, ...]] = []
+        self._last_history_stats: tuple[int, int, int] = (0, 0, 0)
 
     def compose(self) -> ComposeResult:
         """Create the UI layout.
@@ -172,7 +176,7 @@ class SlurmMonitor(App[None]):
 
         jobs_table = self.query_one("#jobs_table", DataTable)
         jobs_table.cursor_type = "row"
-        jobs_table.add_columns("JobID", "Name", "State", "Time", "Nodes", "NodeList")
+        self._job_table_column_keys = jobs_table.add_columns("JobID", "Name", "State", "Time", "Nodes", "NodeList")
         logger.debug("Jobs table columns added, ready for data")
 
         # Show loading screen and start step-by-step loading
@@ -219,6 +223,10 @@ class SlurmMonitor(App[None]):
             return  # SLURM error, already handled
 
         running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = load_result
+
+        # Save initial history for fallback
+        self._last_history_jobs = history_jobs
+        self._last_history_stats = (total_jobs, total_requeues, max_requeues)
 
         # Build job cache from fetched data
         self._loading_update_step(8)
@@ -380,8 +388,6 @@ class SlurmMonitor(App[None]):
             running_jobs, r_error = get_running_jobs()
             if r_error:
                 logger.warning(f"Failed to refresh running jobs: {r_error}")
-                # Keep old data for running jobs if failed, OR maybe we should skip cache update entirely?
-                # For now, let's skip cache update if ANY critical part fails to avoid inconsistencies
                 running_jobs = None
 
             # Get history
@@ -389,14 +395,17 @@ class SlurmMonitor(App[None]):
             if h_error:
                 logger.warning(f"Failed to refresh job history: {h_error}")
                 history_jobs = None
+            else:
+                # Update cache of raw history data
+                self._last_history_jobs = history_jobs
+                self._last_history_stats = (total_jobs, total_requeues, max_requeues)
 
-            # Only update job cache if both succeeded
-            # This implements the "failover" behavior: if data fetch fails, we keep the old data displayed
-            if running_jobs is not None and history_jobs is not None:
-                self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+            # Handle partial failures with fallback
+            if running_jobs is not None:
+                self._handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
             else:
                 self.call_from_thread(
-                    lambda: self.notify("Partial refresh failure - keeping old data", severity="warning")
+                    lambda: self.notify("Running jobs refresh failed - keeping old data", severity="warning")
                 )
 
             # Refresh cluster nodes (single scontrol command)
@@ -425,6 +434,37 @@ class SlurmMonitor(App[None]):
         finally:
             self.call_from_thread(lambda: self._set_loading_indicator(False))
 
+    def _handle_refresh_fallback(
+        self,
+        running_jobs: list[tuple[str, ...]],
+        history_jobs: list[tuple[str, ...]] | None,
+        total_jobs: int,
+        total_requeues: int,
+        max_requeues: int,
+    ) -> None:
+        """Handle refresh logic with fallback for failed history.
+
+        Args:
+            running_jobs: List of running jobs tuples.
+            history_jobs: List of history jobs tuples (or None if failed).
+            total_jobs: Total job count from history.
+            total_requeues: Total requeues from history.
+            max_requeues: Max requeues from history.
+        """
+        if history_jobs is None:
+            # Reuse last successful history
+            history_jobs = list(self._last_history_jobs)
+            total_jobs, total_requeues, max_requeues = self._last_history_stats
+            self.call_from_thread(
+                lambda: self.notify("History refresh failed - using cached history", severity="warning")
+            )
+        else:
+            # Update cache of raw history data on success
+            self._last_history_jobs = history_jobs
+            self._last_history_stats = (total_jobs, total_requeues, max_requeues)
+
+        self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+
     def _set_loading_indicator(self, active: bool) -> None:
         """Safely toggle the global loading indicator spinner."""
         try:
@@ -442,11 +482,19 @@ class SlurmMonitor(App[None]):
         cursor_row = jobs_table.cursor_row
         cursor_job_id = self._job_id_from_row_index(jobs_table, cursor_row)
 
-        jobs = self._job_cache.jobs
+        jobs = self._sorted_jobs_for_display(self._job_cache.jobs)
         desired_job_ids = {job.job_id for job in jobs}
 
-        removed_rows = self._remove_missing_job_rows(jobs_table, desired_job_ids)
-        rows_changed = self._upsert_job_rows(jobs_table, jobs)
+        desired_order = [job.job_id for job in jobs]
+        current_order = self._current_jobs_table_order(jobs_table)
+
+        # If order changed (e.g., new/pending job submitted), rebuild to ensure "top of queue" ordering.
+        if current_order != desired_order:
+            removed_rows = jobs_table.row_count
+            rows_changed = self._rebuild_jobs_table(jobs_table, jobs)
+        else:
+            removed_rows = self._remove_missing_job_rows(jobs_table, desired_job_ids)
+            rows_changed = self._upsert_job_rows(jobs_table, jobs)
 
         cursor_restored = self._restore_jobs_table_cursor(jobs_table, cursor_row, cursor_job_id)
         jobs_table.display = jobs_table.row_count > 0
@@ -456,6 +504,61 @@ class SlurmMonitor(App[None]):
         logger.debug(
             f"Jobs table reconciled: {jobs_table.row_count} rows, {rows_changed} updates, {removed_rows} removals"
         )
+
+    def _sorted_jobs_for_display(self, jobs: list[Job]) -> list[Job]:
+        """Sort jobs for stable, user-friendly display.
+
+        Ordering:
+        - Active jobs first
+        - Pending jobs above running jobs (newly-submitted jobs are usually pending)
+        - Newest job IDs first (best-effort by numeric prefix)
+        """
+
+        def _job_id_number(job_id: str) -> int:
+            match = re.match(r"^(?P<num>\d+)", job_id)
+            if match is None:
+                return 0
+            try:
+                return int(match.group("num"))
+            except ValueError:
+                return 0
+
+        def _sort_key(job: Job) -> tuple[int, int, int]:
+            active_rank = 0 if job.is_active else 1
+            pending_rank = 0 if job.state_category == JobState.PENDING else 1
+            job_num = _job_id_number(job.job_id)
+            return (active_rank, pending_rank, -job_num)
+
+        return sorted(jobs, key=_sort_key)
+
+    def _current_jobs_table_order(self, jobs_table: DataTable) -> list[str]:
+        """Return the current job ID order in the table (top to bottom)."""
+        job_ids: list[str] = []
+        for idx in range(jobs_table.row_count):
+            try:
+                row = jobs_table.get_row_at(idx)
+            except Exception as exc:
+                logger.debug(f"Failed to read jobs table row {idx}: {exc}")
+                continue
+            if not row:
+                continue
+            job_ids.append(str(row[0]))
+        return job_ids
+
+    def _rebuild_jobs_table(self, jobs_table: DataTable, jobs: list[Job]) -> int:
+        """Clear and repopulate the jobs table in the provided order."""
+        jobs_table.clear(columns=False)
+        self._job_row_keys.clear()
+        changes = 0
+        for job in jobs:
+            try:
+                new_key = jobs_table.add_row(*self._job_row_values(job))
+            except Exception:
+                logger.exception(f"Failed to add job {job.job_id} to table")
+                continue
+            self._job_row_keys[job.job_id] = new_key
+            changes += 1
+        return changes
 
     def _remove_missing_job_rows(self, jobs_table: DataTable, desired_job_ids: set[str]) -> int:
         """Remove rows that are no longer present in the latest data."""
@@ -494,7 +597,7 @@ class SlurmMonitor(App[None]):
                 changes += 1
         return changes
 
-    def _safe_get_row(self, jobs_table: DataTable, row_key: RowKey) -> list[str] | None:
+    def _safe_get_row(self, jobs_table: DataTable, row_key: RowKey) -> list[RenderableType] | None:
         """Return row values for the provided key, handling missing rows gracefully."""
         try:
             return jobs_table.get_row(row_key)
@@ -526,24 +629,26 @@ class SlurmMonitor(App[None]):
         jobs_table: DataTable,
         row_key: RowKey,
         new_values: list[str],
-        existing_values: list[str],
+        existing_values: list[RenderableType],
         job_id: str,
     ) -> bool:
         """Update individual cells that have changed."""
         updated = False
-        for column_key, new_value, existing_value in zip(
-            self.JOB_TABLE_COLUMNS,
-            new_values,
-            existing_values,
-            strict=False,
-        ):
-            if new_value == existing_value:
+        for idx, (new_value, existing_value) in enumerate(zip(new_values, existing_values, strict=False)):
+            # existing_value may be a Text/Renderable, so normalize to string for comparison
+            if new_value == str(existing_value):
                 continue
             try:
+                column_key: ColumnKey | str
+                if idx < len(self._job_table_column_keys):
+                    column_key = self._job_table_column_keys[idx]
+                else:
+                    column_key = self.JOB_TABLE_COLUMNS[idx] if idx < len(self.JOB_TABLE_COLUMNS) else str(idx)
                 jobs_table.update_cell(row_key, column_key, new_value)
                 updated = True
             except Exception:
-                logger.exception(f"Failed to update {column_key} for job {job_id}")
+                column_name = self.JOB_TABLE_COLUMNS[idx] if idx < len(self.JOB_TABLE_COLUMNS) else str(idx)
+                logger.exception(f"Failed to update {column_name} for job {job_id}")
         return updated
 
     def _restore_jobs_table_cursor(
@@ -920,6 +1025,8 @@ class SlurmMonitor(App[None]):
                     logger.debug("Focused jobs table for arrow key navigation")
                 except Exception as exc:
                     logger.debug(f"Failed to focus jobs table: {exc}")
+                # Ensure the jobs table is refreshed when switching back to it (e.g., after background refreshes)
+                self.call_later(self._update_ui_from_cache)
             elif event.tab_name == "nodes":
                 # Defer heavy update to avoid blocking tab switch
                 self.call_later(self._update_node_overview)

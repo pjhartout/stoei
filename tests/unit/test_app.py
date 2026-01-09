@@ -762,3 +762,85 @@ class TestUpdateUIFromCache:
 
                 # Cursor should still be at row 1
                 assert jobs_table.cursor_row == 1
+
+    async def test_update_ui_updates_existing_job_row_values(self, app: SlurmMonitor) -> None:
+        """Test that a job row is updated in-place when cached values change."""
+        from stoei.slurm.cache import Job
+        from textual.widgets import DataTable
+
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                # Initial cached job
+                app._job_cache._jobs = [
+                    Job(
+                        job_id="1",
+                        name="job1",
+                        state="RUNNING",
+                        time="00:01:00",
+                        nodes="1",
+                        node_list="n1",
+                        is_active=True,
+                    )
+                ]
+                app._update_ui_from_cache()
+
+                jobs_table = app.query_one("#jobs_table", DataTable)
+                assert jobs_table.row_count == 1
+                assert jobs_table.get_row_at(0)[3] == "00:01:00"  # Time column
+
+                # Update the cache with changed time/state
+                app._job_cache._jobs = [
+                    Job(
+                        job_id="1",
+                        name="job1",
+                        state="PENDING",
+                        time="00:02:00",
+                        nodes="1",
+                        node_list="n1",
+                        is_active=True,
+                    )
+                ]
+                app._update_ui_from_cache()
+
+                # The existing row should be updated (not duplicated)
+                assert jobs_table.row_count == 1
+                assert jobs_table.get_row_at(0)[3] == "00:02:00"
+
+    async def test_update_ui_orders_pending_and_newest_jobs_first(self, app: SlurmMonitor) -> None:
+        """Test that pending/newest jobs appear at the top after refresh."""
+        from stoei.slurm.cache import Job
+        from textual.widgets import DataTable
+
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                app._job_cache._jobs = [
+                    Job(
+                        job_id="100",
+                        name="running_old",
+                        state="RUNNING",
+                        time="00:10:00",
+                        nodes="1",
+                        node_list="n1",
+                        is_active=True,
+                    ),
+                    Job(
+                        job_id="101",
+                        name="pending_new",
+                        state="PENDING",
+                        time="00:00:00",
+                        nodes="1",
+                        node_list="(Priority)",
+                        is_active=True,
+                    ),
+                ]
+
+                app._update_ui_from_cache()
+                jobs_table = app.query_one("#jobs_table", DataTable)
+                assert jobs_table.row_count == 2
+                assert str(jobs_table.get_row_at(0)[0]) == "101"
