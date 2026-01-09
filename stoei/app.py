@@ -99,10 +99,14 @@ class SlurmMonitor(App[None]):
     )
     JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList")
 
-    def __init__(self) -> None:
-        """Initialize the SLURM monitor app."""
+    def __init__(self, refresh_interval: float = REFRESH_INTERVAL) -> None:
+        """Initialize the SLURM monitor app.
+
+        Args:
+            refresh_interval: Interval between automatic refreshes in seconds.
+        """
         super().__init__()
-        self.refresh_interval: float = REFRESH_INTERVAL
+        self.refresh_interval: float = refresh_interval
         self.auto_refresh_timer: Timer | None = None
         self._job_cache: JobCache = JobCache()
         self._refresh_worker: Worker[None] | None = None
@@ -1256,8 +1260,13 @@ class SlurmMonitor(App[None]):
         self.exit()
 
 
-def main() -> None:
-    """Run the SLURM monitor TUI app."""
-    app = SlurmMonitor()
+def main(refresh_interval: float | None = None) -> None:
+    """Run the SLURM monitor TUI app.
+
+    Args:
+        refresh_interval: Optional override for automatic refresh interval in seconds.
+    """
+    interval = refresh_interval if refresh_interval is not None else REFRESH_INTERVAL
+    app = SlurmMonitor(refresh_interval=interval)
     app.run()
     logger.info("Stoei exited")

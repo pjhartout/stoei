@@ -130,7 +130,7 @@ def test_cli_logs_uncaught_exceptions(tmp_path: Path, monkeypatch: pytest.Monkey
     logger_module = importlib.reload(logger_module)
     cli_module = importlib.reload(cli_module)
 
-    def blow_up() -> None:
+    def blow_up(refresh_interval: float | None = None) -> None:  # noqa: ARG001
         raise RuntimeError("boom")
 
     monkeypatch.setattr(cli_module, "main", blow_up)
