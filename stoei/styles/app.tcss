@@ -27,6 +27,15 @@ Header {
     color: ansi_cyan;
 }
 
+LoadingIndicator {
+    layer: overlay;
+    dock: top;
+    width: 14;
+    height: 1;
+    content-align: center middle;
+    background: ansi_black;
+}
+
 Footer {
     background: ansi_black;
     color: $foreground;

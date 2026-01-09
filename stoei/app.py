@@ -78,6 +78,7 @@ class SlurmMonitor(App[None]):
 
     TITLE = "STOEI"
     ENABLE_COMMAND_PALETTE = False
+    LAYERS: ClassVar[list[str]] = ["base", "overlay"]
     CSS_PATH: ClassVar[list[Path]] = [
         STYLES_DIR / "app.tcss",
         STYLES_DIR / "modals.tcss",
@@ -120,7 +121,7 @@ class SlurmMonitor(App[None]):
         Yields:
             The widgets that make up the application UI.
         """
-        yield Header(show_clock=True)
+        yield Header(show_clock=True, icon="")
         yield LoadingIndicator(id="loading-indicator")
 
         with Horizontal(id="main-container"):
