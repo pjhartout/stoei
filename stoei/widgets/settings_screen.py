@@ -11,7 +11,15 @@ from textual.screen import Screen
 from textual.widgets import Button, Input, Select, Static
 
 from stoei.logger import get_logger
-from stoei.settings import LOG_LEVELS, MIN_LOG_LINES, Settings
+from stoei.settings import (
+    LOG_LEVELS,
+    MAX_JOB_HISTORY_DAYS,
+    MAX_REFRESH_INTERVAL,
+    MIN_JOB_HISTORY_DAYS,
+    MIN_LOG_LINES,
+    MIN_REFRESH_INTERVAL,
+    Settings,
+)
 from stoei.themes import THEME_LABELS
 
 logger = get_logger(__name__)
@@ -31,6 +39,8 @@ class SettingsScreen(Screen[Settings | None]):
         ("t", "jump_theme", "Jump to Theme"),
         ("l", "jump_log_level", "Jump to Log Level"),
         ("m", "jump_max_lines", "Jump to Max Lines"),
+        ("r", "jump_refresh", "Jump to Refresh Interval"),
+        ("h", "jump_history", "Jump to History Days"),
     )
 
     # Order of focusable widgets for navigation
@@ -38,6 +48,8 @@ class SettingsScreen(Screen[Settings | None]):
         "#settings-theme",
         "#settings-log-level",
         "#settings-max-lines",
+        "#settings-refresh-interval",
+        "#settings-job-history-days",
         "#settings-save",
         "#settings-cancel",
     )
@@ -73,6 +85,16 @@ class SettingsScreen(Screen[Settings | None]):
             )
             yield Static("Max log lines", classes="settings-label")
             yield Input(str(self._settings.max_log_lines), id="settings-max-lines")
+            yield Static(
+                f"Refresh interval (seconds, {MIN_REFRESH_INTERVAL:.0f}-{MAX_REFRESH_INTERVAL:.0f})",
+                classes="settings-label",
+            )
+            yield Input(str(self._settings.refresh_interval), id="settings-refresh-interval")
+            yield Static(
+                f"Job history days ({MIN_JOB_HISTORY_DAYS}-{MAX_JOB_HISTORY_DAYS})",
+                classes="settings-label",
+            )
+            yield Input(str(self._settings.job_history_days), id="settings-job-history-days")
             with Container(id="settings-button-row"):
                 yield Button("💾 Save", variant="primary", id="settings-save")
                 yield Button("✕ Cancel", variant="default", id="settings-cancel")
@@ -261,6 +283,26 @@ class SettingsScreen(Screen[Settings | None]):
         except Exception as exc:
             logger.debug(f"Failed to focus max lines input: {exc}")
 
+    def action_jump_refresh(self) -> None:
+        """Jump focus to the refresh interval input."""
+        # Don't jump if currently typing in the input field
+        if isinstance(self.focused, Input):
+            return
+        try:
+            self.query_one("#settings-refresh-interval", Input).focus()
+        except Exception as exc:
+            logger.debug(f"Failed to focus refresh interval input: {exc}")
+
+    def action_jump_history(self) -> None:
+        """Jump focus to the job history days input."""
+        # Don't jump if currently typing in the input field
+        if isinstance(self.focused, Input):
+            return
+        try:
+            self.query_one("#settings-job-history-days", Input).focus()
+        except Exception as exc:
+            logger.debug(f"Failed to focus job history days input: {exc}")
+
     def action_cancel(self) -> None:
         """Cancel and close the settings screen."""
         self.dismiss(None)
@@ -271,36 +313,104 @@ class SettingsScreen(Screen[Settings | None]):
 
     def _save_settings(self) -> None:
         """Validate settings and dismiss with the updated settings."""
+        validated = self._validate_all_settings()
+        if validated is not None:
+            self.dismiss(validated)
+
+    def _validate_all_settings(self) -> Settings | None:
+        """Validate all settings fields and return Settings if valid, None otherwise."""
+        theme = self._validate_theme()
+        if theme is None:
+            return None
+
+        log_level = self._validate_log_level()
+        if log_level is None:
+            return None
+
+        max_lines = self._validate_max_lines()
+        if max_lines is None:
+            return None
+
+        refresh_interval = self._validate_refresh_interval()
+        if refresh_interval is None:
+            return None
+
+        job_history_days = self._validate_job_history_days()
+        if job_history_days is None:
+            return None
+
+        return Settings(
+            theme=theme,
+            log_level=log_level,
+            max_log_lines=max_lines,
+            refresh_interval=refresh_interval,
+            job_history_days=job_history_days,
+        )
+
+    def _validate_theme(self) -> str | None:
+        """Validate and return theme selection."""
         theme_select = self.query_one("#settings-theme", Select)
-        log_level_select = self.query_one("#settings-log-level", Select)
-        max_lines_input = self.query_one("#settings-max-lines", Input)
-
         theme_value = theme_select.value
-        log_level_value = log_level_select.value
-
         if not isinstance(theme_value, str) or theme_value not in THEME_LABELS:
             logger.warning("Invalid theme selection")
             self.app.notify("Please select a valid theme", severity="warning")
-            return
+            return None
+        return theme_value
 
+    def _validate_log_level(self) -> str | None:
+        """Validate and return log level selection."""
+        log_level_select = self.query_one("#settings-log-level", Select)
+        log_level_value = log_level_select.value
         if not isinstance(log_level_value, str) or log_level_value not in LOG_LEVELS:
             logger.warning("Invalid log level selection")
             self.app.notify("Please select a valid log level", severity="warning")
-            return
+            return None
+        return log_level_value
 
+    def _validate_max_lines(self) -> int | None:
+        """Validate and return max log lines value."""
+        max_lines_input = self.query_one("#settings-max-lines", Input)
         max_lines_value = max_lines_input.value.strip()
         try:
             max_lines = int(max_lines_value)
         except ValueError:
             self.app.notify("Max log lines must be a number", severity="warning")
-            return
-
+            return None
         if max_lines < MIN_LOG_LINES:
+            self.app.notify(f"Max log lines must be at least {MIN_LOG_LINES}", severity="warning")
+            return None
+        return max_lines
+
+    def _validate_refresh_interval(self) -> float | None:
+        """Validate and return refresh interval value."""
+        refresh_interval_input = self.query_one("#settings-refresh-interval", Input)
+        refresh_interval_value = refresh_interval_input.value.strip()
+        try:
+            refresh_interval = float(refresh_interval_value)
+        except ValueError:
+            self.app.notify("Refresh interval must be a number", severity="warning")
+            return None
+        if refresh_interval < MIN_REFRESH_INTERVAL or refresh_interval > MAX_REFRESH_INTERVAL:
             self.app.notify(
-                f"Max log lines must be at least {MIN_LOG_LINES}",
+                f"Refresh interval must be between {MIN_REFRESH_INTERVAL:.0f} and {MAX_REFRESH_INTERVAL:.0f} seconds",
                 severity="warning",
             )
-            return
+            return None
+        return refresh_interval
 
-        updated = Settings(theme=theme_value, log_level=log_level_value, max_log_lines=max_lines)
-        self.dismiss(updated)
+    def _validate_job_history_days(self) -> int | None:
+        """Validate and return job history days value."""
+        job_history_days_input = self.query_one("#settings-job-history-days", Input)
+        job_history_days_value = job_history_days_input.value.strip()
+        try:
+            job_history_days = int(job_history_days_value)
+        except ValueError:
+            self.app.notify("Job history days must be a number", severity="warning")
+            return None
+        if job_history_days < MIN_JOB_HISTORY_DAYS or job_history_days > MAX_JOB_HISTORY_DAYS:
+            self.app.notify(
+                f"Job history days must be between {MIN_JOB_HISTORY_DAYS} and {MAX_JOB_HISTORY_DAYS}",
+                severity="warning",
+            )
+            return None
+        return job_history_days

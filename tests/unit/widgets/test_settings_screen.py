@@ -60,6 +60,8 @@ class TestSettingsScreenBindings:
         assert "t" in binding_keys
         assert "l" in binding_keys
         assert "m" in binding_keys
+        assert "r" in binding_keys
+        assert "h" in binding_keys
 
 
 class TestSettingsScreenFocusOrder:
@@ -75,6 +77,8 @@ class TestSettingsScreenFocusOrder:
             "#settings-theme",
             "#settings-log-level",
             "#settings-max-lines",
+            "#settings-refresh-interval",
+            "#settings-job-history-days",
             "#settings-save",
             "#settings-cancel",
         ]
@@ -139,6 +143,18 @@ class TestSettingsScreenActions:
         assert hasattr(screen, "action_jump_max_lines")
         assert callable(screen.action_jump_max_lines)
 
+    def test_action_jump_refresh_exists(self, default_settings: Settings) -> None:
+        """Test action_jump_refresh method exists."""
+        screen = SettingsScreen(default_settings)
+        assert hasattr(screen, "action_jump_refresh")
+        assert callable(screen.action_jump_refresh)
+
+    def test_action_jump_history_exists(self, default_settings: Settings) -> None:
+        """Test action_jump_history method exists."""
+        screen = SettingsScreen(default_settings)
+        assert hasattr(screen, "action_jump_history")
+        assert callable(screen.action_jump_history)
+
 
 class TestSettingsScreenInApp:
     """Functional tests for settings screen running in an app context."""
@@ -166,6 +182,10 @@ class TestSettingsScreenInApp:
             assert log_level_select is not None
             max_lines_input = screen.query_one("#settings-max-lines", Input)
             assert max_lines_input is not None
+            refresh_interval_input = screen.query_one("#settings-refresh-interval", Input)
+            assert refresh_interval_input is not None
+            job_history_days_input = screen.query_one("#settings-job-history-days", Input)
+            assert job_history_days_input is not None
             save_btn = screen.query_one("#settings-save", Button)
             assert save_btn is not None
             cancel_btn = screen.query_one("#settings-cancel", Button)
@@ -516,8 +536,9 @@ class TestSettingsScreenInApp:
         app = TestApp(default_settings)
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            max_lines_input = app.screen.query_one("#settings-max-lines", Input)
-            max_lines_input.focus()
+            # Focus job history days (last input before buttons)
+            history_days_input = app.screen.query_one("#settings-job-history-days", Input)
+            history_days_input.focus()
             await pilot.pause()
 
             await pilot.press("enter")
@@ -572,3 +593,47 @@ class TestSettingsScreenInApp:
             await pilot.press("up")
             cancel_btn = app.screen.query_one("#settings-cancel", Button)
             assert app.screen.focused is cancel_btn
+
+    @pytest.mark.asyncio
+    async def test_r_jumps_to_refresh_interval(self, default_settings: Settings) -> None:
+        """'r' should jump focus to refresh interval input."""
+
+        class TestApp(App[None]):
+            def __init__(self, settings: Settings) -> None:
+                super().__init__()
+                self._settings = settings
+
+            def on_mount(self) -> None:
+                self.push_screen(SettingsScreen(self._settings))
+
+        app = TestApp(default_settings)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            theme_select = app.screen.query_one("#settings-theme", Select)
+            assert app.screen.focused is theme_select
+
+            await pilot.press("r")
+            refresh_input = app.screen.query_one("#settings-refresh-interval", Input)
+            assert app.screen.focused is refresh_input
+
+    @pytest.mark.asyncio
+    async def test_h_jumps_to_history_days(self, default_settings: Settings) -> None:
+        """'h' should jump focus to job history days input."""
+
+        class TestApp(App[None]):
+            def __init__(self, settings: Settings) -> None:
+                super().__init__()
+                self._settings = settings
+
+            def on_mount(self) -> None:
+                self.push_screen(SettingsScreen(self._settings))
+
+        app = TestApp(default_settings)
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            theme_select = app.screen.query_one("#settings-theme", Select)
+            assert app.screen.focused is theme_select
+
+            await pilot.press("h")
+            history_input = app.screen.query_one("#settings-job-history-days", Input)
+            assert app.screen.focused is history_input

@@ -17,6 +17,16 @@ LOG_LEVELS: tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 MIN_LOG_LINES = 200
 DEFAULT_MAX_LOG_LINES = 2000
 
+# Refresh interval settings (in seconds)
+MIN_REFRESH_INTERVAL = 1.0
+MAX_REFRESH_INTERVAL = 300.0
+DEFAULT_REFRESH_INTERVAL = 5.0
+
+# Job history settings (in days)
+MIN_JOB_HISTORY_DAYS = 1
+MAX_JOB_HISTORY_DAYS = 90
+DEFAULT_JOB_HISTORY_DAYS = 7
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -25,6 +35,8 @@ class Settings:
     theme: str = DEFAULT_THEME_NAME
     log_level: str = "WARNING"
     max_log_lines: int = DEFAULT_MAX_LOG_LINES
+    refresh_interval: float = DEFAULT_REFRESH_INTERVAL
+    job_history_days: int = DEFAULT_JOB_HISTORY_DAYS
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object]) -> Settings:
@@ -46,7 +58,29 @@ class Settings:
         if max_log_lines is None or max_log_lines < MIN_LOG_LINES:
             max_log_lines = DEFAULT_MAX_LOG_LINES
 
-        return cls(theme=theme, log_level=log_level, max_log_lines=max_log_lines)
+        refresh_interval = _coerce_float(data.get("refresh_interval"))
+        if (
+            refresh_interval is None
+            or refresh_interval < MIN_REFRESH_INTERVAL
+            or refresh_interval > MAX_REFRESH_INTERVAL
+        ):
+            refresh_interval = DEFAULT_REFRESH_INTERVAL
+
+        job_history_days = _coerce_int(data.get("job_history_days"))
+        if (
+            job_history_days is None
+            or job_history_days < MIN_JOB_HISTORY_DAYS
+            or job_history_days > MAX_JOB_HISTORY_DAYS
+        ):
+            job_history_days = DEFAULT_JOB_HISTORY_DAYS
+
+        return cls(
+            theme=theme,
+            log_level=log_level,
+            max_log_lines=max_log_lines,
+            refresh_interval=refresh_interval,
+            job_history_days=job_history_days,
+        )
 
     def to_dict(self) -> dict[str, object]:
         """Serialize settings to a dictionary.
@@ -146,11 +180,32 @@ def _coerce_int(value: object) -> int | None:
     Returns:
         Integer value or None.
     """
-    if isinstance(value, int):
+    if isinstance(value, int) and not isinstance(value, bool):
         return value
     if isinstance(value, str):
         try:
             return int(value)
+        except ValueError:
+            return None
+    return None
+
+
+def _coerce_float(value: object) -> float | None:
+    """Coerce a value into a float if possible.
+
+    Args:
+        value: Raw value to coerce.
+
+    Returns:
+        Float value or None.
+    """
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    if isinstance(value, str):
+        try:
+            return float(value)
         except ValueError:
             return None
     return None

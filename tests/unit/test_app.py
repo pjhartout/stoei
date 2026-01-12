@@ -3,7 +3,8 @@
 from unittest.mock import MagicMock, patch
 
 import pytest
-from stoei.app import REFRESH_INTERVAL, SlurmMonitor
+from stoei.app import SlurmMonitor
+from stoei.settings import DEFAULT_REFRESH_INTERVAL
 from stoei.slurm.cache import JobCache, JobState
 from stoei.widgets.cluster_sidebar import ClusterStats
 
@@ -16,9 +17,13 @@ class TestSlurmMonitorInit:
         """Reset JobCache singleton before each test."""
         JobCache.reset()
 
-    def test_init_sets_refresh_interval(self) -> None:
+    def test_init_sets_refresh_interval_from_settings(self) -> None:
         app = SlurmMonitor()
-        assert app.refresh_interval == REFRESH_INTERVAL
+        assert app.refresh_interval == app._settings.refresh_interval
+
+    def test_init_uses_default_refresh_interval(self) -> None:
+        app = SlurmMonitor()
+        assert app.refresh_interval == DEFAULT_REFRESH_INTERVAL
 
     def test_init_no_timer_initially(self) -> None:
         app = SlurmMonitor()

@@ -57,14 +57,8 @@ logger = get_logger(__name__)
 # Path to styles directory
 STYLES_DIR = Path(__file__).parent / "styles"
 
-# Refresh interval in seconds (increased for better performance)
-REFRESH_INTERVAL = 5.0
-
 # Minimum window width to show sidebar (sidebar is 30 wide, need space for content)
 MIN_WIDTH_FOR_SIDEBAR = 100
-
-# Job history days (user's jobs from the last N days)
-JOB_HISTORY_DAYS = 7
 
 # Loading steps for initial data load
 LOADING_STEPS = [
@@ -72,7 +66,7 @@ LOADING_STEPS = [
     LoadingStep("cluster_nodes", "Fetching cluster nodes...", weight=2.0),
     LoadingStep("parse_nodes", "Parsing node information...", weight=1.0),
     LoadingStep("user_running", "Fetching your running jobs...", weight=1.0),
-    LoadingStep("user_history", "Fetching your job history (7 days)...", weight=2.0),
+    LoadingStep("user_history", "Fetching your job history...", weight=2.0),
     LoadingStep("all_running", "Fetching all running jobs...", weight=2.0),
     LoadingStep("aggregate_users", "Aggregating user statistics...", weight=1.0),
     LoadingStep("cluster_stats", "Calculating cluster statistics...", weight=1.0),
@@ -130,7 +124,7 @@ class SlurmMonitor(App[None]):
         super().__init__()
         self._register_custom_themes()
         self._apply_theme(self._settings.theme)
-        self.refresh_interval: float = REFRESH_INTERVAL
+        self.refresh_interval: float = self._settings.refresh_interval
         self.auto_refresh_timer: Timer | None = None
         self._job_cache: JobCache = JobCache()
         self._refresh_worker: Worker[None] | None = None
@@ -275,16 +269,40 @@ class SlurmMonitor(App[None]):
             or None if SLURM is not available.
         """
         # Step 0: Check SLURM availability
+        if not self._load_step_check_slurm():
+            return None
+
+        # Steps 1-2: Load cluster nodes
+        self._load_step_cluster_nodes()
+
+        # Step 3: Fetch user's running jobs
+        running_jobs = self._load_step_running_jobs()
+
+        # Step 4: Fetch user's job history
+        history_jobs, total_jobs, total_requeues, max_requeues = self._load_step_job_history()
+
+        # Step 5: Fetch all running jobs (for user overview)
+        self._load_step_all_running_jobs()
+
+        # Steps 6-7: Calculate statistics
+        self._load_step_statistics()
+
+        return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
+
+    def _load_step_check_slurm(self) -> bool:
+        """Execute step 0: Check SLURM availability."""
         self._loading_update_step(0)
         is_available, error_msg = check_slurm_available()
         if not is_available:
             self._loading_fail_step(0, error_msg or "SLURM not available")
             logger.error(f"SLURM not available: {error_msg}")
             self.call_from_thread(self._show_slurm_error)
-            return None
+            return False
         self._loading_complete_step(0, "SLURM available")
+        return True
 
-        # Step 1: Fetch cluster nodes
+    def _load_step_cluster_nodes(self) -> None:
+        """Execute steps 1-2: Fetch and parse cluster nodes."""
         self._loading_update_step(1)
         nodes, error = get_cluster_nodes()
         if error:
@@ -295,32 +313,34 @@ class SlurmMonitor(App[None]):
             self._loading_complete_step(1, f"{len(nodes)} nodes")
         self._cluster_nodes = nodes
 
-        # Step 2: Parse node information
         self._loading_update_step(2)
         self._loading_complete_step(2, f"{len(self._cluster_nodes)} nodes parsed")
 
-        # Step 3: Fetch user's running jobs
+    def _load_step_running_jobs(self) -> list[tuple[str, ...]]:
+        """Execute step 3: Fetch user's running jobs."""
         self._loading_update_step(3)
         running_jobs, error = get_running_jobs()
         if error:
             self._loading_fail_step(3, error)
             logger.warning(f"Failed to get running jobs: {error}")
-            # Non-fatal during initial load, just empty
-            running_jobs = []
-        else:
-            self._loading_complete_step(3, f"{len(running_jobs)} running/pending")
+            return []
+        self._loading_complete_step(3, f"{len(running_jobs)} running/pending")
+        return running_jobs
 
-        # Step 4: Fetch user's job history (7 days)
+    def _load_step_job_history(self) -> tuple[list[tuple[str, ...]], int, int, int]:
+        """Execute step 4: Fetch user's job history."""
         self._loading_update_step(4)
-        history_jobs, total_jobs, total_requeues, max_requeues, error = get_job_history(days=JOB_HISTORY_DAYS)
+        job_history_days = self._settings.job_history_days
+        history_jobs, total_jobs, total_requeues, max_requeues, error = get_job_history(days=job_history_days)
         if error:
             self._loading_fail_step(4, error)
             logger.warning(f"Failed to get job history: {error}")
-            history_jobs, total_jobs, total_requeues, max_requeues = [], 0, 0, 0
-        else:
-            self._loading_complete_step(4, f"{total_jobs} jobs in {JOB_HISTORY_DAYS} days")
+            return [], 0, 0, 0
+        self._loading_complete_step(4, f"{total_jobs} jobs in {job_history_days} days")
+        return history_jobs, total_jobs, total_requeues, max_requeues
 
-        # Step 5: Fetch all running jobs (for user overview)
+    def _load_step_all_running_jobs(self) -> None:
+        """Execute step 5: Fetch all running jobs for user overview."""
         self._loading_update_step(5)
         all_running, error = get_all_running_jobs()
         if error:
@@ -331,17 +351,15 @@ class SlurmMonitor(App[None]):
             self._loading_complete_step(5, f"{len(all_running)} jobs")
         self._all_users_jobs = all_running
 
-        # Step 6: Aggregate user statistics
+    def _load_step_statistics(self) -> None:
+        """Execute steps 6-7: Calculate user and cluster statistics."""
         self._loading_update_step(6)
         user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
         self._loading_complete_step(6, f"{len(user_stats)} users")
 
-        # Step 7: Calculate cluster statistics
         self._loading_update_step(7)
         cluster_stats = self._calculate_cluster_stats()
         self._loading_complete_step(7, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
-
-        return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
 
     def _show_slurm_error(self) -> None:
         """Show SLURM unavailable error screen."""
@@ -412,6 +430,24 @@ class SlurmMonitor(App[None]):
         log_pane = self.query_one("#log_pane", LogPane)
         log_pane.max_lines = self._settings.max_log_lines
 
+    def _apply_refresh_interval(self, old_interval: float, new_interval: float) -> None:
+        """Apply refresh interval changes by restarting the timer if needed.
+
+        Args:
+            old_interval: Previous refresh interval.
+            new_interval: New refresh interval.
+        """
+        if old_interval == new_interval:
+            return
+
+        self.refresh_interval = new_interval
+
+        # Restart timer if running
+        if self.auto_refresh_timer is not None:
+            self.auto_refresh_timer.stop()
+            self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
+            logger.info(f"Refresh interval changed from {old_interval}s to {new_interval}s")
+
     def action_show_settings(self) -> None:
         """Open the settings screen."""
         self.push_screen(SettingsScreen(self._settings), self._handle_settings_updated)
@@ -424,11 +460,13 @@ class SlurmMonitor(App[None]):
         """
         if settings is None:
             return
+        old_settings = self._settings
         self._settings = settings
         save_settings(settings)
         self._apply_theme(settings.theme)
         self._apply_log_pane_settings()
         self._apply_log_settings()
+        self._apply_refresh_interval(old_settings.refresh_interval, settings.refresh_interval)
         self.notify("Settings saved")
 
     def _start_refresh_worker(self) -> None:
@@ -465,7 +503,8 @@ class SlurmMonitor(App[None]):
                 running_jobs = None
 
             # Get history
-            history_jobs, total_jobs, total_requeues, max_requeues, h_error = get_job_history(days=JOB_HISTORY_DAYS)
+            job_history_days = self._settings.job_history_days
+            history_jobs, total_jobs, total_requeues, max_requeues, h_error = get_job_history(days=job_history_days)
             if h_error:
                 logger.warning(f"Failed to refresh job history: {h_error}")
                 history_jobs = None
