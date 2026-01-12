@@ -402,7 +402,7 @@ class LogViewerScreen(Screen[None]):
         # Start spinner animation
         self._spinner_timer = self.set_interval(0.1, self._animate_spinner)
         # Start async file loading
-        self.run_worker(self._async_load_file(), exclusive=True)
+        self.run_worker(self._async_load_file, exclusive=True)
 
     def _animate_spinner(self) -> None:
         """Animate the loading spinner."""
@@ -606,7 +606,7 @@ class LogViewerScreen(Screen[None]):
         self._spinner_timer = self.set_interval(0.1, self._animate_spinner)
 
         # Start async reload
-        self.run_worker(self._async_reload_file(), exclusive=True)
+        self.run_worker(self._async_reload_file, exclusive=True)
         self.app.notify("Reloading file...", timeout=2)
 
     async def _async_reload_file(self) -> None:
@@ -1236,8 +1236,8 @@ class CancelConfirmScreen(Screen[bool]):
                 id="cancel-warning",
             )
             with Container(id="cancel-button-row"):
-                yield Button("🗑️ Cancel Job", variant="error", id="confirm-cancel-btn")
-                yield Button("✕ Keep Running", variant="default", id="abort-cancel-btn")
+                yield Button("🗑️ Yes, Cancel", variant="error", id="confirm-cancel-btn")
+                yield Button("✓ No, Keep It", variant="default", id="abort-cancel-btn")
 
     def on_mount(self) -> None:
         """Focus the abort button by default (safer option)."""

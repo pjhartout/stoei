@@ -13,7 +13,7 @@ from textual.binding import BindingType
 from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.timer import Timer
-from textual.widgets import Button, DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import ColumnKey, RowKey
 from textual.worker import Worker, WorkerState
 
@@ -157,7 +157,6 @@ class SlurmMonitor(App[None]):
                 with Container(id="tab-jobs-content", classes="tab-content"):
                     with Horizontal(id="jobs-header"):
                         yield Static("[bold]📋 My Jobs[/bold]", id="jobs-title")
-                        yield Button("🗑️ Cancel Job", variant="error", id="cancel-job-btn")
                     yield DataTable(id="jobs_table")
 
                 # Nodes tab
@@ -1525,15 +1524,6 @@ class SlurmMonitor(App[None]):
         except (IndexError, KeyError):
             logger.exception(f"Could not get job ID from row {cursor_row}")
             self.notify("Could not get job ID from selected row", severity="error")
-
-    def on_button_pressed(self, event: Button.Pressed) -> None:
-        """Handle button press events.
-
-        Args:
-            event: The button press event.
-        """
-        if event.button.id == "cancel-job-btn":
-            self.action_cancel_job()
 
     def _check_window_size(self) -> None:
         """Check window size and adjust layout accordingly."""

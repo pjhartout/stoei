@@ -92,22 +92,6 @@ Footer > .footer--description {
     background: $panel;
 }
 
-#cancel-job-btn {
-    width: auto;
-    min-width: 16;
-    background: $error;
-    color: $text-on-error;
-    border: none;
-}
-
-#cancel-job-btn:hover {
-    background: $error;
-}
-
-#cancel-job-btn:focus {
-    border: tall $accent;
-}
-
 /* DataTable styling */
 #jobs_table {
     height: 1fr;

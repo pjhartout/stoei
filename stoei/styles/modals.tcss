@@ -361,21 +361,21 @@ LogViewerScreen #log-search-status {
 CancelConfirmScreen {
     layout: vertical;
     align: center middle;
-    background: $background;
+    background: $background 50%;
 }
 
 CancelConfirmScreen #cancel-confirm-container {
-    width: 60;
+    width: 50;
     height: auto;
-    padding: 2 3;
+    padding: 1 2;
     background: $panel;
-    border: double $error;
+    border: round $error;
 }
 
 CancelConfirmScreen #cancel-title {
     width: 100%;
     content-align: center middle;
-    padding: 1;
+    padding: 1 0;
     color: $error;
     text-style: bold;
     border-bottom: solid $border-muted;
@@ -385,7 +385,7 @@ CancelConfirmScreen #cancel-title {
 CancelConfirmScreen #cancel-job-info {
     width: 100%;
     content-align: center middle;
-    padding: 1;
+    padding: 0 1;
 }
 
 CancelConfirmScreen #cancel-warning {
@@ -401,12 +401,15 @@ CancelConfirmScreen #cancel-button-row {
     layout: horizontal;
     align: center middle;
     margin-top: 1;
+    padding: 0;
 }
 
 CancelConfirmScreen Button {
-    width: 1fr;
+    width: 21;
     margin: 0 1;
     height: 3;
+    border: tall $panel;
+    text-style: bold;
 }
 
 CancelConfirmScreen #confirm-cancel-btn {
@@ -414,13 +417,27 @@ CancelConfirmScreen #confirm-cancel-btn {
     color: $text-on-error;
 }
 
-CancelConfirmScreen #abort-cancel-btn {
-    background: $surface;
+CancelConfirmScreen #confirm-cancel-btn:hover {
+    background: $error;
+    text-style: bold underline;
 }
 
-CancelConfirmScreen #confirm-cancel-btn:focus,
+CancelConfirmScreen #abort-cancel-btn {
+    background: $success;
+    color: $text-on-success;
+}
+
+CancelConfirmScreen #abort-cancel-btn:hover {
+    background: $success;
+    text-style: bold underline;
+}
+
+CancelConfirmScreen #confirm-cancel-btn:focus {
+    border: tall $error;
+}
+
 CancelConfirmScreen #abort-cancel-btn:focus {
-    border: tall $accent;
+    border: tall $success;
 }
 
 /* SLURM Unavailable Error Screen */
