@@ -5,6 +5,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 from stoei.app import REFRESH_INTERVAL, SlurmMonitor
 from stoei.slurm.cache import JobCache, JobState
+from stoei.widgets.cluster_sidebar import ClusterStats
 
 
 class TestSlurmMonitorInit:
