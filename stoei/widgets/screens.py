@@ -7,9 +7,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import ClassVar
 
-from rich.markup import MarkupError
+from rich.errors import MarkupError
 from textual.app import ComposeResult, SuspendNotSupported
 from textual.containers import Container, Vertical, VerticalScroll
+from textual.css.query import NoMatches
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Button, Input, Static
@@ -453,17 +454,24 @@ class LogViewerScreen(Screen[None]):
 
         try:
             # Hide loading indicator
-            loading_container = self.query_one("#log-loading-container", Container)
-            loading_container.add_class("hidden")
+            try:
+                loading_container = self.query_one("#log-loading-container", Container)
+                loading_container.add_class("hidden")
+            except NoMatches:
+                logger.debug("Log loading container not found")
 
             if self.load_error:
                 # Show error
-                error_container = self.query_one("#log-error-container", Container)
-                error_container.remove_class("hidden")
-                error_text = self.query_one("#log-error-text", Static)
-                error_text.update(f"⚠️  {self.load_error}")
-                # Focus close button
-                self.query_one("#log-close-button", Button).focus()
+                try:
+                    error_container = self.query_one("#log-error-container", Container)
+                    error_container.remove_class("hidden")
+                    error_text = self.query_one("#log-error-text", Static)
+                    error_text.update(f"⚠️  {self.load_error}")
+                    # Focus close button
+                    self.query_one("#log-close-button", Button).focus()
+                except NoMatches:
+                    logger.debug("Log error container not found")
+                    return
                 # Show notification for timeout
                 if self._load_timed_out:
                     self.app.notify(
@@ -473,9 +481,13 @@ class LogViewerScreen(Screen[None]):
                     )
             else:
                 # Show content
-                content_scroll = self.query_one("#log-content-scroll", VerticalScroll)
-                content_scroll.remove_class("hidden")
-                content_widget = self.query_one("#log-content-text", Static)
+                try:
+                    content_scroll = self.query_one("#log-content-scroll", VerticalScroll)
+                    content_scroll.remove_class("hidden")
+                    content_widget = self.query_one("#log-content-text", Static)
+                except NoMatches:
+                    logger.debug("Log content widgets not found")
+                    return
                 content_widget._render_markup = self._use_markup
                 content_widget.update(self.file_contents)
                 # Focus scroll area and scroll to bottom

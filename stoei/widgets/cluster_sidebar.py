@@ -81,8 +81,8 @@ class ClusterSidebar(Static):
     DEFAULT_CSS: ClassVar[str] = """
     ClusterSidebar {
         width: 30;
-        border: heavy ansi_cyan;
-        background: #000000;
+        border: heavy $accent;
+        background: $panel;
         padding: 1;
     }
     """

@@ -3,7 +3,16 @@
 from pathlib import Path
 
 import pytest
+from stoei.app import SlurmMonitor
 from textual.app import App
+
+
+class CSSVariableApp(App[None]):
+    """App that knows stoei theme variables."""
+
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        """Return stoei theme variable defaults for CSS parsing."""
+        return SlurmMonitor.THEME_VARIABLE_DEFAULTS
 
 
 class TestCSSValidation:
@@ -24,7 +33,7 @@ class TestCSSValidation:
 
         # Try to parse the CSS - if it's invalid, this will raise an error
         # We'll test by trying to create an app that uses it
-        class TestApp(App[None]):
+        class TestApp(CSSVariableApp):
             CSS_PATH = [app_css]  # noqa: RUF012
 
         # Creating the app should not raise CSS parsing errors
@@ -39,7 +48,7 @@ class TestCSSValidation:
         modals_css.read_text()
 
         # Try to parse the CSS
-        class TestApp(App[None]):
+        class TestApp(CSSVariableApp):
             CSS_PATH = [modals_css]  # noqa: RUF012
 
         # Creating the app should not raise CSS parsing errors
@@ -55,7 +64,7 @@ class TestCSSValidation:
             css_file.read_text()
 
             # Try to create an app with this CSS
-            class TestApp(App[None]):
+            class TestApp(CSSVariableApp):
                 CSS_PATH = [css_file]  # noqa: RUF012
 
             # Should not raise CSS parsing errors
@@ -71,7 +80,7 @@ class TestCSSValidation:
         assert widget is not None
 
         # Try to create an app with the widget
-        class TestApp(App[None]):
+        class TestApp(CSSVariableApp):
             def compose(self):
                 yield ClusterSidebar()
 

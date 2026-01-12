@@ -148,6 +148,16 @@ stoei
 | `1` | Switch to Jobs tab |
 | `2` | Switch to Nodes tab |
 | `3` | Switch to Users tab |
+| `4` | Switch to Logs tab |
+| `s` | Open settings |
+
+## Settings
+
+Settings are stored in `~/.config/stoei/settings.json` (or `STOEI_CONFIG_DIR`). Open the settings screen with `s` to update:
+
+- Theme: Terminal (ANSI), OC-1, Tokyo Night, Dracula, Monokai, Solarized, Nord, Catppuccin, Ayu, One Dark Pro, Shades of Purple, Night Owl, Vesper
+- Log level: DEBUG/INFO/WARNING/ERROR/CRITICAL (default WARNING)
+- Max log lines (minimum 200)
 
 ## Requirements
 

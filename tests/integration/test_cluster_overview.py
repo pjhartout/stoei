@@ -3,6 +3,7 @@
 from pathlib import Path
 
 import pytest
+from stoei.app import SlurmMonitor
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from stoei.widgets.tabs import TabContainer
@@ -12,6 +13,10 @@ from textual.app import App
 
 class ClusterTestApp(App[None]):
     """Test app for integration testing."""
+
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        """Return theme variables required by stoei widgets."""
+        return SlurmMonitor.THEME_VARIABLE_DEFAULTS
 
     def compose(self):
         """Create test app layout."""

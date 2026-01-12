@@ -4,8 +4,10 @@ from datetime import datetime
 from typing import TYPE_CHECKING, ClassVar
 
 from rich.text import Text
-from textual.message_pump import NoActiveAppError
+from textual._context import NoActiveAppError
 from textual.widgets import RichLog
+
+from stoei.settings import DEFAULT_MAX_LOG_LINES
 
 if TYPE_CHECKING:
     pass
@@ -22,6 +24,8 @@ class LogPane(RichLog):
     }
     """
 
+    DEFAULT_MAX_LINES: ClassVar[int] = DEFAULT_MAX_LOG_LINES
+
     # Log level to color mapping
     LEVEL_COLORS: ClassVar[dict[str, str]] = {
         "DEBUG": "dim cyan",
@@ -34,7 +38,7 @@ class LogPane(RichLog):
 
     def __init__(
         self,
-        max_lines: int | None = None,
+        max_lines: int = DEFAULT_MAX_LINES,
         *,
         name: str | None = None,
         id: str | None = None,
@@ -44,7 +48,7 @@ class LogPane(RichLog):
         """Initialize the LogPane widget.
 
         Args:
-            max_lines: Maximum number of log lines to retain (None for unlimited).
+            max_lines: Maximum number of log lines to retain.
             name: The name of the widget.
             id: The ID of the widget in the DOM.
             classes: The CSS classes for the widget.

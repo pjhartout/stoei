@@ -1,6 +1,7 @@
 """Unit tests for the TabContainer widget."""
 
 import pytest
+from stoei.app import SlurmMonitor
 from stoei.widgets.tabs import TabContainer, TabSwitched
 from textual.app import App
 from textual.widgets import Button
@@ -17,6 +18,10 @@ class TestTabSwitched:
 
 class TabTestApp(App[None]):
     """Test app for tab testing."""
+
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        """Return theme variables required by stoei widgets."""
+        return SlurmMonitor.THEME_VARIABLE_DEFAULTS
 
     def compose(self):
         """Create test app layout."""
