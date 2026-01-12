@@ -5,6 +5,9 @@ from typing import ClassVar
 
 from textual.widgets import Static
 
+# Conversion constant: 1 TB = 1024 GB
+GB_PER_TB = 1024
+
 
 @dataclass
 class ClusterStats:
@@ -20,6 +23,12 @@ class ClusterStats:
     total_gpus: int = 0
     allocated_gpus: int = 0
     gpus_by_type: dict[str, tuple[int, int]] = field(default_factory=dict)
+    # Pending job resources
+    pending_jobs_count: int = 0
+    pending_cpus: int = 0
+    pending_memory_gb: float = 0.0
+    pending_gpus: int = 0
+    pending_gpus_by_type: dict[str, int] = field(default_factory=dict)
 
     @property
     def free_nodes_pct(self) -> float:
@@ -179,5 +188,27 @@ class ClusterSidebar(Static):
                     f"  Free: {free_gpus} ({color_pct(gpus_pct)})",
                 ]
             )
+
+        # Display pending queue section if there are pending jobs
+        if stats.pending_jobs_count > 0:
+            lines.append("")
+            lines.append("[bold]Pending Queue[/bold]")
+            lines.append(f"  {stats.pending_jobs_count} jobs waiting")
+            lines.append(f"  CPUs: {stats.pending_cpus:,}")
+            # Format memory with appropriate unit
+            pending_mem = stats.pending_memory_gb
+            if pending_mem >= GB_PER_TB:
+                lines.append(f"  Memory: {pending_mem / GB_PER_TB:.1f} TB")
+            else:
+                lines.append(f"  Memory: {pending_mem:.1f} GB")
+            # Display pending GPUs by type if available
+            if stats.pending_gpus_by_type:
+                lines.append("  GPUs:")
+                for gpu_type in sorted(stats.pending_gpus_by_type.keys()):
+                    gpu_count = stats.pending_gpus_by_type[gpu_type]
+                    type_display = gpu_type if gpu_type != "gpu" else "generic"
+                    lines.append(f"    {type_display}: {gpu_count}")
+            elif stats.pending_gpus > 0:
+                lines.append(f"  GPUs: {stats.pending_gpus}")
 
         return "\n".join(lines)

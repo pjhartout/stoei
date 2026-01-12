@@ -1,5 +1,6 @@
 """Main Textual TUI application for stoei."""
 
+import contextlib
 import re
 import time
 from pathlib import Path
@@ -850,6 +851,107 @@ class SlurmMonitor(App[None]):
                 stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
                 stats.allocated_gpus += gpu_count
 
+    def _parse_tres_for_pending(self, tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
+        """Parse TRES string to extract CPU, memory (GB), and GPU entries.
+
+        Args:
+            tres_str: TRES string in format like "cpu=32,mem=256G,node=4,gres/gpu=16"
+                or "cpu=32,mem=256G,node=4,gres/gpu:h200=8".
+
+        Returns:
+            Tuple of (cpus, memory_gb, gpu_entries) where gpu_entries is a list of
+            (gpu_type, gpu_count) tuples.
+        """
+        cpus = 0
+        memory_gb = 0.0
+
+        if not tres_str or tres_str.strip() == "":
+            return cpus, memory_gb, []
+
+        # Parse CPU count
+        cpu_match = re.search(r"cpu=(\d+)", tres_str)
+        if cpu_match:
+            with contextlib.suppress(ValueError):
+                cpus = int(cpu_match.group(1))
+
+        # Parse memory (can be in G, M, or T)
+        mem_match = re.search(r"mem=(\d+)([GMT])", tres_str, re.IGNORECASE)
+        if mem_match:
+            try:
+                mem_value = int(mem_match.group(1))
+                mem_unit = mem_match.group(2).upper()
+                if mem_unit == "G":
+                    memory_gb = float(mem_value)
+                elif mem_unit == "M":
+                    memory_gb = mem_value / 1024.0
+                elif mem_unit == "T":
+                    memory_gb = mem_value * 1024.0
+            except ValueError:
+                pass
+
+        # Use shared GPU parser
+        gpu_entries = parse_gpu_entries(tres_str)
+
+        return cpus, memory_gb, gpu_entries
+
+    def _calculate_pending_resources(self, stats: ClusterStats) -> None:
+        """Calculate resources requested by pending jobs.
+
+        Args:
+            stats: ClusterStats object to update with pending resource data.
+        """
+        # Job tuple indices
+        state_index = 3
+        tres_index = 7
+        min_fields_for_tres = 8
+
+        pending_cpus = 0
+        pending_memory_gb = 0.0
+        pending_gpus = 0
+        pending_gpus_by_type: dict[str, int] = {}
+        pending_jobs_count = 0
+
+        for job in self._all_users_jobs:
+            # Check if job is pending (state is "PENDING" or "PD")
+            if len(job) <= state_index:
+                continue
+            state = job[state_index].strip().upper()
+            if state not in ("PENDING", "PD"):
+                continue
+
+            pending_jobs_count += 1
+
+            # Parse TRES if available
+            if len(job) < min_fields_for_tres:
+                continue
+            tres_str = job[tres_index]
+            if not tres_str:
+                continue
+
+            cpus, memory_gb, gpu_entries = self._parse_tres_for_pending(tres_str)
+            pending_cpus += cpus
+            pending_memory_gb += memory_gb
+
+            # Aggregate GPUs by type
+            for gpu_type, gpu_count in gpu_entries:
+                pending_gpus += gpu_count
+                if gpu_type in pending_gpus_by_type:
+                    pending_gpus_by_type[gpu_type] += gpu_count
+                else:
+                    pending_gpus_by_type[gpu_type] = gpu_count
+
+        # Update stats with pending resource data
+        stats.pending_jobs_count = pending_jobs_count
+        stats.pending_cpus = pending_cpus
+        stats.pending_memory_gb = pending_memory_gb
+        stats.pending_gpus = pending_gpus
+        stats.pending_gpus_by_type = pending_gpus_by_type
+
+        logger.debug(
+            f"Pending resources: {pending_jobs_count} jobs, {pending_cpus} CPUs, "
+            f"{pending_memory_gb:.1f} GB memory, {pending_gpus} GPUs"
+        )
+
     def _calculate_cluster_stats(self) -> ClusterStats:
         """Calculate cluster statistics from node data.
 
@@ -860,6 +962,8 @@ class SlurmMonitor(App[None]):
 
         if not self._cluster_nodes:
             logger.debug("No cluster nodes available for stats calculation")
+            # Still calculate pending resources even if no cluster nodes
+            self._calculate_pending_resources(stats)
             return stats
 
         for node_data in self._cluster_nodes:
@@ -892,6 +996,9 @@ class SlurmMonitor(App[None]):
             # Fallback: if no TRES data, try parsing Gres field
             if not cfg_tres and not alloc_tres:
                 self._parse_gpus_from_gres(node_data, state, stats)
+
+        # Calculate pending job resources
+        self._calculate_pending_resources(stats)
 
         return stats
 

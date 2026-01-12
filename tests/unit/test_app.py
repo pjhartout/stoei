@@ -844,3 +844,172 @@ class TestUpdateUIFromCache:
                 jobs_table = app.query_one("#jobs_table", DataTable)
                 assert jobs_table.row_count == 2
                 assert str(jobs_table.get_row_at(0)[0]) == "101"
+
+
+class TestParseTresForPending:
+    """Tests for the _parse_tres_for_pending method."""
+
+    @pytest.fixture(autouse=True)
+    def mock_slurm(self) -> None:
+        """Mock SLURM availability check."""
+        with patch("stoei.app.check_slurm_available", return_value=(True, None)):
+            yield
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Create a SlurmMonitor instance for testing."""
+        return SlurmMonitor()
+
+    def test_parse_tres_empty_string(self, app: SlurmMonitor) -> None:
+        """Test parsing empty TRES string."""
+        cpus, memory, gpus = app._parse_tres_for_pending("")
+        assert cpus == 0
+        assert memory == 0.0
+        assert gpus == []
+
+    def test_parse_tres_cpu_only(self, app: SlurmMonitor) -> None:
+        """Test parsing TRES with CPU only."""
+        cpus, memory, gpus = app._parse_tres_for_pending("cpu=32")
+        assert cpus == 32
+        assert memory == 0.0
+        assert gpus == []
+
+    def test_parse_tres_memory_gb(self, app: SlurmMonitor) -> None:
+        """Test parsing TRES with memory in GB."""
+        cpus, memory, gpus = app._parse_tres_for_pending("cpu=8,mem=256G")
+        assert cpus == 8
+        assert memory == 256.0
+        assert gpus == []
+
+    def test_parse_tres_memory_mb(self, app: SlurmMonitor) -> None:
+        """Test parsing TRES with memory in MB."""
+        cpus, memory, gpus = app._parse_tres_for_pending("cpu=8,mem=2048M")
+        assert cpus == 8
+        assert memory == 2.0  # 2048 MB = 2 GB
+        assert gpus == []
+
+    def test_parse_tres_memory_tb(self, app: SlurmMonitor) -> None:
+        """Test parsing TRES with memory in TB."""
+        cpus, memory, gpus = app._parse_tres_for_pending("cpu=8,mem=2T")
+        assert cpus == 8
+        assert memory == 2048.0  # 2 TB = 2048 GB
+        assert gpus == []
+
+    def test_parse_tres_with_gpus(self, app: SlurmMonitor) -> None:
+        """Test parsing TRES with GPUs."""
+        cpus, memory, gpus = app._parse_tres_for_pending("cpu=64,mem=512G,node=8,gres/gpu=32")
+        assert cpus == 64
+        assert memory == 512.0
+        assert gpus == [("gpu", 32)]
+
+    def test_parse_tres_with_gpu_types(self, app: SlurmMonitor) -> None:
+        """Test parsing TRES with typed GPUs."""
+        cpus, memory, gpus = app._parse_tres_for_pending("cpu=64,mem=512G,gres/gpu:h200=8")
+        assert cpus == 64
+        assert memory == 512.0
+        assert gpus == [("h200", 8)]
+
+    def test_parse_tres_full_example(self, app: SlurmMonitor) -> None:
+        """Test parsing a full TRES string."""
+        tres = "cpu=768,mem=8000G,node=4,gres/gpu=32"
+        cpus, memory, gpus = app._parse_tres_for_pending(tres)
+        assert cpus == 768
+        assert memory == 8000.0
+        assert gpus == [("gpu", 32)]
+
+
+class TestCalculatePendingResources:
+    """Tests for the _calculate_pending_resources method."""
+
+    @pytest.fixture(autouse=True)
+    def mock_slurm(self) -> None:
+        """Mock SLURM availability check."""
+        with patch("stoei.app.check_slurm_available", return_value=(True, None)):
+            yield
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Create a SlurmMonitor instance for testing."""
+        return SlurmMonitor()
+
+    def test_no_pending_jobs(self, app: SlurmMonitor) -> None:
+        """Test with no pending jobs."""
+        app._all_users_jobs = [
+            ("12345", "job1", "user1", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=32G"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 0
+        assert stats.pending_cpus == 0
+        assert stats.pending_memory_gb == 0.0
+        assert stats.pending_gpus == 0
+
+    def test_single_pending_job(self, app: SlurmMonitor) -> None:
+        """Test with a single pending job."""
+        app._all_users_jobs = [
+            ("12345", "job1", "user1", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 1
+        assert stats.pending_cpus == 32
+        assert stats.pending_memory_gb == 256.0
+        assert stats.pending_gpus == 4
+
+    def test_multiple_pending_jobs(self, app: SlurmMonitor) -> None:
+        """Test with multiple pending jobs."""
+        app._all_users_jobs = [
+            ("12345", "job1", "user1", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
+            ("12346", "job2", "user2", "PENDING", "0:00", "2", "(Resources)", "cpu=64,mem=512G,gres/gpu=8"),
+            ("12347", "job3", "user1", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=32G"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 2
+        assert stats.pending_cpus == 96  # 32 + 64
+        assert stats.pending_memory_gb == 768.0  # 256 + 512
+        assert stats.pending_gpus == 12  # 4 + 8
+
+    def test_pending_state_pd(self, app: SlurmMonitor) -> None:
+        """Test that 'PD' state is recognized as pending."""
+        app._all_users_jobs = [
+            ("12345", "job1", "user1", "PD", "0:00", "1", "(Priority)", "cpu=16,mem=128G"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 1
+        assert stats.pending_cpus == 16
+
+    def test_pending_gpus_by_type(self, app: SlurmMonitor) -> None:
+        """Test that pending GPUs are aggregated by type."""
+        app._all_users_jobs = [
+            ("12345", "job1", "user1", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu:h200=8"),
+            ("12346", "job2", "user2", "PENDING", "0:00", "2", "(Resources)", "cpu=64,mem=512G,gres/gpu:a100=4"),
+            ("12347", "job3", "user3", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu:h200=4"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 3
+        assert stats.pending_gpus == 16  # 8 + 4 + 4
+        assert stats.pending_gpus_by_type == {"h200": 12, "a100": 4}
+
+    def test_pending_job_without_tres(self, app: SlurmMonitor) -> None:
+        """Test pending job without TRES field."""
+        app._all_users_jobs = [
+            ("12345", "job1", "user1", "PENDING", "0:00", "1", "(Priority)"),  # No TRES field
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 1
+        assert stats.pending_cpus == 0  # No TRES data
+
+    def test_empty_jobs_list(self, app: SlurmMonitor) -> None:
+        """Test with empty jobs list."""
+        app._all_users_jobs = []
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 0
+        assert stats.pending_cpus == 0
+        assert stats.pending_memory_gb == 0.0
+        assert stats.pending_gpus == 0
+        assert stats.pending_gpus_by_type == {}
