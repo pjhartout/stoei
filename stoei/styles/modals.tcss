@@ -13,8 +13,8 @@ JobInputScreen > Vertical {
     width: 70;
     height: auto;
     padding: 2 3;
-    background: ansi_black;
-    border: double ansi_cyan;
+    background: $panel;
+    border: double $accent;
 }
 
 JobInputScreen #input-title {
@@ -22,27 +22,27 @@ JobInputScreen #input-title {
     content-align: center middle;
     padding: 1;
     margin-bottom: 1;
-    color: ansi_cyan;
+    color: $accent;
     text-style: bold;
-    border-bottom: solid ansi_bright_black;
+    border-bottom: solid $border-muted;
 }
 
 JobInputScreen #input-hint {
     width: 100%;
     content-align: center middle;
-    color: ansi_bright_black;
+    color: $text-muted;
     margin-bottom: 1;
 }
 
 JobInputScreen Input {
     width: 100%;
     margin: 1 0;
-    border: tall ansi_cyan;
+    border: tall $accent;
     background: $background;
 }
 
 JobInputScreen Input:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 JobInputScreen #button-row {
@@ -58,11 +58,12 @@ JobInputScreen Button {
 }
 
 JobInputScreen #submit-btn {
-    background: ansi_blue;
+    background: $accent;
+    color: $text-on-accent;
 }
 
 JobInputScreen #cancel-btn {
-    background: ansi_bright_black;
+    background: $surface;
 }
 
 /* Job Info Screen */
@@ -75,28 +76,28 @@ JobInfoScreen > Vertical {
     width: 100%;
     height: 100%;
     padding: 0;
-    background: ansi_black;
+    background: $panel;
 }
 
 JobInfoScreen #job-info-header {
     width: 100%;
     height: auto;
     padding: 1 2;
-    background: ansi_black;
-    border-bottom: heavy ansi_cyan;
+    background: $panel;
+    border-bottom: heavy $accent;
 }
 
 JobInfoScreen #job-info-title {
     width: 100%;
     content-align: center middle;
-    color: ansi_cyan;
+    color: $accent;
     text-style: bold;
 }
 
 JobInfoScreen #job-info-subtitle {
     width: 100%;
     content-align: center middle;
-    color: ansi_bright_black;
+    color: $text-muted;
     margin-top: 1;
 }
 
@@ -121,14 +122,14 @@ JobInfoScreen #error-container {
 JobInfoScreen #error-icon {
     width: 100%;
     content-align: center middle;
-    color: ansi_red;
+    color: $error;
     text-style: bold;
 }
 
 JobInfoScreen #error-text {
     width: 100%;
     content-align: center middle;
-    color: ansi_red;
+    color: $error;
     margin-top: 1;
 }
 
@@ -136,8 +137,8 @@ JobInfoScreen #job-info-footer {
     width: 100%;
     height: auto;
     padding: 1 2;
-    background: ansi_black;
-    border-top: solid ansi_bright_black;
+    background: $panel;
+    border-top: solid $border-muted;
     layout: horizontal;
     align: center middle;
 }
@@ -145,13 +146,13 @@ JobInfoScreen #job-info-footer {
 JobInfoScreen #close-button {
     width: auto;
     min-width: 16;
-    background: ansi_bright_black;
+    background: $surface;
 }
 
 JobInfoScreen #hint-text {
     width: 1fr;
     content-align: left middle;
-    color: ansi_bright_black;
+    color: $text-muted;
     margin-right: 2;
 }
 
@@ -165,15 +166,16 @@ JobInfoScreen #log-buttons {
 JobInfoScreen #stdout-button {
     width: auto;
     min-width: 16;
-    background: ansi_blue;
+    background: $accent;
+    color: $text-on-accent;
     margin-right: 1;
 }
 
 JobInfoScreen #stderr-button {
     width: auto;
     min-width: 16;
-    background: ansi_yellow;
-    color: ansi_black;
+    background: $warning;
+    color: $text-on-warning;
     margin-right: 1;
 }
 
@@ -183,19 +185,19 @@ JobInfoScreen #stderr-button:disabled {
 }
 
 JobInfoScreen #stdout-button:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 JobInfoScreen #stderr-button:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 JobInfoScreen #close-button:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 JobInfoScreen #job-info-content:focus {
-    border: tall ansi_cyan;
+    border: tall $accent;
 }
 
 /* Log Viewer Screen */
@@ -208,28 +210,28 @@ LogViewerScreen #log-viewer-container {
     width: 100%;
     height: 100%;
     padding: 0;
-    background: ansi_black;
+    background: $panel;
 }
 
 LogViewerScreen #log-viewer-header {
     width: 100%;
     height: auto;
     padding: 1 2;
-    background: ansi_black;
-    border-bottom: heavy ansi_green;
+    background: $panel;
+    border-bottom: heavy $success;
 }
 
 LogViewerScreen #log-viewer-title {
     width: 100%;
     content-align: center middle;
-    color: ansi_green;
+    color: $success;
     text-style: bold;
 }
 
 LogViewerScreen #log-viewer-path {
     width: 100%;
     content-align: center middle;
-    color: ansi_bright_black;
+    color: $text-muted;
     margin-top: 1;
 }
 
@@ -257,7 +259,7 @@ LogViewerScreen #log-loading-container.hidden {
 LogViewerScreen #log-loading-spinner {
     width: 100%;
     content-align: center middle;
-    color: ansi_cyan;
+    color: $accent;
     text-style: bold;
 }
 
@@ -280,15 +282,15 @@ LogViewerScreen #log-error-container.hidden {
 LogViewerScreen #log-error-text {
     width: 100%;
     content-align: center middle;
-    color: ansi_red;
+    color: $error;
 }
 
 LogViewerScreen #log-viewer-footer {
     width: 100%;
     height: auto;
     padding: 1 2;
-    background: ansi_black;
-    border-top: solid ansi_bright_black;
+    background: $panel;
+    border-top: solid $border-muted;
     layout: horizontal;
     align: center middle;
 }
@@ -296,38 +298,38 @@ LogViewerScreen #log-viewer-footer {
 LogViewerScreen #log-hint-text {
     width: 1fr;
     content-align: left middle;
-    color: ansi_bright_black;
+    color: $text-muted;
 }
 
 LogViewerScreen #editor-button {
     width: auto;
     min-width: 20;
-    background: ansi_green;
-    color: ansi_black;
+    background: $success;
+    color: $text-on-success;
     margin-right: 1;
 }
 
 LogViewerScreen #log-close-button {
     width: auto;
     min-width: 12;
-    background: ansi_bright_black;
+    background: $surface;
 }
 
 LogViewerScreen #editor-button:focus,
 LogViewerScreen #log-close-button:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 LogViewerScreen #log-content-scroll:focus {
-    border: tall ansi_green;
+    border: tall $success;
 }
 
 LogViewerScreen #log-search-container {
     width: 100%;
     height: auto;
     padding: 0 2;
-    background: ansi_black;
-    border-bottom: solid ansi_bright_black;
+    background: $panel;
+    border-bottom: solid $border-muted;
     layout: horizontal;
     align: left middle;
 }
@@ -339,12 +341,12 @@ LogViewerScreen #log-search-container.hidden {
 LogViewerScreen #log-search-input {
     width: 1fr;
     max-width: 50;
-    border: tall ansi_cyan;
+    border: tall $accent;
     background: $background;
 }
 
 LogViewerScreen #log-search-input:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 LogViewerScreen #log-search-status {
@@ -352,7 +354,7 @@ LogViewerScreen #log-search-status {
     min-width: 8;
     padding: 0 1;
     content-align: right middle;
-    color: ansi_bright_black;
+    color: $text-muted;
 }
 
 /* Cancel Confirmation Screen */
@@ -366,17 +368,17 @@ CancelConfirmScreen #cancel-confirm-container {
     width: 60;
     height: auto;
     padding: 2 3;
-    background: ansi_black;
-    border: double ansi_red;
+    background: $panel;
+    border: double $error;
 }
 
 CancelConfirmScreen #cancel-title {
     width: 100%;
     content-align: center middle;
     padding: 1;
-    color: ansi_red;
+    color: $error;
     text-style: bold;
-    border-bottom: solid ansi_bright_black;
+    border-bottom: solid $border-muted;
     margin-bottom: 1;
 }
 
@@ -389,7 +391,7 @@ CancelConfirmScreen #cancel-job-info {
 CancelConfirmScreen #cancel-warning {
     width: 100%;
     content-align: center middle;
-    color: ansi_bright_black;
+    color: $text-muted;
     margin: 1 0;
 }
 
@@ -408,16 +410,17 @@ CancelConfirmScreen Button {
 }
 
 CancelConfirmScreen #confirm-cancel-btn {
-    background: ansi_red;
+    background: $error;
+    color: $text-on-error;
 }
 
 CancelConfirmScreen #abort-cancel-btn {
-    background: ansi_bright_black;
+    background: $surface;
 }
 
 CancelConfirmScreen #confirm-cancel-btn:focus,
 CancelConfirmScreen #abort-cancel-btn:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 /* SLURM Unavailable Error Screen */
@@ -431,8 +434,8 @@ SlurmUnavailableScreen #slurm-error-container {
     width: 80;
     height: auto;
     padding: 2 3;
-    background: ansi_black;
-    border: double ansi_red;
+    background: $panel;
+    border: double $error;
 }
 
 SlurmUnavailableScreen #slurm-error-header {
@@ -440,13 +443,13 @@ SlurmUnavailableScreen #slurm-error-header {
     height: auto;
     padding: 1;
     margin-bottom: 2;
-    border-bottom: solid ansi_bright_black;
+    border-bottom: solid $border-muted;
 }
 
 SlurmUnavailableScreen #error-title {
     width: 100%;
     content-align: center middle;
-    color: ansi_red;
+    color: $error;
     text-style: bold;
 }
 
@@ -474,11 +477,11 @@ SlurmUnavailableScreen #slurm-error-footer {
 SlurmUnavailableScreen #quit-button {
     width: auto;
     min-width: 16;
-    background: ansi_bright_black;
+    background: $surface;
 }
 
 SlurmUnavailableScreen #quit-button:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 /* Help Screen */
@@ -493,22 +496,22 @@ HelpScreen #help-container {
     height: 80%;
     max-height: 40;
     padding: 0;
-    background: ansi_black;
-    border: double ansi_magenta;
+    background: $panel;
+    border: double $accent;
 }
 
 HelpScreen #help-header {
     width: 100%;
     height: auto;
     padding: 1 2;
-    background: ansi_black;
-    border-bottom: heavy ansi_magenta;
+    background: $panel;
+    border-bottom: heavy $accent;
 }
 
 HelpScreen #help-title {
     width: 100%;
     content-align: center middle;
-    color: ansi_magenta;
+    color: $accent;
     text-style: bold;
 }
 
@@ -527,8 +530,8 @@ HelpScreen #help-footer {
     width: 100%;
     height: auto;
     padding: 1 2;
-    background: ansi_black;
-    border-top: solid ansi_bright_black;
+    background: $panel;
+    border-top: solid $border-muted;
     layout: horizontal;
     align: center middle;
 }
@@ -536,19 +539,85 @@ HelpScreen #help-footer {
 HelpScreen #help-hint {
     width: 1fr;
     content-align: left middle;
-    color: ansi_bright_black;
+    color: $text-muted;
 }
 
 HelpScreen #help-close-button {
     width: auto;
     min-width: 12;
-    background: ansi_bright_black;
+    background: $surface;
 }
 
 HelpScreen #help-close-button:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 HelpScreen #help-content:focus {
-    border: tall ansi_magenta;
+    border: tall $accent;
+}
+
+/* Settings Screen */
+SettingsScreen {
+    layout: vertical;
+    align: center middle;
+    background: $background;
+}
+
+SettingsScreen #settings-container {
+    width: 70;
+    height: auto;
+    padding: 2 3;
+    background: $panel;
+    border: double $accent;
+}
+
+SettingsScreen #settings-title {
+    width: 100%;
+    content-align: center middle;
+    padding: 1;
+    margin-bottom: 1;
+    color: $accent;
+    text-style: bold;
+    border-bottom: solid $border-muted;
+}
+
+SettingsScreen .settings-label {
+    width: 100%;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+SettingsScreen Select,
+SettingsScreen Input {
+    width: 100%;
+    margin: 1 0;
+}
+
+SettingsScreen Input {
+    border: tall $accent;
+    background: $background;
+}
+
+SettingsScreen Input:focus {
+    border: tall $accent;
+}
+
+SettingsScreen #settings-button-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    margin-top: 1;
+}
+
+SettingsScreen #settings-save {
+    width: 1fr;
+    margin: 0 1;
+    background: $accent;
+    color: $text-on-accent;
+}
+
+SettingsScreen #settings-cancel {
+    width: 1fr;
+    margin: 0 1;
+    background: $surface;
 }

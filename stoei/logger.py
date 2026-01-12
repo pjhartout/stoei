@@ -110,7 +110,7 @@ def get_logger(name: str) -> "loguru.Logger":
     return logger.bind(name=name)
 
 
-def add_tui_sink(sink_func: Callable[[object], None], level: str = "INFO") -> int:
+def add_tui_sink(sink_func: Callable[[object], None], level: str = "WARNING") -> int:
     """Add a TUI sink for displaying logs in the application.
 
     This also removes the stdout handler to prevent logs from interfering

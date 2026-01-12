@@ -1,19 +1,8 @@
 /*
  * Main application styles for stoei TUI.
  *
- * Uses ANSI color references to inherit from terminal's color scheme.
- * This ensures compatibility with tmux and terminals configured with Nord or other themes.
- *
- * ANSI color mapping (typical Nord):
- *   0/black     → nord1    8/bright_black   → nord3
- *   1/red       → nord11   9/bright_red     → nord11
- *   2/green     → nord14  10/bright_green   → nord14
- *   3/yellow    → nord13  11/bright_yellow  → nord13
- *   4/blue      → nord10  12/bright_blue    → nord9
- *   5/magenta   → nord15  13/bright_magenta → nord15
- *   6/cyan      → nord8   14/bright_cyan    → nord7
- *   7/white     → nord5   15/bright_white   → nord6
- *   background  → nord0   foreground        → nord4
+ * Colors are driven by Textual theme variables (see stoei.themes).
+ * Custom variables like $text-muted are provided by the app.
  */
 
 /* Base screen */
@@ -23,8 +12,8 @@ Screen {
 
 /* Header and Footer */
 Header {
-    background: ansi_black;
-    color: ansi_cyan;
+    background: $panel;
+    color: $accent;
 }
 
 LoadingIndicator {
@@ -33,17 +22,17 @@ LoadingIndicator {
     width: 14;
     height: 1;
     content-align: center middle;
-    background: ansi_black;
+    background: $panel;
 }
 
 Footer {
-    background: ansi_black;
+    background: $panel;
     color: $foreground;
 }
 
 Footer > .footer--key {
-    background: ansi_bright_black;
-    color: ansi_cyan;
+    background: $surface;
+    color: $accent;
 }
 
 Footer > .footer--description {
@@ -91,32 +80,32 @@ Footer > .footer--description {
 #jobs-header {
     width: 100%;
     height: 3;
-    background: ansi_black;
+    background: $panel;
     padding: 0 1;
-    border-bottom: heavy ansi_blue;
+    border-bottom: heavy $accent;
     align: left middle;
 }
 
 #jobs-title {
     width: 1fr;
-    color: ansi_cyan;
-    background: ansi_black;
+    color: $accent;
+    background: $panel;
 }
 
 #cancel-job-btn {
     width: auto;
     min-width: 16;
-    background: ansi_red;
-    color: ansi_bright_white;
+    background: $error;
+    color: $text-on-error;
     border: none;
 }
 
 #cancel-job-btn:hover {
-    background: ansi_bright_red;
+    background: $error;
 }
 
 #cancel-job-btn:focus {
-    border: tall ansi_bright_cyan;
+    border: tall $accent;
 }
 
 /* DataTable styling */
@@ -135,17 +124,17 @@ DataTable {
 
 DataTable > .datatable--header {
     text-style: bold;
-    background: ansi_black;
-    color: ansi_cyan;
+    background: $panel;
+    color: $accent;
 }
 
 DataTable > .datatable--cursor {
-    background: ansi_bright_black;
-    color: ansi_bright_white;
+    background: $surface;
+    color: $foreground;
 }
 
 DataTable > .datatable--hover {
-    background: ansi_black;
+    background: $panel;
 }
 
 DataTable > .datatable--even-row {
@@ -153,7 +142,7 @@ DataTable > .datatable--even-row {
 }
 
 DataTable > .datatable--odd-row {
-    background: ansi_black;
+    background: $panel;
 }
 
 /* LogPane styling for logs tab */
@@ -161,16 +150,16 @@ DataTable > .datatable--odd-row {
     height: 1fr;
     width: 100%;
     background: $background;
-    scrollbar-background: ansi_black;
-    scrollbar-color: ansi_bright_black;
-    scrollbar-color-hover: ansi_bright_magenta;
-    scrollbar-color-active: ansi_magenta;
+    scrollbar-background: $panel;
+    scrollbar-color: $border;
+    scrollbar-color-hover: $accent-hover;
+    scrollbar-color-active: $accent;
 }
 
 /* Scrollbar styling */
 VerticalScroll {
-    scrollbar-background: ansi_black;
-    scrollbar-color: ansi_bright_black;
-    scrollbar-color-hover: ansi_bright_blue;
-    scrollbar-color-active: ansi_cyan;
+    scrollbar-background: $panel;
+    scrollbar-color: $border;
+    scrollbar-color-hover: $accent-hover;
+    scrollbar-color-active: $accent;
 }

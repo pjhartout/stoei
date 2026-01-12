@@ -97,9 +97,24 @@ class HelpScreen(Screen[None]):
                 ],
             ),
             self._format_section(
+                "Settings Screen",
+                [
+                    ("↑/↓", "Navigate between fields"),
+                    ("Tab", "Next field"),
+                    ("Shift+Tab", "Previous field"),
+                    ("←/→", "Cycle dropdown options"),
+                    ("Enter", "Confirm selection / Next field"),
+                    ("Home/End", "First / Last field"),
+                    ("t/l/m", "Jump to Theme/Level/Max"),
+                    ("Ctrl+S", "Save settings"),
+                    ("Esc/q", "Cancel and close"),
+                ],
+            ),
+            self._format_section(
                 "General",
                 [
                     ("r", "Refresh data now"),
+                    ("s", "Open settings"),
                     ("?", "Show this help screen"),
                     ("q", "Quit application"),
                 ],

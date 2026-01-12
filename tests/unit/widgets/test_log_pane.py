@@ -14,6 +14,7 @@ class TestLogPane:
         assert pane.auto_scroll is True
         assert pane.markup is True
         assert pane.wrap is True
+        assert pane.max_lines == LogPane.DEFAULT_MAX_LINES
 
     def test_init_with_custom_max_lines(self) -> None:
         """Test LogPane accepts custom max_lines."""

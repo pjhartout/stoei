@@ -2,9 +2,9 @@
 
 from typing import ClassVar
 
-from textual import events
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
+from textual.message import Message
 from textual.widgets import Button
 
 from stoei.logger import get_logger
@@ -12,7 +12,7 @@ from stoei.logger import get_logger
 logger = get_logger(__name__)
 
 
-class TabSwitched(events.Message):
+class TabSwitched(Message):
     """Message sent when a tab is switched."""
 
     def __init__(self, tab_name: str) -> None:
@@ -37,8 +37,8 @@ class TabContainer(Container):
     #tab-header {
         height: 1;
         width: 100%;
-        border-bottom: heavy ansi_blue;
-        background: ansi_black;
+        border-bottom: heavy $accent;
+        background: $panel;
     }
 
     #tab-buttons {
@@ -50,18 +50,18 @@ class TabContainer(Container):
         width: 1fr;
         height: 1;
         border: none;
-        background: ansi_black;
-        color: ansi_cyan;
+        background: $panel;
+        color: $accent;
         padding: 0;
     }
 
     .tab-button:hover {
-        background: ansi_bright_black;
+        background: $surface;
     }
 
     .tab-button.active {
-        background: ansi_blue;
-        color: ansi_bright_white;
+        background: $accent;
+        color: $text-on-accent;
     }
 
     /* Compact tabs for narrow windows */

@@ -43,6 +43,7 @@ class TestHelpScreen:
         # Check for some expected keybindings
         assert "Quit" in content
         assert "Refresh" in content
+        assert "Open settings" in content
 
     def test_format_section(self) -> None:
         """Test _format_section method."""

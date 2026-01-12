@@ -348,6 +348,11 @@ class TestAppClusterIntegration:
         assert bindings_dict["right"] == "next_tab"
         assert bindings_dict["shift+tab"] == "previous_tab"
 
+    def test_bindings_include_settings_shortcut(self, app: SlurmMonitor) -> None:
+        """Test that settings shortcut binding exists."""
+        bindings_dict = {b[0]: b[1] for b in app.BINDINGS}
+        assert bindings_dict["s"] == "show_settings"
+
     async def test_action_next_tab_cycles_forward(self, app: SlurmMonitor) -> None:
         """Test that action_next_tab cycles through tabs forward."""
         with (

@@ -7,7 +7,9 @@ from pathlib import Path
 from typing import ClassVar
 
 from rich.console import RenderableType
+from textual._path import CSSPathType
 from textual.app import App, ComposeResult
+from textual.binding import BindingType
 from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.timer import Timer
@@ -16,6 +18,7 @@ from textual.widgets.data_table import ColumnKey, RowKey
 from textual.worker import Worker, WorkerState
 
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
+from stoei.settings import Settings, load_settings, save_settings
 from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
     cancel_job,
@@ -36,6 +39,7 @@ from stoei.slurm.gpu_parser import (
     parse_gpu_from_gres,
 )
 from stoei.slurm.validation import check_slurm_available
+from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
 from stoei.widgets.help_screen import HelpScreen
 from stoei.widgets.loading_indicator import LoadingIndicator
@@ -43,6 +47,7 @@ from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen, NodeInfoScreen
+from stoei.widgets.settings_screen import SettingsScreen
 from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
 from stoei.widgets.tabs import TabContainer, TabSwitched
 from stoei.widgets.user_overview import UserOverviewTab
@@ -81,13 +86,26 @@ class SlurmMonitor(App[None]):
     TITLE = "STOEI"
     ENABLE_COMMAND_PALETTE = False
     LAYERS: ClassVar[list[str]] = ["base", "overlay"]
-    CSS_PATH: ClassVar[list[Path]] = [
+    CSS_PATH: ClassVar[CSSPathType | None] = [
         STYLES_DIR / "app.tcss",
         STYLES_DIR / "modals.tcss",
     ]
-    BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
+    THEME_VARIABLE_DEFAULTS: ClassVar[dict[str, str]] = {
+        "text-muted": "ansi_bright_black",
+        "text-subtle": "ansi_bright_black",
+        "border": "ansi_bright_black",
+        "border-muted": "ansi_black",
+        "accent-hover": "ansi_bright_blue",
+        "accent-active": "ansi_blue",
+        "text-on-accent": "ansi_bright_white",
+        "text-on-error": "ansi_bright_white",
+        "text-on-warning": "ansi_black",
+        "text-on-success": "ansi_black",
+    }
+    BINDINGS: ClassVar[list[BindingType]] = [
         ("q", "quit", "Quit"),
         ("r", "refresh", "Refresh Now"),
+        ("s", "show_settings", "Settings"),
         ("i", "show_job_info", "Job Info"),
         ("enter", "show_selected_job_info", "View Selected Job"),
         ("c", "cancel_job", "Cancel Job"),
@@ -99,12 +117,19 @@ class SlurmMonitor(App[None]):
         ("right", "next_tab", "Next Tab"),
         ("shift+tab", "previous_tab", "Previous Tab"),
         ("question_mark", "show_help", "Help"),
-    )
+    ]
     JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList")
+
+    def get_theme_variable_defaults(self) -> dict[str, str]:
+        """Provide default values for custom theme variables."""
+        return {**super().get_theme_variable_defaults(), **self.THEME_VARIABLE_DEFAULTS}
 
     def __init__(self) -> None:
         """Initialize the SLURM monitor app."""
+        self._settings: Settings = load_settings()
         super().__init__()
+        self._register_custom_themes()
+        self._apply_theme(self._settings.theme)
         self.refresh_interval: float = REFRESH_INTERVAL
         self.auto_refresh_timer: Timer | None = None
         self._job_cache: JobCache = JobCache()
@@ -151,7 +176,7 @@ class SlurmMonitor(App[None]):
 
                 # Logs tab
                 with Container(id="tab-logs-content", classes="tab-content"):
-                    yield LogPane(id="log_pane")
+                    yield LogPane(id="log_pane", max_lines=self._settings.max_log_lines)
 
             # Sidebar with cluster load (on the right)
             yield ClusterSidebar(id="cluster-sidebar")
@@ -333,7 +358,7 @@ class SlurmMonitor(App[None]):
 
         # Set up log pane as a loguru sink
         log_pane = self.query_one("#log_pane", LogPane)
-        self._log_sink_id = add_tui_sink(log_pane.sink, level="DEBUG")
+        self._log_sink_id = add_tui_sink(log_pane.sink, level=self._settings.log_level)
 
         logger.info("Initial load complete, transitioning to main UI")
 
@@ -357,6 +382,54 @@ class SlurmMonitor(App[None]):
 
         # Check window size
         self._check_window_size()
+
+    def _register_custom_themes(self) -> None:
+        """Register custom themes for the app."""
+        for theme in REGISTERED_THEMES:
+            self.register_theme(theme)
+
+    def _apply_theme(self, theme_name: str) -> None:
+        """Apply a theme by name.
+
+        Args:
+            theme_name: Name of the theme to apply.
+        """
+        if theme_name not in self.available_themes:
+            logger.warning(f"Unknown theme '{theme_name}', falling back to {DEFAULT_THEME_NAME}")
+            theme_name = DEFAULT_THEME_NAME
+        self.theme = theme_name
+
+    def _apply_log_settings(self) -> None:
+        """Apply log settings to the active log sink."""
+        if self._log_sink_id is None:
+            return
+        log_pane = self.query_one("#log_pane", LogPane)
+        remove_tui_sink(self._log_sink_id)
+        self._log_sink_id = add_tui_sink(log_pane.sink, level=self._settings.log_level)
+
+    def _apply_log_pane_settings(self) -> None:
+        """Apply log pane settings."""
+        log_pane = self.query_one("#log_pane", LogPane)
+        log_pane.max_lines = self._settings.max_log_lines
+
+    def action_show_settings(self) -> None:
+        """Open the settings screen."""
+        self.push_screen(SettingsScreen(self._settings), self._handle_settings_updated)
+
+    def _handle_settings_updated(self, settings: Settings | None) -> None:
+        """Handle settings updates from the settings screen.
+
+        Args:
+            settings: Updated settings or None if canceled.
+        """
+        if settings is None:
+            return
+        self._settings = settings
+        save_settings(settings)
+        self._apply_theme(settings.theme)
+        self._apply_log_pane_settings()
+        self._apply_log_settings()
+        self.notify("Settings saved")
 
     def _start_refresh_worker(self) -> None:
         """Start background worker for lightweight data refresh."""
