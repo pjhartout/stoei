@@ -243,3 +243,141 @@ class TestClusterSidebar:
         cluster_sidebar.update_stats(stats2)
         assert cluster_sidebar.stats.total_nodes == 20
         assert cluster_sidebar.stats.free_nodes == 15
+
+
+class TestClusterStatsPendingResources:
+    """Tests for pending resource fields in ClusterStats."""
+
+    def test_pending_fields_initial_values(self) -> None:
+        """Test initial default values for pending fields."""
+        stats = ClusterStats()
+        assert stats.pending_jobs_count == 0
+        assert stats.pending_cpus == 0
+        assert stats.pending_memory_gb == 0.0
+        assert stats.pending_gpus == 0
+        assert stats.pending_gpus_by_type == {}
+
+    def test_pending_fields_with_values(self) -> None:
+        """Test pending fields with set values."""
+        stats = ClusterStats(
+            pending_jobs_count=42,
+            pending_cpus=1280,
+            pending_memory_gb=10240.0,
+            pending_gpus=64,
+            pending_gpus_by_type={"h200": 32, "a100": 16, "gpu": 16},
+        )
+        assert stats.pending_jobs_count == 42
+        assert stats.pending_cpus == 1280
+        assert stats.pending_memory_gb == 10240.0
+        assert stats.pending_gpus == 64
+        assert stats.pending_gpus_by_type == {"h200": 32, "a100": 16, "gpu": 16}
+
+
+class TestClusterSidebarPendingQueue:
+    """Tests for pending queue display in ClusterSidebar."""
+
+    @pytest.fixture
+    def cluster_sidebar(self) -> ClusterSidebar:
+        """Create a ClusterSidebar widget for testing."""
+        return ClusterSidebar(id="test-sidebar")
+
+    def test_render_stats_no_pending_jobs(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that pending section is not displayed when no pending jobs."""
+        stats = ClusterStats(total_nodes=10, free_nodes=5, pending_jobs_count=0)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "Pending Queue" not in rendered
+
+    def test_render_stats_with_pending_jobs(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that pending section is displayed when there are pending jobs."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            pending_jobs_count=42,
+            pending_cpus=1280,
+            pending_memory_gb=512.0,
+            pending_gpus=64,
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "Pending Queue" in rendered
+        assert "42 jobs waiting" in rendered
+        assert "1,280" in rendered  # CPUs with comma formatting
+        assert "512.0 GB" in rendered
+
+    def test_render_stats_pending_memory_tb(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that pending memory shows TB when >= 1024 GB."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            pending_jobs_count=10,
+            pending_memory_gb=2048.0,  # 2 TB
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "2.0 TB" in rendered
+        assert "2048" not in rendered  # Should not show raw GB value
+
+    def test_render_stats_pending_gpus_by_type(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that pending GPUs are shown by type."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            pending_jobs_count=10,
+            pending_cpus=100,
+            pending_memory_gb=100.0,
+            pending_gpus=48,
+            pending_gpus_by_type={"h200": 32, "a100": 16},
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "GPUs:" in rendered
+        assert "h200: 32" in rendered
+        assert "a100: 16" in rendered
+
+    def test_render_stats_pending_gpus_generic_type(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that generic GPU type is displayed as 'generic'."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            pending_jobs_count=10,
+            pending_cpus=100,
+            pending_memory_gb=100.0,
+            pending_gpus=16,
+            pending_gpus_by_type={"gpu": 16},
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "generic: 16" in rendered
+
+    def test_render_stats_pending_gpus_total_only(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that pending GPUs show total when no type breakdown."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            pending_jobs_count=10,
+            pending_cpus=100,
+            pending_memory_gb=100.0,
+            pending_gpus=32,
+            pending_gpus_by_type={},
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "GPUs: 32" in rendered
+
+    def test_render_stats_pending_section_order(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that pending section appears after GPU section."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            total_gpus=50,
+            allocated_gpus=25,
+            gpus_by_type={"h200": (50, 25)},
+            pending_jobs_count=10,
+            pending_cpus=100,
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        gpu_pos = rendered.find("GPUs:")
+        pending_pos = rendered.find("Pending Queue")
+        assert gpu_pos < pending_pos, "Pending Queue should appear after GPUs"
