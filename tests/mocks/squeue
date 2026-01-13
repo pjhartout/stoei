@@ -6,22 +6,57 @@ import random
 import sys
 
 # Constants for parsing
-MIN_JOB_FIELDS_WITH_USER = 7
-MIN_JOB_FIELDS_WITH_TRES = 8
+# All-users tuples now include Partition:
+# (JobID, Name, User, Partition, State, Time, Nodes, NodeList, [TRES])
+MIN_JOB_FIELDS_WITH_USER = 8
+MIN_JOB_FIELDS_WITH_TRES = 9
 MIN_JOB_FIELDS_WITHOUT_USER = 6
 MIN_USER_INDEX = 2
+MIN_ALL_USERS_STATE_INDEX = 4
+MIN_USER_ONLY_STATE_INDEX = 2
 MIN_RANDOM_JOBS = 2
 MAX_RANDOM_JOBS = 10
 
 # Real job data from current cluster (with user field and TRES)
 MOCK_JOBS_ALL_USERS = [
-    ("47441", "rope_pct_llama_", "afkhan", "PENDING", "0:00", "8", "(Priority)", "cpu=64,mem=512G,node=8,gres/gpu=32"),
-    ("47434", "rope_pct_llama_", "afkhan", "PENDING", "0:00", "8", "(Resources)", "cpu=64,mem=512G,node=8,gres/gpu=32"),
-    ("47587", "sam3_multigpu", "flkar", "RUNNING", "5:29:36", "1", "daisg106", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
+    (
+        "47441",
+        "rope_pct_llama_",
+        "afkhan",
+        "gpu",
+        "PENDING",
+        "0:00",
+        "8",
+        "(Priority)",
+        "cpu=64,mem=512G,node=8,gres/gpu=32",
+    ),
+    (
+        "47434",
+        "rope_pct_llama_",
+        "afkhan",
+        "gpu",
+        "PENDING",
+        "0:00",
+        "8",
+        "(Resources)",
+        "cpu=64,mem=512G,node=8,gres/gpu=32",
+    ),
+    (
+        "47587",
+        "sam3_multigpu",
+        "flkar",
+        "gpu",
+        "RUNNING",
+        "5:29:36",
+        "1",
+        "daisg106",
+        "cpu=192,mem=2000G,node=1,gres/gpu=8",
+    ),
     (
         "47474_5",
         "sdvae_sit_b_2_r",
         "xichen",
+        "gpu",
         "RUNNING",
         "18:29",
         "1",
@@ -32,28 +67,51 @@ MOCK_JOBS_ALL_USERS = [
         "47475_2",
         "sdvae_sit_b_2_r",
         "xichen",
+        "gpu",
         "RUNNING",
         "32:59",
         "1",
         "daisg104",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
-    ("47429", "train", "rmaser", "RUNNING", "12:30:07", "1", "daisg116", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
+    (
+        "47429",
+        "train",
+        "rmaser",
+        "gpu",
+        "RUNNING",
+        "12:30:07",
+        "1",
+        "daisg116",
+        "cpu=192,mem=2000G,node=1,gres/gpu=8",
+    ),
     (
         "46043",
         "foldmae",
         "dchen",
+        "gpu",
         "RUNNING",
         "12:58:54",
         "4",
         "daisg[111-113,115]",
         "cpu=768,mem=8000G,node=4,gres/gpu=32",
     ),
-    ("47537", "foldmae", "dchen", "PENDING", "0:00", "4", "(Priority)", "cpu=768,mem=8000G,node=4,gres/gpu=32"),
+    (
+        "47537",
+        "foldmae",
+        "dchen",
+        "gpu",
+        "PENDING",
+        "0:00",
+        "4",
+        "(Priority)",
+        "cpu=768,mem=8000G,node=4,gres/gpu=32",
+    ),
     (
         "47670",
         "17_imagenet128_",
         "bpogodzi",
+        "gpu",
         "PENDING",
         "0:00",
         "1",
@@ -64,6 +122,7 @@ MOCK_JOBS_ALL_USERS = [
         "47671",
         "17_imagenet128_",
         "bpogodzi",
+        "gpu",
         "PENDING",
         "0:00",
         "1",
@@ -74,6 +133,7 @@ MOCK_JOBS_ALL_USERS = [
         "47462_11",
         "decomposed_rep_",
         "jvanders",
+        "gpu",
         "RUNNING",
         "4:28",
         "1",
@@ -155,21 +215,41 @@ MOCK_JOBS_USER_ONLY = [
 ]
 
 
+def _normalize_all_users_job(job: tuple[str, ...]) -> tuple[str, ...]:
+    """Normalize all-users job tuples to include Partition.
+
+    Historical versions of this mock stored tuples as:
+      (JobID, Name, User, State, Time, Nodes, NodeList, [TRES])
+
+    The production app now expects:
+      (JobID, Name, User, Partition, State, Time, Nodes, NodeList, [TRES])
+    """
+    if len(job) == 7:
+        job_id, name, user, state, time, nodes, nodelist = job
+        return (job_id, name, user, "gpu", state, time, nodes, nodelist)
+    if len(job) == 8:
+        job_id, name, user, state, time, nodes, nodelist, tres = job
+        return (job_id, name, user, "gpu", state, time, nodes, nodelist, tres)
+    return job
+
+
 def print_fixed_width(jobs):
     """Print jobs in fixed width format compatible with -O."""
-    # JobID:20,Name:20,UserName:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
+    # JobID:20,Name:20,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
     for job in jobs:
+        job = _normalize_all_users_job(job)
         if len(job) < MIN_JOB_FIELDS_WITH_USER:
             continue
             
-        job_id, name, user, state, time, nodes, nodelist = job[:MIN_JOB_FIELDS_WITH_USER]
-        tres = job[7] if len(job) >= MIN_JOB_FIELDS_WITH_TRES else ""
+        job_id, name, user, partition, state, time, nodes, nodelist = job[:MIN_JOB_FIELDS_WITH_USER]
+        tres = job[8] if len(job) >= MIN_JOB_FIELDS_WITH_TRES else ""
         
         # Pad fields to match expected fixed width
         line = (
             f"{job_id:<20}"
             f"{name:<20}"
             f"{user:<15}"
+            f"{partition:<15}"
             f"{state:<10}"
             f"{time:<12}"
             f"{nodes:<6}"
@@ -198,9 +278,11 @@ def main() -> None:
     allowed_states = args.states.split(",") if args.states else None
 
     # Get job pool
+    using_all_users_jobs = False
     if is_fixed_width:
         # Fixed width mode implies full job details including TRES
-        jobs = MOCK_JOBS_ALL_USERS
+        jobs = [_normalize_all_users_job(j) for j in MOCK_JOBS_ALL_USERS]
+        using_all_users_jobs = True
     else:
         # Legacy/Simple mode
         # Determine format - check if user field is in format string
@@ -208,19 +290,23 @@ def main() -> None:
         is_all_users = args.all or (not args.user and has_user_field)
         
         if is_all_users and has_user_field:
-            jobs = MOCK_JOBS_ALL_USERS
+            jobs = [_normalize_all_users_job(j) for j in MOCK_JOBS_ALL_USERS]
+            using_all_users_jobs = True
         else:
             jobs = MOCK_JOBS_USER_ONLY
 
     # Filter by state
     if allowed_states:
-        jobs = [j for j in jobs if any(s in j[3] for s in allowed_states)] # Index 3 is STATE in both lists
+        if using_all_users_jobs:
+            jobs = [j for j in jobs if len(j) > MIN_ALL_USERS_STATE_INDEX and any(s in j[MIN_ALL_USERS_STATE_INDEX] for s in allowed_states)]
+        else:
+            jobs = [j for j in jobs if len(j) > MIN_USER_ONLY_STATE_INDEX and any(s in j[MIN_USER_ONLY_STATE_INDEX] for s in allowed_states)]
 
     # Filter by user if specified
     if args.user:
         # In MOCK_JOBS_ALL_USERS, user is at index 2
         # In MOCK_JOBS_USER_ONLY, no user field (so -u logic is just selection)
-        if jobs == MOCK_JOBS_ALL_USERS:
+        if using_all_users_jobs:
              jobs = [job for job in jobs if len(job) > MIN_USER_INDEX and job[MIN_USER_INDEX] == args.user]
         # else: user only jobs are just returned as is for that user
 
@@ -241,7 +327,7 @@ def main() -> None:
     has_tres_field = args.format and "%t" in args.format
     
     if not args.noheader:
-        if jobs == MOCK_JOBS_ALL_USERS:
+        if using_all_users_jobs:
              if has_tres_field:
                 print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)|TRES")
              else:
@@ -250,10 +336,10 @@ def main() -> None:
              print("     JOBID|        JOBNAME|   STATE|      TIME|   NODES|      NODELIST")
 
     for job in selected_jobs:
-        if jobs == MOCK_JOBS_ALL_USERS:
-            job_id, name, user, state, time, nodes, nodelist = job[:MIN_JOB_FIELDS_WITH_USER]
+        if using_all_users_jobs:
+            job_id, name, user, _partition, state, time, nodes, nodelist = job[:MIN_JOB_FIELDS_WITH_USER]
             if has_tres_field and len(job) >= MIN_JOB_FIELDS_WITH_TRES:
-                tres = job[7]
+                tres = job[8]
                 print(f"{job_id:>10}|{name:>15}|{user:>8}|{state:>8}|{time:>10}|{nodes:>4}|{nodelist:>12}|{tres}")
             else:
                 print(f"{job_id:>10}|{name:>15}|{user:>8}|{state:>8}|{time:>10}|{nodes:>4}|{nodelist:>12}")

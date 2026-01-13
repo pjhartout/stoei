@@ -21,7 +21,7 @@ HISTORY_JOBS: list[tuple[str, ...]] = [
 ]
 
 ALL_RUNNING_JOBS: list[tuple[str, ...]] = [
-    ("101", "train", "user1", "RUNNING", "00:10:00", "1", "node001", "cpu=4,mem=32G,gres/gpu:h100=1"),
+    ("101", "train", "user1", "gpu", "RUNNING", "00:10:00", "1", "node001", "cpu=4,mem=32G,gres/gpu:h100=1"),
 ]
 
 NODE_DATA: list[dict[str, str]] = [

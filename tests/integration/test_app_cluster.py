@@ -136,8 +136,8 @@ class TestAppClusterIntegration:
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 app._all_users_jobs = [
-                    ("12345", "job1", "user1", "RUNNING", "00:05:00", "1", "node01"),
-                    ("12346", "job2", "user2", "PENDING", "00:00:00", "2", "node02"),
+                    ("12345", "job1", "user1", "gpu", "RUNNING", "00:05:00", "1", "node01"),
+                    ("12346", "job2", "user2", "cpu", "PENDING", "00:00:00", "2", "node02"),
                 ]
 
                 event = TabSwitched("users")

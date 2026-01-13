@@ -445,8 +445,10 @@ class LogViewerScreen(Screen[None]):
             if self._spinner_timer:
                 self._spinner_timer.stop()
                 self._spinner_timer = None
-            # Update UI - we're already on the main event loop
-            self._on_load_complete()
+            # Update UI after next refresh to ensure widgets are mounted.
+            # This avoids races where the worker completes before the DOM is ready,
+            # which can leave the content scroll container hidden.
+            self.call_after_refresh(self._on_load_complete)
 
     def _on_load_complete(self) -> None:
         """Called when file loading completes (success or failure)."""
