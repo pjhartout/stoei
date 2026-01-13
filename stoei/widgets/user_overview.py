@@ -300,17 +300,18 @@ class UserOverviewTab(VerticalScroll):
         """Aggregate job data into user statistics.
 
         Args:
-            jobs: List of job tuples from squeue (JobID, Name, User, State, Time, Nodes, NodeList, [TRES]).
-                TRES is optional (8th field).
+            jobs: List of job tuples from squeue
+                (JobID, Name, User, Partition, State, Time, Nodes, NodeList, [TRES]).
+                TRES is optional (9th field).
 
         Returns:
             List of UserStats objects.
         """
         # Constants for job tuple indices
-        min_job_fields = 7  # Minimum: JobID, Name, User, State, Time, Nodes, NodeList
+        min_job_fields = 8  # Minimum: JobID, Name, User, Partition, State, Time, Nodes, NodeList
         username_index = 2
-        nodes_index = 5
-        tres_index = 7  # Optional 8th field
+        nodes_index = 6
+        tres_index = 8  # Optional 9th field
 
         def _default_user_data() -> _UserDataDict:
             """Create default user data dictionary."""

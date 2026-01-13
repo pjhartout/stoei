@@ -1,7 +1,7 @@
 """Unit tests for the ClusterSidebar widget."""
 
 import pytest
-from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
+from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats, PendingPartitionStats
 
 
 class TestClusterStats:
@@ -256,6 +256,7 @@ class TestClusterStatsPendingResources:
         assert stats.pending_memory_gb == 0.0
         assert stats.pending_gpus == 0
         assert stats.pending_gpus_by_type == {}
+        assert stats.pending_by_partition == {}
 
     def test_pending_fields_with_values(self) -> None:
         """Test pending fields with set values."""
@@ -265,12 +266,18 @@ class TestClusterStatsPendingResources:
             pending_memory_gb=10240.0,
             pending_gpus=64,
             pending_gpus_by_type={"h200": 32, "a100": 16, "gpu": 16},
+            pending_by_partition={
+                "gpu": PendingPartitionStats(jobs_count=40, cpus=1200, memory_gb=10000.0, gpus=64),
+                "cpu": PendingPartitionStats(jobs_count=2, cpus=80, memory_gb=240.0, gpus=0),
+            },
         )
         assert stats.pending_jobs_count == 42
         assert stats.pending_cpus == 1280
         assert stats.pending_memory_gb == 10240.0
         assert stats.pending_gpus == 64
         assert stats.pending_gpus_by_type == {"h200": 32, "a100": 16, "gpu": 16}
+        assert stats.pending_by_partition["gpu"].jobs_count == 40
+        assert stats.pending_by_partition["cpu"].jobs_count == 2
 
 
 class TestClusterSidebarPendingQueue:
@@ -297,13 +304,38 @@ class TestClusterSidebarPendingQueue:
             pending_cpus=1280,
             pending_memory_gb=512.0,
             pending_gpus=64,
+            pending_by_partition={
+                "cpu": PendingPartitionStats(jobs_count=2, cpus=64, memory_gb=512.0, gpus=0),
+                "gpu": PendingPartitionStats(jobs_count=40, cpus=1216, memory_gb=0.0, gpus=64),
+            },
         )
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
         assert "Pending Queue" in rendered
-        assert "42 jobs waiting" in rendered
-        assert "1,280" in rendered  # CPUs with comma formatting
-        assert "512.0 GB" in rendered
+        assert "  cpu: 2 jobs" in rendered
+        assert "  gpu: 40 jobs" in rendered
+
+    def test_render_stats_pending_by_partition(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that pending queue can be broken down by partition."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            pending_jobs_count=3,
+            pending_cpus=96,
+            pending_memory_gb=768.0,
+            pending_gpus=12,
+            pending_by_partition={
+                "cpu": PendingPartitionStats(jobs_count=1, cpus=64, memory_gb=512.0, gpus=8),
+                "gpu": PendingPartitionStats(jobs_count=2, cpus=32, memory_gb=256.0, gpus=4),
+            },
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        cpu_pos = rendered.find("  cpu: 1 jobs")
+        gpu_pos = rendered.find("  gpu: 2 jobs")
+        assert cpu_pos != -1
+        assert gpu_pos != -1
+        assert cpu_pos < gpu_pos
 
     def test_render_stats_pending_memory_tb(self, cluster_sidebar: ClusterSidebar) -> None:
         """Test that pending memory shows TB when >= 1024 GB."""
@@ -311,7 +343,9 @@ class TestClusterSidebarPendingQueue:
             total_nodes=10,
             free_nodes=5,
             pending_jobs_count=10,
-            pending_memory_gb=2048.0,  # 2 TB
+            pending_by_partition={
+                "gpu": PendingPartitionStats(jobs_count=10, cpus=0, memory_gb=2048.0, gpus=0),  # 2 TB
+            },
         )
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
@@ -319,15 +353,20 @@ class TestClusterSidebarPendingQueue:
         assert "2048" not in rendered  # Should not show raw GB value
 
     def test_render_stats_pending_gpus_by_type(self, cluster_sidebar: ClusterSidebar) -> None:
-        """Test that pending GPUs are shown by type."""
+        """Test that pending GPUs are shown by type per partition."""
         stats = ClusterStats(
             total_nodes=10,
             free_nodes=5,
             pending_jobs_count=10,
-            pending_cpus=100,
-            pending_memory_gb=100.0,
-            pending_gpus=48,
-            pending_gpus_by_type={"h200": 32, "a100": 16},
+            pending_by_partition={
+                "gpu": PendingPartitionStats(
+                    jobs_count=10,
+                    cpus=100,
+                    memory_gb=100.0,
+                    gpus=48,
+                    gpus_by_type={"h200": 32, "a100": 16},
+                ),
+            },
         )
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
@@ -341,10 +380,15 @@ class TestClusterSidebarPendingQueue:
             total_nodes=10,
             free_nodes=5,
             pending_jobs_count=10,
-            pending_cpus=100,
-            pending_memory_gb=100.0,
-            pending_gpus=16,
-            pending_gpus_by_type={"gpu": 16},
+            pending_by_partition={
+                "gpu": PendingPartitionStats(
+                    jobs_count=10,
+                    cpus=100,
+                    memory_gb=100.0,
+                    gpus=16,
+                    gpus_by_type={"gpu": 16},
+                ),
+            },
         )
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
@@ -356,10 +400,9 @@ class TestClusterSidebarPendingQueue:
             total_nodes=10,
             free_nodes=5,
             pending_jobs_count=10,
-            pending_cpus=100,
-            pending_memory_gb=100.0,
-            pending_gpus=32,
-            pending_gpus_by_type={},
+            pending_by_partition={
+                "gpu": PendingPartitionStats(jobs_count=10, cpus=100, memory_gb=100.0, gpus=32),
+            },
         )
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
@@ -374,7 +417,7 @@ class TestClusterSidebarPendingQueue:
             allocated_gpus=25,
             gpus_by_type={"h200": (50, 25)},
             pending_jobs_count=10,
-            pending_cpus=100,
+            pending_by_partition={"gpu": PendingPartitionStats(jobs_count=10, cpus=100, memory_gb=0.0, gpus=0)},
         )
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()

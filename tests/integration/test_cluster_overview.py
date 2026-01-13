@@ -9,6 +9,7 @@ from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from stoei.widgets.tabs import TabContainer
 from stoei.widgets.user_overview import UserOverviewTab, UserStats
 from textual.app import App
+from textual.widgets import Static
 
 
 class ClusterTestApp(App[None]):
@@ -189,7 +190,8 @@ class TestClusterDataIntegration:
             # Should start with loading message
             assert not sidebar._data_loaded
             # Initial content should contain loading message
-            content = str(sidebar.render())
+            content_widget = sidebar.query_one("#cluster-sidebar-content", Static)
+            content = str(content_widget.render())
             assert "Cluster Load" in content or "Loading" in content
 
     async def test_cluster_sidebar_renders_after_update(self, app: ClusterTestApp) -> None:
@@ -206,7 +208,8 @@ class TestClusterDataIntegration:
             )
             sidebar.update_stats(stats)
             assert sidebar._data_loaded
-            content = str(sidebar.render())
+            content_widget = sidebar.query_one("#cluster-sidebar-content", Static)
+            content = str(content_widget.render())
             assert "Nodes" in content
             assert "CPUs" in content
 

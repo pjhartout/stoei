@@ -565,14 +565,15 @@ def get_node_info(node_name: str) -> tuple[str, str | None]:
 
 
 # Fixed-width column positions for squeue -O format
-# Format: JobID:20,Name:20,UserName:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
+# Format: JobID:20,Name:20,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
 _SQUEUE_COL_JOBID_END = 20
 _SQUEUE_COL_NAME_END = 40
 _SQUEUE_COL_USER_END = 55
-_SQUEUE_COL_STATE_END = 65
-_SQUEUE_COL_TIME_END = 77
-_SQUEUE_COL_NODES_END = 83
-_SQUEUE_COL_NODELIST_END = 113
+_SQUEUE_COL_PARTITION_END = 70
+_SQUEUE_COL_STATE_END = 80
+_SQUEUE_COL_TIME_END = 92
+_SQUEUE_COL_NODES_END = 98
+_SQUEUE_COL_NODELIST_END = 128
 
 
 def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
@@ -582,7 +583,7 @@ def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
         line: Single line from squeue -O output.
 
     Returns:
-        Tuple of (job_id, name, user, state, time_used, num_nodes, node_list, tres) or None.
+        Tuple of (job_id, name, user, partition, state, time_used, num_nodes, node_list, tres) or None.
     """
     if len(line) < _SQUEUE_COL_JOBID_END:
         return None
@@ -593,7 +594,10 @@ def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
 
     name = line[_SQUEUE_COL_JOBID_END:_SQUEUE_COL_NAME_END].strip() if len(line) > _SQUEUE_COL_JOBID_END else ""
     user = line[_SQUEUE_COL_NAME_END:_SQUEUE_COL_USER_END].strip() if len(line) > _SQUEUE_COL_NAME_END else ""
-    state = line[_SQUEUE_COL_USER_END:_SQUEUE_COL_STATE_END].strip() if len(line) > _SQUEUE_COL_USER_END else ""
+    partition = line[_SQUEUE_COL_USER_END:_SQUEUE_COL_PARTITION_END].strip() if len(line) > _SQUEUE_COL_USER_END else ""
+    state = (
+        line[_SQUEUE_COL_PARTITION_END:_SQUEUE_COL_STATE_END].strip() if len(line) > _SQUEUE_COL_PARTITION_END else ""
+    )
     time_used = line[_SQUEUE_COL_STATE_END:_SQUEUE_COL_TIME_END].strip() if len(line) > _SQUEUE_COL_STATE_END else ""
     num_nodes = line[_SQUEUE_COL_TIME_END:_SQUEUE_COL_NODES_END].strip() if len(line) > _SQUEUE_COL_TIME_END else ""
     node_list = (
@@ -601,7 +605,7 @@ def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
     )
     tres = line[_SQUEUE_COL_NODELIST_END:].strip() if len(line) > _SQUEUE_COL_NODELIST_END else ""
 
-    return (job_id, name, user, state, time_used, num_nodes, node_list, tres)
+    return (job_id, name, user, partition, state, time_used, num_nodes, node_list, tres)
 
 
 def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
@@ -620,7 +624,7 @@ def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
         command = [
             squeue,
             "-O",
-            "JobID:20,Name:20,UserName:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
+            "JobID:20,Name:20,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
             "-a",  # Show all partitions
             "-t",
             "RUNNING,PENDING",

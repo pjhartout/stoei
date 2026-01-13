@@ -941,7 +941,7 @@ class TestCalculatePendingResources:
     def test_no_pending_jobs(self, app: SlurmMonitor) -> None:
         """Test with no pending jobs."""
         app._all_users_jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=32G"),
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=32G"),
         ]
         stats = ClusterStats()
         app._calculate_pending_resources(stats)
@@ -953,7 +953,7 @@ class TestCalculatePendingResources:
     def test_single_pending_job(self, app: SlurmMonitor) -> None:
         """Test with a single pending job."""
         app._all_users_jobs = [
-            ("12345", "job1", "user1", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
         ]
         stats = ClusterStats()
         app._calculate_pending_resources(stats)
@@ -965,9 +965,9 @@ class TestCalculatePendingResources:
     def test_multiple_pending_jobs(self, app: SlurmMonitor) -> None:
         """Test with multiple pending jobs."""
         app._all_users_jobs = [
-            ("12345", "job1", "user1", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
-            ("12346", "job2", "user2", "PENDING", "0:00", "2", "(Resources)", "cpu=64,mem=512G,gres/gpu=8"),
-            ("12347", "job3", "user1", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=32G"),
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
+            ("12346", "job2", "user2", "cpu", "PENDING", "0:00", "2", "(Resources)", "cpu=64,mem=512G,gres/gpu=8"),
+            ("12347", "job3", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=32G"),
         ]
         stats = ClusterStats()
         app._calculate_pending_resources(stats)
@@ -979,7 +979,7 @@ class TestCalculatePendingResources:
     def test_pending_state_pd(self, app: SlurmMonitor) -> None:
         """Test that 'PD' state is recognized as pending."""
         app._all_users_jobs = [
-            ("12345", "job1", "user1", "PD", "0:00", "1", "(Priority)", "cpu=16,mem=128G"),
+            ("12345", "job1", "user1", "gpu", "PD", "0:00", "1", "(Priority)", "cpu=16,mem=128G"),
         ]
         stats = ClusterStats()
         app._calculate_pending_resources(stats)
@@ -989,9 +989,9 @@ class TestCalculatePendingResources:
     def test_pending_gpus_by_type(self, app: SlurmMonitor) -> None:
         """Test that pending GPUs are aggregated by type."""
         app._all_users_jobs = [
-            ("12345", "job1", "user1", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu:h200=8"),
-            ("12346", "job2", "user2", "PENDING", "0:00", "2", "(Resources)", "cpu=64,mem=512G,gres/gpu:a100=4"),
-            ("12347", "job3", "user3", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu:h200=4"),
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu:h200=8"),
+            ("12346", "job2", "user2", "gpu", "PENDING", "0:00", "2", "(Resources)", "cpu=64,mem=512G,gres/gpu:a100=4"),
+            ("12347", "job3", "user3", "cpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu:h200=4"),
         ]
         stats = ClusterStats()
         app._calculate_pending_resources(stats)
@@ -1002,7 +1002,7 @@ class TestCalculatePendingResources:
     def test_pending_job_without_tres(self, app: SlurmMonitor) -> None:
         """Test pending job without TRES field."""
         app._all_users_jobs = [
-            ("12345", "job1", "user1", "PENDING", "0:00", "1", "(Priority)"),  # No TRES field
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)"),  # No TRES field
         ]
         stats = ClusterStats()
         app._calculate_pending_resources(stats)
@@ -1019,3 +1019,24 @@ class TestCalculatePendingResources:
         assert stats.pending_memory_gb == 0.0
         assert stats.pending_gpus == 0
         assert stats.pending_gpus_by_type == {}
+
+    def test_pending_resources_grouped_by_partition(self, app: SlurmMonitor) -> None:
+        """Pending resources should be aggregated per partition."""
+        app._all_users_jobs = [
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
+            ("12346", "job2", "user2", "cpu", "PENDING", "0:00", "2", "(Resources)", "cpu=64,mem=512G,gres/gpu=8"),
+            ("12347", "job3", "user3", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=16,mem=128G"),
+        ]
+
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+
+        assert set(stats.pending_by_partition.keys()) == {"cpu", "gpu"}
+        assert stats.pending_by_partition["gpu"].jobs_count == 2
+        assert stats.pending_by_partition["gpu"].cpus == 48
+        assert stats.pending_by_partition["gpu"].memory_gb == 384.0
+        assert stats.pending_by_partition["gpu"].gpus == 4
+        assert stats.pending_by_partition["cpu"].jobs_count == 1
+        assert stats.pending_by_partition["cpu"].cpus == 64
+        assert stats.pending_by_partition["cpu"].memory_gb == 512.0
+        assert stats.pending_by_partition["cpu"].gpus == 8

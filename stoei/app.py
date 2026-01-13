@@ -40,7 +40,7 @@ from stoei.slurm.gpu_parser import (
 )
 from stoei.slurm.validation import check_slurm_available
 from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
-from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
+from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats, PendingPartitionStats
 from stoei.widgets.help_screen import HelpScreen
 from stoei.widgets.loading_indicator import LoadingIndicator
 from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
@@ -1012,15 +1012,17 @@ class SlurmMonitor(App[None]):
             stats: ClusterStats object to update with pending resource data.
         """
         # Job tuple indices
-        state_index = 3
-        tres_index = 7
-        min_fields_for_tres = 8
+        partition_index = 3
+        state_index = 4
+        tres_index = 8
+        min_fields_for_tres = 9
 
         pending_cpus = 0
         pending_memory_gb = 0.0
         pending_gpus = 0
         pending_gpus_by_type: dict[str, int] = {}
         pending_jobs_count = 0
+        pending_by_partition: dict[str, PendingPartitionStats] = {}
 
         for job in self._all_users_jobs:
             # Check if job is pending (state is "PENDING" or "PD")
@@ -1032,6 +1034,14 @@ class SlurmMonitor(App[None]):
 
             pending_jobs_count += 1
 
+            partition = job[partition_index].strip() if len(job) > partition_index else ""
+            partition_key = partition if partition else "unknown"
+            partition_stats = pending_by_partition.get(partition_key)
+            if partition_stats is None:
+                partition_stats = PendingPartitionStats()
+                pending_by_partition[partition_key] = partition_stats
+            partition_stats.jobs_count += 1
+
             # Parse TRES if available
             if len(job) < min_fields_for_tres:
                 continue
@@ -1042,14 +1052,18 @@ class SlurmMonitor(App[None]):
             cpus, memory_gb, gpu_entries = self._parse_tres_for_pending(tres_str)
             pending_cpus += cpus
             pending_memory_gb += memory_gb
+            partition_stats.cpus += cpus
+            partition_stats.memory_gb += memory_gb
 
             # Aggregate GPUs by type
             for gpu_type, gpu_count in gpu_entries:
                 pending_gpus += gpu_count
+                partition_stats.gpus += gpu_count
                 if gpu_type in pending_gpus_by_type:
                     pending_gpus_by_type[gpu_type] += gpu_count
                 else:
                     pending_gpus_by_type[gpu_type] = gpu_count
+                partition_stats.gpus_by_type[gpu_type] = partition_stats.gpus_by_type.get(gpu_type, 0) + gpu_count
 
         # Update stats with pending resource data
         stats.pending_jobs_count = pending_jobs_count
@@ -1057,6 +1071,7 @@ class SlurmMonitor(App[None]):
         stats.pending_memory_gb = pending_memory_gb
         stats.pending_gpus = pending_gpus
         stats.pending_gpus_by_type = pending_gpus_by_type
+        stats.pending_by_partition = pending_by_partition
 
         logger.debug(
             f"Pending resources: {pending_jobs_count} jobs, {pending_cpus} CPUs, "

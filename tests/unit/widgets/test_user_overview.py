@@ -81,8 +81,8 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_single_user(self) -> None:
         """Test aggregating stats for a single user."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "2", "node01,node02"),
-            ("12346", "job2", "user1", "RUNNING", "0:30:00", "1", "node03"),
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "2", "node01,node02"),
+            ("12346", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "node03"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -93,9 +93,9 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_multiple_users(self) -> None:
         """Test aggregating stats for multiple users."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "2", "node01,node02"),
-            ("12346", "job2", "user2", "RUNNING", "0:30:00", "1", "node03"),
-            ("12347", "job3", "user1", "PENDING", "0:00:00", "1", "(null)"),
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "2", "node01,node02"),
+            ("12346", "job2", "user2", "gpu", "RUNNING", "0:30:00", "1", "node03"),
+            ("12347", "job3", "user1", "gpu", "PENDING", "0:00:00", "1", "(null)"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 2
@@ -107,7 +107,7 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_node_range(self) -> None:
         """Test aggregating stats with node range notation."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "4-8", "node[04-08]"),
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "4-8", "node[04-08]"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -117,7 +117,7 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_invalid_node_count(self) -> None:
         """Test aggregating stats with invalid node count."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "invalid", "node01"),
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "invalid", "node01"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -136,7 +136,7 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_empty_username(self) -> None:
         """Test aggregating stats with empty username."""
         jobs = [
-            ("12345", "job1", "", "RUNNING", "1:00:00", "1", "node01"),
+            ("12345", "job1", "", "gpu", "RUNNING", "1:00:00", "1", "node01"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         # Should skip jobs with empty username
@@ -260,8 +260,18 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_with_tres_memory(self) -> None:
         """Test aggregating stats with TRES memory information."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "2", "node01,node02", "cpu=32,mem=256G,node=2,gres/gpu=8"),
-            ("12346", "job2", "user1", "RUNNING", "0:30:00", "1", "node03", "cpu=16,mem=128G,node=1,gres/gpu=4"),
+            (
+                "12345",
+                "job1",
+                "user1",
+                "gpu",
+                "RUNNING",
+                "1:00:00",
+                "2",
+                "node01,node02",
+                "cpu=32,mem=256G,node=2,gres/gpu=8",
+            ),
+            ("12346", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "node03", "cpu=16,mem=128G,node=1,gres/gpu=4"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -274,7 +284,7 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_with_tres_memory_mb(self) -> None:
         """Test aggregating stats with TRES memory in MB."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=8192M,node=1,gres/gpu=1"),
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=8192M,node=1,gres/gpu=1"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -285,9 +295,19 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_with_tres_multiple_users(self) -> None:
         """Test aggregating stats with TRES for multiple users."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "2", "node01,node02", "cpu=32,mem=256G,node=2,gres/gpu=8"),
-            ("12346", "job2", "user2", "RUNNING", "0:30:00", "1", "node03", "cpu=16,mem=128G,node=1,gres/gpu=4"),
-            ("12347", "job3", "user1", "PENDING", "0:00:00", "1", "(null)", "cpu=8,mem=64G,node=1,gres/gpu=2"),
+            (
+                "12345",
+                "job1",
+                "user1",
+                "gpu",
+                "RUNNING",
+                "1:00:00",
+                "2",
+                "node01,node02",
+                "cpu=32,mem=256G,node=2,gres/gpu=8",
+            ),
+            ("12346", "job2", "user2", "gpu", "RUNNING", "0:30:00", "1", "node03", "cpu=16,mem=128G,node=1,gres/gpu=4"),
+            ("12347", "job3", "user1", "gpu", "PENDING", "0:00:00", "1", "(null)", "cpu=8,mem=64G,node=1,gres/gpu=2"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 2
@@ -305,7 +325,7 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_without_tres(self) -> None:
         """Test aggregating stats when TRES field is missing."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "2", "node01,node02"),
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "2", "node01,node02"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -318,7 +338,7 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_with_empty_tres(self) -> None:
         """Test aggregating stats when TRES field is empty."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "2", "node01,node02", ""),
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "2", "node01,node02", ""),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -335,6 +355,7 @@ class TestUserOverviewTab:
                 "12345",
                 "job1",
                 "user1",
+                "gpu",
                 "RUNNING",
                 "1:00:00",
                 "2",
@@ -353,8 +374,18 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_mixed_tres_and_no_tres(self) -> None:
         """Test aggregating stats with mix of jobs with and without TRES."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "2", "node01,node02", "cpu=32,mem=256G,node=2,gres/gpu=8"),
-            ("12346", "job2", "user1", "RUNNING", "0:30:00", "1", "node03"),  # No TRES
+            (
+                "12345",
+                "job1",
+                "user1",
+                "gpu",
+                "RUNNING",
+                "1:00:00",
+                "2",
+                "node01,node02",
+                "cpu=32,mem=256G,node=2,gres/gpu=8",
+            ),
+            ("12346", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "node03"),  # No TRES
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -367,8 +398,28 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_with_gpu_types(self) -> None:
         """Test aggregating stats with GPU type information."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "1", "node01", "cpu=32,mem=256G,node=1,gres/gpu:h200=8"),
-            ("12346", "job2", "user1", "RUNNING", "0:30:00", "1", "node02", "cpu=16,mem=128G,node=1,gres/gpu:h200=4"),
+            (
+                "12345",
+                "job1",
+                "user1",
+                "gpu",
+                "RUNNING",
+                "1:00:00",
+                "1",
+                "node01",
+                "cpu=32,mem=256G,node=1,gres/gpu:h200=8",
+            ),
+            (
+                "12346",
+                "job2",
+                "user1",
+                "gpu",
+                "RUNNING",
+                "0:30:00",
+                "1",
+                "node02",
+                "cpu=16,mem=128G,node=1,gres/gpu:h200=4",
+            ),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -378,8 +429,28 @@ class TestUserOverviewTab:
     def test_aggregate_user_stats_with_multiple_gpu_types(self) -> None:
         """Test aggregating stats with multiple GPU types."""
         jobs = [
-            ("12345", "job1", "user1", "RUNNING", "1:00:00", "1", "node01", "cpu=32,mem=256G,node=1,gres/gpu:h200=8"),
-            ("12346", "job2", "user1", "RUNNING", "0:30:00", "1", "node02", "cpu=16,mem=128G,node=1,gres/gpu:a100=4"),
+            (
+                "12345",
+                "job1",
+                "user1",
+                "gpu",
+                "RUNNING",
+                "1:00:00",
+                "1",
+                "node01",
+                "cpu=32,mem=256G,node=1,gres/gpu:h200=8",
+            ),
+            (
+                "12346",
+                "job2",
+                "user1",
+                "gpu",
+                "RUNNING",
+                "0:30:00",
+                "1",
+                "node02",
+                "cpu=16,mem=128G,node=1,gres/gpu:a100=4",
+            ),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
@@ -395,6 +466,7 @@ class TestUserOverviewTab:
                 "12345",
                 "job1",
                 "user1",
+                "gpu",
                 "RUNNING",
                 "1:00:00",
                 "1",
