@@ -30,7 +30,9 @@ from stoei.slurm.commands import (
     get_job_log_paths,
     get_node_info,
     get_running_jobs,
+    get_user_jobs,
 )
+from stoei.slurm.formatters import format_user_info
 from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
     calculate_total_gpus,
@@ -47,11 +49,17 @@ from stoei.widgets.loading_indicator import LoadingIndicator
 from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
-from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen, NodeInfoScreen
+from stoei.widgets.screens import (
+    CancelConfirmScreen,
+    JobInfoScreen,
+    JobInputScreen,
+    NodeInfoScreen,
+    UserInfoScreen,
+)
 from stoei.widgets.settings_screen import SettingsScreen
 from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
 from stoei.widgets.tabs import TabContainer, TabSwitched
-from stoei.widgets.user_overview import UserOverviewTab
+from stoei.widgets.user_overview import UserOverviewTab, UserStats
 
 logger = get_logger(__name__)
 
@@ -1412,9 +1420,11 @@ class SlurmMonitor(App[None]):
         Args:
             event: The row selected event.
         """
-        # Check if this is the nodes table
+        # Check which table is selected
         if event.data_table.id == "nodes_table":
             self._show_node_info_for_row(event.data_table, event.row_key)
+        elif event.data_table.id == "users_table":
+            self._show_user_info_for_row(event.data_table, event.row_key)
         else:
             # Default to job info for jobs table
             self._show_job_info_for_row(event.data_table, event.row_key)
@@ -1470,6 +1480,96 @@ class SlurmMonitor(App[None]):
         """
         self.push_screen(NodeInfoScreen(node_name, node_info, error))
         logger.debug(f"Displayed node info screen for {node_name}")
+
+    def _show_user_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
+        """Show user info for a specific row in the users table.
+
+        Args:
+            table: The DataTable containing the row.
+            row_key: The key of the row to show info for.
+        """
+        try:
+            row_data = table.get_row(row_key)
+            username = str(row_data[0]).strip()
+            # Remove Rich markup tags if present
+            username = re.sub(r"\[.*?\]", "", username).strip()
+
+            if not username:
+                logger.warning(f"Could not extract username from row {row_key}")
+                self.notify("Could not get username from selected row", severity="error")
+                return
+
+            logger.info(f"Showing info for selected user {username}")
+            self._show_user_info(username)
+
+        except (IndexError, KeyError):
+            logger.exception(f"Could not get username from row {row_key}")
+            self.notify("Could not get username from selected row", severity="error")
+
+    def _show_user_info(self, username: str) -> None:
+        """Show detailed information for a user.
+
+        Args:
+            username: The username to display.
+        """
+        logger.info(f"Fetching user info for {username}")
+        self.notify("Loading user information...", timeout=2)
+
+        # Get user info in a worker to avoid blocking
+        def fetch_user_info() -> None:
+            jobs, error = get_user_jobs(username)
+            if error:
+                self.call_from_thread(lambda: self._display_user_info(username, "", error))
+                return
+
+            # Aggregate user stats from the jobs
+            # Build a job list in the format expected by aggregate_user_stats
+            # Jobs from get_user_jobs: (JobID, Name, Partition, State, Time, Nodes, NodeList, TRES)
+            # aggregate_user_stats expects: (JobID, Name, User, Partition, State, Time, Nodes, NodeList, TRES)
+            min_user_job_fields = 8  # Minimum fields from get_user_jobs
+            formatted_jobs: list[tuple[str, ...]] = []
+            for job in jobs:
+                if len(job) >= min_user_job_fields:
+                    # Insert username at position 2
+                    formatted_job = (job[0], job[1], username, job[2], job[3], job[4], job[5], job[6], job[7])
+                    formatted_jobs.append(formatted_job)
+
+            user_stats_list = UserOverviewTab.aggregate_user_stats(formatted_jobs)
+
+            # Find stats for this user
+            user_stats: UserStats | None = None
+            for stats in user_stats_list:
+                if stats.username == username:
+                    user_stats = stats
+                    break
+
+            if user_stats is None:
+                # Create default stats if no jobs
+                user_stats = UserStats(
+                    username=username,
+                    job_count=0,
+                    total_cpus=0,
+                    total_memory_gb=0.0,
+                    total_gpus=0,
+                    total_nodes=0,
+                    gpu_types="",
+                )
+
+            formatted_info = format_user_info(username, user_stats, jobs)
+            self.call_from_thread(lambda: self._display_user_info(username, formatted_info, None))
+
+        self.run_worker(fetch_user_info, name="fetch_user_info", thread=True)
+
+    def _display_user_info(self, username: str, user_info: str, error: str | None) -> None:
+        """Display user information in a modal screen.
+
+        Args:
+            username: The username.
+            user_info: Formatted user information.
+            error: Optional error message.
+        """
+        self.push_screen(UserInfoScreen(username, user_info, error))
+        logger.debug(f"Displayed user info screen for {username}")
 
     def _show_job_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
         """Show job info for a specific row in a table.

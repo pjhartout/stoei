@@ -3,7 +3,14 @@
 from pathlib import Path
 
 import pytest
-from stoei.widgets.screens import CancelConfirmScreen, JobInfoScreen, JobInputScreen, LogViewerScreen
+from stoei.widgets.screens import (
+    CancelConfirmScreen,
+    JobInfoScreen,
+    JobInputScreen,
+    LogViewerScreen,
+    NodeInfoScreen,
+    UserInfoScreen,
+)
 
 
 class TestJobInfoScreen:
@@ -60,6 +67,94 @@ class TestJobInfoScreen:
         binding_keys = [b[0] for b in JobInfoScreen.BINDINGS]
         assert "o" in binding_keys  # stdout
         assert "e" in binding_keys  # stderr
+
+
+class TestNodeInfoScreen:
+    """Tests for NodeInfoScreen."""
+
+    def test_init_stores_node_name(self) -> None:
+        """Test that node_name is stored on initialization."""
+        screen = NodeInfoScreen("gpu-node-01", "Node info content")
+        assert screen.node_name == "gpu-node-01"
+
+    def test_init_stores_node_info(self) -> None:
+        """Test that node_info is stored on initialization."""
+        screen = NodeInfoScreen("gpu-node-01", "Node info content")
+        assert screen.node_info == "Node info content"
+
+    def test_init_with_error(self) -> None:
+        """Test initialization with error message."""
+        screen = NodeInfoScreen("gpu-node-01", "", error="Node not found")
+        assert screen.error == "Node not found"
+
+    def test_init_error_none_by_default(self) -> None:
+        """Test that error is None by default."""
+        screen = NodeInfoScreen("gpu-node-01", "Node info content")
+        assert screen.error is None
+
+    def test_bindings_defined(self) -> None:
+        """Test that bindings are defined."""
+        assert len(NodeInfoScreen.BINDINGS) > 0
+
+    def test_bindings_include_escape(self) -> None:
+        """Test that escape binding exists."""
+        binding_keys = [b[0] for b in NodeInfoScreen.BINDINGS]
+        assert "escape" in binding_keys
+
+    def test_bindings_include_close(self) -> None:
+        """Test that q binding exists for close."""
+        binding_keys = [b[0] for b in NodeInfoScreen.BINDINGS]
+        assert "q" in binding_keys
+
+    def test_action_close_method_exists(self) -> None:
+        """Test action_close method exists."""
+        screen = NodeInfoScreen("gpu-node-01", "Node info")
+        assert hasattr(screen, "action_close")
+        assert callable(screen.action_close)
+
+
+class TestUserInfoScreen:
+    """Tests for UserInfoScreen."""
+
+    def test_init_stores_username(self) -> None:
+        """Test that username is stored on initialization."""
+        screen = UserInfoScreen("testuser", "User info content")
+        assert screen.username == "testuser"
+
+    def test_init_stores_user_info(self) -> None:
+        """Test that user_info is stored on initialization."""
+        screen = UserInfoScreen("testuser", "User info content")
+        assert screen.user_info == "User info content"
+
+    def test_init_with_error(self) -> None:
+        """Test initialization with error message."""
+        screen = UserInfoScreen("testuser", "", error="User not found")
+        assert screen.error == "User not found"
+
+    def test_init_error_none_by_default(self) -> None:
+        """Test that error is None by default."""
+        screen = UserInfoScreen("testuser", "User info content")
+        assert screen.error is None
+
+    def test_bindings_defined(self) -> None:
+        """Test that bindings are defined."""
+        assert len(UserInfoScreen.BINDINGS) > 0
+
+    def test_bindings_include_escape(self) -> None:
+        """Test that escape binding exists."""
+        binding_keys = [b[0] for b in UserInfoScreen.BINDINGS]
+        assert "escape" in binding_keys
+
+    def test_bindings_include_close(self) -> None:
+        """Test that q binding exists for close."""
+        binding_keys = [b[0] for b in UserInfoScreen.BINDINGS]
+        assert "q" in binding_keys
+
+    def test_action_close_method_exists(self) -> None:
+        """Test action_close method exists."""
+        screen = UserInfoScreen("testuser", "User info")
+        assert hasattr(screen, "action_close")
+        assert callable(screen.action_close)
 
 
 class TestLogViewerScreen:
@@ -1189,3 +1284,97 @@ class TestScreensInApp:
             # Verify content is displayed
             rendered_str = str(rendered)
             assert problematic_content.strip() in rendered_str or problematic_content in rendered_str
+
+    async def test_node_info_screen_composes(self) -> None:
+        """Test that NodeInfoScreen composes correctly."""
+        from textual.app import App
+        from textual.widgets import Button
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(NodeInfoScreen("gpu-node-01", "Test node info"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            close_btn = screen.query_one("#close-button", Button)
+            assert close_btn is not None
+
+    async def test_node_info_screen_with_error_composes(self) -> None:
+        """Test that NodeInfoScreen with error composes correctly."""
+        from textual.app import App
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(NodeInfoScreen("gpu-node-01", "", error="Node not found"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            error_text = screen.query_one("#error-text")
+            assert error_text is not None
+
+    async def test_user_info_screen_composes(self) -> None:
+        """Test that UserInfoScreen composes correctly."""
+        from textual.app import App
+        from textual.widgets import Button
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(UserInfoScreen("testuser", "Test user info"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            close_btn = screen.query_one("#close-button", Button)
+            assert close_btn is not None
+
+    async def test_user_info_screen_with_error_composes(self) -> None:
+        """Test that UserInfoScreen with error composes correctly."""
+        from textual.app import App
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(UserInfoScreen("testuser", "", error="User has no jobs"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            error_text = screen.query_one("#error-text")
+            assert error_text is not None
+
+    async def test_user_info_screen_displays_content(self) -> None:
+        """Test that UserInfoScreen displays user info content."""
+        from textual.app import App
+        from textual.containers import VerticalScroll
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(UserInfoScreen("testuser", "User Summary\nJobs: 5\nCPUs: 32"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            content = screen.query_one("#user-info-content", VerticalScroll)
+            assert content is not None
+
+    async def test_node_info_screen_displays_content(self) -> None:
+        """Test that NodeInfoScreen displays node info content."""
+        from textual.app import App
+        from textual.containers import VerticalScroll
+
+        class TestApp(App[None]):
+            def on_mount(self) -> None:
+                self.push_screen(NodeInfoScreen("gpu-node-01", "Node Summary\nState: IDLE\nCPUs: 64"))
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            screen = app.screen
+            content = screen.query_one("#node-info-content", VerticalScroll)
+            assert content is not None

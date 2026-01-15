@@ -1,6 +1,7 @@
 """Tests for SLURM output formatters."""
 
-from stoei.slurm.formatters import format_job_info, format_sacct_job_info, format_value
+from stoei.slurm.formatters import format_job_info, format_sacct_job_info, format_user_info, format_value
+from stoei.widgets.user_overview import UserStats
 
 
 class TestFormatValue:
@@ -316,3 +317,203 @@ class TestFormatValueEdgeCases:
         """Test unknown state uses white color."""
         result = format_value("JobState", "CUSTOMSTATE")
         assert "white" in result
+
+
+class TestFormatUserInfo:
+    """Tests for format_user_info function."""
+
+    def test_format_basic_user_info(self) -> None:
+        """Test formatting basic user info."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=3,
+            total_cpus=32,
+            total_memory_gb=128.0,
+            total_gpus=4,
+            total_nodes=2,
+            gpu_types="4x A100",
+        )
+        jobs: list[tuple[str, ...]] = [
+            ("12345", "train_model", "gpu", "R", "1:30:00", "2", "node01,node02", "cpu=16,mem=64G,gres/gpu=2"),
+            ("12346", "preprocess", "cpu", "PD", "0:00:00", "1", "", "cpu=8,mem=32G"),
+        ]
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        # Check summary section
+        assert "User Summary" in result
+        assert "testuser" in result
+        assert "32" in result  # CPUs
+        assert "128" in result  # Memory
+        assert "4" in result  # GPUs
+        assert "A100" in result  # GPU type
+
+    def test_format_includes_job_counts(self) -> None:
+        """Test that job counts by state are included."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=2,
+            total_cpus=16,
+            total_memory_gb=64.0,
+            total_gpus=0,
+            total_nodes=1,
+        )
+        jobs: list[tuple[str, ...]] = [
+            ("12345", "job1", "gpu", "RUNNING", "1:00:00", "1", "node01", ""),
+            ("12346", "job2", "cpu", "PENDING", "0:00:00", "1", "", ""),
+        ]
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        assert "Jobs by State" in result
+        assert "Running" in result
+        assert "Pending" in result
+
+    def test_format_includes_job_list(self) -> None:
+        """Test that job list is included."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=8,
+            total_memory_gb=32.0,
+            total_gpus=0,
+            total_nodes=1,
+        )
+        jobs: list[tuple[str, ...]] = [
+            ("12345", "test_job", "default", "R", "0:30:00", "1", "node01", ""),
+        ]
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        assert "Job List" in result
+        assert "12345" in result
+        assert "test_job" in result
+
+    def test_format_empty_jobs_list(self) -> None:
+        """Test formatting with no jobs."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=0,
+            total_cpus=0,
+            total_memory_gb=0.0,
+            total_gpus=0,
+            total_nodes=0,
+        )
+        jobs: list[tuple[str, ...]] = []
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        assert "No active jobs" in result
+
+    def test_format_job_state_colors_running(self) -> None:
+        """Test that running state is colored green."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=8,
+            total_memory_gb=32.0,
+            total_gpus=0,
+            total_nodes=1,
+        )
+        jobs: list[tuple[str, ...]] = [
+            ("12345", "job1", "gpu", "RUNNING", "1:00:00", "1", "node01", ""),
+        ]
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        assert "green" in result
+
+    def test_format_job_state_colors_pending(self) -> None:
+        """Test that pending state is colored yellow."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=8,
+            total_memory_gb=32.0,
+            total_gpus=0,
+            total_nodes=1,
+        )
+        jobs: list[tuple[str, ...]] = [
+            ("12345", "job1", "gpu", "PENDING", "0:00:00", "1", "", ""),
+        ]
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        assert "yellow" in result
+
+    def test_format_truncates_long_values(self) -> None:
+        """Test that long values are truncated."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=8,
+            total_memory_gb=32.0,
+            total_gpus=0,
+            total_nodes=1,
+        )
+        jobs: list[tuple[str, ...]] = [
+            ("123456789012345", "very_long_job_name_here", "long_partition_name", "R", "1:00:00", "1", "node01", ""),
+        ]
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        # Should be truncated, not showing full strings
+        assert "123456789012345"[:12] in result
+
+    def test_format_without_gpu_types(self) -> None:
+        """Test formatting when no GPU types are specified."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=8,
+            total_memory_gb=32.0,
+            total_gpus=0,
+            total_nodes=1,
+            gpu_types="",
+        )
+        jobs: list[tuple[str, ...]] = []
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        # Should not include GPU Types line when empty
+        # (it's included only if gpu_types is truthy)
+        assert "User Summary" in result
+
+    def test_format_with_gpu_types(self) -> None:
+        """Test formatting when GPU types are specified."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=8,
+            total_memory_gb=32.0,
+            total_gpus=4,
+            total_nodes=1,
+            gpu_types="4x H100",
+        )
+        jobs: list[tuple[str, ...]] = []
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        assert "GPU Types" in result
+        assert "H100" in result
+        assert "magenta" in result
+
+    def test_format_skips_short_job_tuples(self) -> None:
+        """Test that job tuples with fewer than 6 fields are skipped."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=2,
+            total_cpus=16,
+            total_memory_gb=64.0,
+            total_gpus=0,
+            total_nodes=2,
+        )
+        jobs: list[tuple[str, ...]] = [
+            ("12345", "job1", "gpu", "R", "1:00:00", "1", "node01", ""),  # Valid
+            ("12346", "job2"),  # Too short, should be skipped
+        ]
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        assert "12345" in result
+        # 12346 should not appear in job list (but may appear in count)

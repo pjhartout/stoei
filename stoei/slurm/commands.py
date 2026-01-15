@@ -678,3 +678,110 @@ def get_all_users_jobs() -> tuple[list[tuple[str, ...]], str | None]:
         Tuple of (List of tuples containing job information, optional error message).
     """
     return get_all_running_jobs()
+
+
+def _validate_username(username: str) -> str | None:
+    """Validate and sanitize a username.
+
+    Args:
+        username: The username to validate.
+
+    Returns:
+        Error message if invalid, None if valid.
+    """
+    if not username or not username.strip():
+        return "Invalid username"
+
+    # Sanitize username (only allow alphanumeric, underscore, hyphen)
+    username_stripped = username.strip()
+    if not all(c.isalnum() or c in "_-" for c in username_stripped):
+        return "Invalid username characters"
+
+    return None
+
+
+def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
+    """Get running/pending jobs for a specific user.
+
+    Args:
+        username: The username to query jobs for.
+
+    Returns:
+        Tuple of (list of job tuples, optional error message).
+        Each job tuple contains: (JobID, Name, Partition, State, Time, Nodes, NodeList, TRES).
+    """
+    validation_error = _validate_username(username)
+    if validation_error:
+        return [], validation_error
+
+    username = username.strip()
+
+    try:
+        squeue = resolve_executable("squeue")
+        # Use -O format which supports Tres field directly
+        command = [
+            squeue,
+            "-u",
+            username,
+            "-O",
+            "JobID:20,Name:20,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
+            "-t",
+            "RUNNING,PENDING",
+            "--noheader",
+        ]
+        logger.debug(f"Running squeue command for user {username}")
+
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except FileNotFoundError:
+        logger.exception("squeue not found")
+        return [], "squeue not found"
+    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
+        logger.exception(f"Error getting jobs for user {username}")
+        return [], "Error getting user jobs"
+
+    if result.returncode != 0:
+        logger.warning(f"squeue returned non-zero exit code: {result.returncode}")
+        return [], f"squeue error: {result.stderr}"
+
+    # Parse fixed-width format output
+    jobs: list[tuple[str, ...]] = []
+    lines = result.stdout.strip().split("\n")
+
+    # Column positions for user jobs (similar to get_all_running_jobs but without username)
+    col_jobid_end = 20
+    col_name_end = 40
+    col_partition_end = 55
+    col_state_end = 65
+    col_time_end = 77
+    col_nodes_end = 83
+    col_nodelist_end = 113
+
+    for line in lines:
+        if not line.strip():
+            continue
+
+        if len(line) < col_jobid_end:
+            continue
+
+        job_id = line[0:col_jobid_end].strip()
+        if not job_id:
+            continue
+
+        name = line[col_jobid_end:col_name_end].strip() if len(line) > col_jobid_end else ""
+        partition = line[col_name_end:col_partition_end].strip() if len(line) > col_name_end else ""
+        state = line[col_partition_end:col_state_end].strip() if len(line) > col_partition_end else ""
+        time_used = line[col_state_end:col_time_end].strip() if len(line) > col_state_end else ""
+        num_nodes = line[col_time_end:col_nodes_end].strip() if len(line) > col_time_end else ""
+        node_list = line[col_nodes_end:col_nodelist_end].strip() if len(line) > col_nodes_end else ""
+        tres = line[col_nodelist_end:].strip() if len(line) > col_nodelist_end else ""
+
+        jobs.append((job_id, name, partition, state, time_used, num_nodes, node_list, tres))
+
+    logger.debug(f"Found {len(jobs)} jobs for user {username}")
+    return jobs, None

@@ -1,6 +1,13 @@
 """Formatting utilities for SLURM job information."""
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 from stoei.slurm.parser import parse_scontrol_output
+
+if TYPE_CHECKING:
+    from stoei.widgets.user_overview import UserStats
 
 # Fields categorized for better display
 JOB_CATEGORIES: dict[str, tuple[str, list[str]]] = {
@@ -325,5 +332,96 @@ def format_node_info(raw_output: str) -> str:
         for key, value in sorted(remaining.items()):
             formatted = format_value(key, value)
             lines.append(f"  [bold cyan]{key:.<24}[/bold cyan] {formatted}")
+
+    return "\n".join(lines)
+
+
+# Display width constants for user info job list
+_USER_INFO_JOBID_WIDTH = 12
+_USER_INFO_NAME_WIDTH = 15
+_USER_INFO_PARTITION_WIDTH = 12
+_USER_INFO_TIME_WIDTH = 10
+_USER_INFO_MIN_JOB_FIELDS = 6
+_USER_INFO_STATE_INDEX = 3
+
+
+def format_user_info(
+    username: str,
+    user_stats: UserStats,
+    jobs: list[tuple[str, ...]],
+) -> str:
+    """Format user information with their jobs for display.
+
+    Args:
+        username: The username.
+        user_stats: Aggregated user statistics from UserStats.
+        jobs: List of job tuples for this user.
+            Each tuple: (JobID, Name, Partition, State, Time, Nodes, NodeList, TRES).
+
+    Returns:
+        Formatted string with Rich markup for display.
+    """
+    lines: list[str] = []
+
+    # Summary section
+    lines.append("\n[bold reverse] 👤 User Summary [/bold reverse]")
+    lines.append(f"  [bold cyan]{'Username':.<24}[/bold cyan] [bold]{username}[/bold]")
+    lines.append(f"  [bold cyan]{'Total Jobs':.<24}[/bold cyan] [bold]{user_stats.job_count}[/bold]")
+    lines.append(f"  [bold cyan]{'Total CPUs':.<24}[/bold cyan] {user_stats.total_cpus}")
+    lines.append(f"  [bold cyan]{'Total Memory (GB)':.<24}[/bold cyan] {user_stats.total_memory_gb:.1f}")
+    lines.append(f"  [bold cyan]{'Total GPUs':.<24}[/bold cyan] {user_stats.total_gpus}")
+    if user_stats.gpu_types:
+        lines.append(f"  [bold cyan]{'GPU Types':.<24}[/bold cyan] [magenta]{user_stats.gpu_types}[/magenta]")
+    lines.append(f"  [bold cyan]{'Total Nodes':.<24}[/bold cyan] {user_stats.total_nodes}")
+
+    # Jobs by state
+    running_count = 0
+    pending_count = 0
+
+    for job in jobs:
+        if len(job) > _USER_INFO_STATE_INDEX:
+            state = job[_USER_INFO_STATE_INDEX].strip().upper()
+            if state in ("RUNNING", "R"):
+                running_count += 1
+            elif state in ("PENDING", "PD"):
+                pending_count += 1
+
+    lines.append("\n[bold reverse] 📊 Jobs by State [/bold reverse]")
+    lines.append(f"  [bold cyan]{'Running':.<24}[/bold cyan] [bold green]{running_count}[/bold green]")
+    lines.append(f"  [bold cyan]{'Pending':.<24}[/bold cyan] [bold yellow]{pending_count}[/bold yellow]")
+
+    # Jobs list
+    if jobs:
+        lines.append("\n[bold reverse] 📋 Job List [/bold reverse]")
+        lines.append("")
+        # Header
+        lines.append(
+            f"  [dim]{'JobID':<12} {'Name':<15} {'State':<8} {'Partition':<12} {'Time':<10} {'Nodes':<6}[/dim]"
+        )
+        lines.append(f"  [dim]{'─' * 70}[/dim]")
+
+        for job in jobs:
+            if len(job) < _USER_INFO_MIN_JOB_FIELDS:
+                continue
+
+            job_id = job[0][:_USER_INFO_JOBID_WIDTH] if len(job[0]) > _USER_INFO_JOBID_WIDTH else job[0]
+            name = job[1][:_USER_INFO_NAME_WIDTH] if len(job[1]) > _USER_INFO_NAME_WIDTH else job[1]
+            partition = job[2][:_USER_INFO_PARTITION_WIDTH] if len(job[2]) > _USER_INFO_PARTITION_WIDTH else job[2]
+            state = job[3]
+            time_used = job[4][:_USER_INFO_TIME_WIDTH] if len(job[4]) > _USER_INFO_TIME_WIDTH else job[4]
+            nodes = job[5]
+
+            # Color-code the state
+            state_upper = state.strip().upper()
+            if state_upper in ("RUNNING", "R"):
+                state_display = f"[bold green]{state:<8}[/bold green]"
+            elif state_upper in ("PENDING", "PD"):
+                state_display = f"[bold yellow]{state:<8}[/bold yellow]"
+            else:
+                state_display = f"{state:<8}"
+
+            lines.append(f"  {job_id:<12} {name:<15} {state_display} {partition:<12} {time_used:<10} {nodes:<6}")
+    else:
+        lines.append("\n[italic]No active jobs found for this user.[/italic]")
 
     return "\n".join(lines)
