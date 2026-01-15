@@ -369,7 +369,7 @@ def get_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
             "-u",
             username,
             "-o",
-            "%.10i|%.15j|%.8T|%.10M|%.4D|%.12R",
+            "%.10i|%.15j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S",
         ]
         logger.debug(f"Running squeue command for user {username}")
 
@@ -415,7 +415,7 @@ def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int
             sacct,
             "-u",
             username,
-            "--format=JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList",
+            "--format=JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList,Submit,Start,End",
             "-S",
             f"now-{days}days",
             "-X",

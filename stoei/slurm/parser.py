@@ -7,8 +7,8 @@ if TYPE_CHECKING:
     pass
 
 # Constants for parsing
-MIN_SQUEUE_PARTS = 6
-MIN_SACCT_PARTS = 7
+MIN_SQUEUE_PARTS = 8  # JobID, Name, State, Time, Nodes, NodeList, SubmitTime, StartTime
+MIN_SACCT_PARTS = 10  # JobID, Name, State, Restarts, Elapsed, ExitCode, NodeList, Submit, Start, End
 
 
 def parse_scontrol_output(raw_output: str) -> dict[str, str]:
