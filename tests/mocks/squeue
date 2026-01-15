@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import random
+import sys
 
 # Constants for parsing
 # All-users tuples now include Partition:
@@ -331,6 +332,48 @@ def _filter_by_state(
     return [j for j in jobs if len(j) > state_index and any(s in j[state_index] for s in allowed_states)]
 
 
+def _get_job_pool(args: argparse.Namespace) -> tuple[list[tuple[str, ...]], bool]:
+    """Get the appropriate job pool based on arguments.
+
+    Returns:
+        Tuple of (jobs list, using_all_users_jobs flag).
+    """
+    is_fixed_width = args.Format is not None
+
+    if is_fixed_width:
+        return [_normalize_all_users_job(j) for j in MOCK_JOBS_ALL_USERS], True
+
+    # Legacy/Simple mode - check if user field is in format string
+    has_user_field = args.format and "%.8u" in args.format
+    is_all_users = args.all or (not args.user and has_user_field)
+
+    if is_all_users and has_user_field:
+        return [_normalize_all_users_job(j) for j in MOCK_JOBS_ALL_USERS], True
+    return list(MOCK_JOBS_USER_ONLY), False
+
+
+def _select_random_jobs(jobs: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
+    """Randomly select jobs to simulate dynamic queue."""
+    if not jobs:
+        return []
+    num_jobs = random.randint(  # noqa: S311
+        min(len(jobs), MIN_RANDOM_JOBS),
+        min(len(jobs), MAX_RANDOM_JOBS),
+    )
+    return random.sample(jobs, num_jobs)
+
+
+def _print_header(using_all_users_jobs: bool, has_tres_field: bool) -> None:
+    """Print the appropriate header based on mode."""
+    if using_all_users_jobs:
+        if has_tres_field:
+            print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)|TRES")
+        else:
+            print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)")
+    else:
+        print("JOBID|JOBNAME|STATE|TIME|NODES|NODELIST|SUBMIT_TIME|START_TIME")
+
+
 def main() -> None:
     """Main entry point for mock squeue command."""
     parser = argparse.ArgumentParser()
@@ -338,37 +381,16 @@ def main() -> None:
     parser.add_argument("-o", "--format", default=None)
     parser.add_argument("-O", "--Format", default=None)
     parser.add_argument("-a", "--all", action="store_true")
-    parser.add_argument("-t", "--states", default=None) # Add support for -t
-    parser.add_argument("--noheader", action="store_true") # Add support for --noheader
+    parser.add_argument("-t", "--states", default=None)
+    parser.add_argument("--noheader", action="store_true")
 
     args = parser.parse_args()
 
-    # Determine mode
-    is_fixed_width = args.Format is not None
-
-    # Filter states if specified
-    allowed_states = args.states.split(",") if args.states else None
-
     # Get job pool
-    using_all_users_jobs = False
-    jobs: list[tuple[str, ...]]
-    if is_fixed_width:
-        # Fixed width mode implies full job details including TRES
-        jobs = [_normalize_all_users_job(j) for j in MOCK_JOBS_ALL_USERS]
-        using_all_users_jobs = True
-    else:
-        # Legacy/Simple mode
-        # Determine format - check if user field is in format string
-        has_user_field = args.format and "%.8u" in args.format
-        is_all_users = args.all or (not args.user and has_user_field)
+    jobs, using_all_users_jobs = _get_job_pool(args)
 
-        if is_all_users and has_user_field:
-            jobs = [_normalize_all_users_job(j) for j in MOCK_JOBS_ALL_USERS]
-            using_all_users_jobs = True
-        else:
-            jobs = list(MOCK_JOBS_USER_ONLY)
-
-    # Filter by state
+    # Filter by state if specified
+    allowed_states = args.states.split(",") if args.states else None
     if allowed_states:
         state_idx = MIN_ALL_USERS_STATE_INDEX if using_all_users_jobs else MIN_USER_ONLY_STATE_INDEX
         jobs = _filter_by_state(jobs, allowed_states, state_idx)
@@ -377,35 +399,22 @@ def main() -> None:
     if args.user and using_all_users_jobs:
         jobs = [job for job in jobs if len(job) > MIN_USER_INDEX and job[MIN_USER_INDEX] == args.user]
 
-    # Randomly select some jobs to simulate dynamic queue
-    # Ensure at least some jobs if available
-    if not jobs:
-        selected_jobs: list[tuple[str, ...]] = []
-    else:
-        num_jobs = random.randint(  # noqa: S311
-            min(len(jobs), MIN_RANDOM_JOBS),
-            min(len(jobs), MAX_RANDOM_JOBS),
-        )
-        selected_jobs = random.sample(jobs, num_jobs)
+    # Randomly select jobs
+    selected_jobs = _select_random_jobs(jobs)
 
-    if is_fixed_width:
+    # Handle fixed-width output mode
+    if args.Format is not None:
         print_fixed_width(selected_jobs)
         sys.exit(0)
 
     # Regular output formatting
-    has_user_field = args.format and "%.8u" in args.format
     has_tres_field = args.format and "%t" in args.format
 
     if not args.noheader:
-        if using_all_users_jobs:
-             if has_tres_field:
-                print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)|TRES")
-             else:
-                print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)")
-        else:
-            print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)")
-    else:
-        print("JOBID|JOBNAME|STATE|TIME|NODES|NODELIST|SUBMIT_TIME|START_TIME")
+        _print_header(using_all_users_jobs, has_tres_field)
+
+    # Print the actual job data
+    _print_jobs(selected_jobs, using_all_users_jobs, has_tres_field)
 
 
 def _print_jobs(jobs: list[tuple[str, ...]], using_all_users: bool, has_tres: bool) -> None:
