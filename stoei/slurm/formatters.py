@@ -1,5 +1,7 @@
 """Formatting utilities for SLURM job information."""
 
+from datetime import datetime
+
 from stoei.slurm.parser import parse_scontrol_output
 
 # Fields categorized for better display
@@ -327,3 +329,82 @@ def format_node_info(raw_output: str) -> str:
             lines.append(f"  [bold cyan]{key:.<24}[/bold cyan] {formatted}")
 
     return "\n".join(lines)
+
+
+def _format_compact_time(timestamp_str: str) -> str:
+    """Format a SLURM timestamp to compact display format.
+
+    Args:
+        timestamp_str: SLURM timestamp string (format: 2024-01-15T14:30:00).
+
+    Returns:
+        Compact time string (HH:MM if today, MM-DD HH:MM otherwise).
+        Returns empty string if timestamp cannot be parsed.
+    """
+    if not timestamp_str or timestamp_str.lower() in ("unknown", "n/a", "none", ""):
+        return ""
+
+    try:
+        # Parse SLURM timestamp format
+        dt = datetime.strptime(timestamp_str, "%Y-%m-%dT%H:%M:%S")
+        today = datetime.now().date()
+
+        if dt.date() == today:
+            return dt.strftime("%H:%M")
+        return dt.strftime("%m-%d %H:%M")
+    except ValueError:
+        return ""
+
+
+def format_compact_timeline(
+    submit_time: str,
+    start_time: str,
+    end_time: str,
+    state: str,
+    restarts: int = 0,
+) -> str:
+    """Format job times into a compact timeline string.
+
+    Args:
+        submit_time: Submit timestamp string.
+        start_time: Start timestamp string.
+        end_time: End timestamp string.
+        state: Job state string.
+        restarts: Number of job restarts/requeues.
+
+    Returns:
+        Compact timeline like "14:30 → 14:35" or "14:30 ⏳".
+    """
+    submit_fmt = _format_compact_time(submit_time)
+    start_fmt = _format_compact_time(start_time)
+    end_fmt = _format_compact_time(end_time)
+
+    state_upper = state.upper()
+
+    # Build timeline based on state and available times
+    if not submit_fmt:
+        return "—"
+
+    result = ""
+
+    if "PENDING" in state_upper:
+        # Pending: show submit time with waiting icon
+        result = f"{submit_fmt} ⏳"
+    elif "RUNNING" in state_upper:
+        # Running: show submit → start
+        result = f"{submit_fmt} → {start_fmt}" if start_fmt else f"{submit_fmt} ⏳"
+    elif end_fmt:
+        # Completed/Failed/etc: show full timeline submit → start → end
+        result = f"{submit_fmt} → {start_fmt} → {end_fmt}" if start_fmt else f"{submit_fmt} → {end_fmt}"
+    elif start_fmt:
+        # Has start but no end
+        result = f"{submit_fmt} → {start_fmt}"
+    else:
+        # Only submit time available
+        result = submit_fmt
+
+    # Append requeue indicator if restarts > 0
+    if restarts > 0:
+        result = f"{result} ↻{restarts}"
+
+    return result
