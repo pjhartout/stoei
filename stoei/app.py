@@ -19,6 +19,7 @@ from textual.worker import Worker, WorkerState
 
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
 from stoei.settings import Settings, load_settings, save_settings
+from stoei.slurm.array_parser import parse_array_size
 from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
     cancel_job,
@@ -1005,67 +1006,73 @@ class SlurmMonitor(App[None]):
 
         return cpus, memory_gb, gpu_entries
 
+    def _aggregate_pending_gpus(
+        self,
+        gpu_entries: list[tuple[str, int]],
+        array_size: int,
+        pending_gpus_by_type: dict[str, int],
+        partition_stats: PendingPartitionStats,
+    ) -> int:
+        """Aggregate GPU counts from pending jobs.
+
+        Args:
+            gpu_entries: List of (gpu_type, gpu_count) tuples.
+            array_size: Array size multiplier.
+            pending_gpus_by_type: Dict to update with GPU counts by type.
+            partition_stats: Partition stats to update.
+
+        Returns:
+            Total pending GPUs from these entries.
+        """
+        total_gpus = 0
+        for gpu_type, gpu_count in gpu_entries:
+            scaled_gpu_count = gpu_count * array_size
+            total_gpus += scaled_gpu_count
+            partition_stats.gpus += scaled_gpu_count
+            pending_gpus_by_type[gpu_type] = pending_gpus_by_type.get(gpu_type, 0) + scaled_gpu_count
+            partition_stats.gpus_by_type[gpu_type] = partition_stats.gpus_by_type.get(gpu_type, 0) + scaled_gpu_count
+        return total_gpus
+
     def _calculate_pending_resources(self, stats: ClusterStats) -> None:
         """Calculate resources requested by pending jobs.
+
+        Array jobs (e.g., 12345_[0-99]) are expanded so that resources are
+        multiplied by the number of tasks in the array.
 
         Args:
             stats: ClusterStats object to update with pending resource data.
         """
         # Job tuple indices
-        partition_index = 3
-        state_index = 4
-        tres_index = 8
+        job_id_index, partition_index, state_index, tres_index = 0, 3, 4, 8
         min_fields_for_tres = 9
 
-        pending_cpus = 0
-        pending_memory_gb = 0.0
-        pending_gpus = 0
+        pending_cpus, pending_memory_gb, pending_gpus, pending_jobs_count = 0, 0.0, 0, 0
         pending_gpus_by_type: dict[str, int] = {}
-        pending_jobs_count = 0
         pending_by_partition: dict[str, PendingPartitionStats] = {}
 
         for job in self._all_users_jobs:
-            # Check if job is pending (state is "PENDING" or "PD")
-            if len(job) <= state_index:
-                continue
-            state = job[state_index].strip().upper()
-            if state not in ("PENDING", "PD"):
+            if len(job) <= state_index or job[state_index].strip().upper() not in ("PENDING", "PD"):
                 continue
 
-            pending_jobs_count += 1
+            job_id = job[job_id_index].strip() if len(job) > job_id_index else ""
+            array_size = parse_array_size(job_id)
+            pending_jobs_count += array_size
 
-            partition = job[partition_index].strip() if len(job) > partition_index else ""
-            partition_key = partition if partition else "unknown"
-            partition_stats = pending_by_partition.get(partition_key)
-            if partition_stats is None:
-                partition_stats = PendingPartitionStats()
-                pending_by_partition[partition_key] = partition_stats
-            partition_stats.jobs_count += 1
+            partition_key = (job[partition_index].strip() if len(job) > partition_index else "") or "unknown"
+            partition_stats = pending_by_partition.setdefault(partition_key, PendingPartitionStats())
+            partition_stats.jobs_count += array_size
 
-            # Parse TRES if available
-            if len(job) < min_fields_for_tres:
-                continue
-            tres_str = job[tres_index]
-            if not tres_str:
+            if len(job) < min_fields_for_tres or not job[tres_index]:
                 continue
 
-            cpus, memory_gb, gpu_entries = self._parse_tres_for_pending(tres_str)
-            pending_cpus += cpus
-            pending_memory_gb += memory_gb
-            partition_stats.cpus += cpus
-            partition_stats.memory_gb += memory_gb
+            cpus, memory_gb, gpu_entries = self._parse_tres_for_pending(job[tres_index])
+            pending_cpus += cpus * array_size
+            pending_memory_gb += memory_gb * array_size
+            partition_stats.cpus += cpus * array_size
+            partition_stats.memory_gb += memory_gb * array_size
 
-            # Aggregate GPUs by type
-            for gpu_type, gpu_count in gpu_entries:
-                pending_gpus += gpu_count
-                partition_stats.gpus += gpu_count
-                if gpu_type in pending_gpus_by_type:
-                    pending_gpus_by_type[gpu_type] += gpu_count
-                else:
-                    pending_gpus_by_type[gpu_type] = gpu_count
-                partition_stats.gpus_by_type[gpu_type] = partition_stats.gpus_by_type.get(gpu_type, 0) + gpu_count
+            pending_gpus += self._aggregate_pending_gpus(gpu_entries, array_size, pending_gpus_by_type, partition_stats)
 
-        # Update stats with pending resource data
         stats.pending_jobs_count = pending_jobs_count
         stats.pending_cpus = pending_cpus
         stats.pending_memory_gb = pending_memory_gb
@@ -1219,12 +1226,27 @@ class SlurmMonitor(App[None]):
         return node_infos
 
     def _update_user_overview(self) -> None:
-        """Update the user overview tab."""
+        """Update the user overview tab with running and pending job stats."""
         try:
             user_tab = self.query_one("#user-overview", UserOverviewTab)
-            user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
-            logger.debug(f"Updating user overview with {len(user_stats)} users from {len(self._all_users_jobs)} jobs")
+
+            # Filter for running jobs only (exclude PENDING/PD for running stats)
+            state_index = 4
+            running_jobs = [
+                j
+                for j in self._all_users_jobs
+                if len(j) > state_index and j[state_index].strip().upper() not in ("PENDING", "PD")
+            ]
+
+            # Running job stats
+            user_stats = UserOverviewTab.aggregate_user_stats(running_jobs)
+            logger.debug(f"Updating user overview with {len(user_stats)} users from {len(running_jobs)} running jobs")
             user_tab.update_users(user_stats)
+
+            # Pending job stats (includes array expansion)
+            pending_stats = UserOverviewTab.aggregate_pending_user_stats(self._all_users_jobs)
+            logger.debug(f"Updating pending user stats with {len(pending_stats)} users")
+            user_tab.update_pending_users(pending_stats)
         except Exception as exc:
             logger.error(f"Failed to update user overview: {exc}", exc_info=True)
 
