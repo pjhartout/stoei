@@ -10,6 +10,7 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Static
 
+from stoei.slurm.array_parser import parse_array_size
 from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
     calculate_total_gpus,
@@ -42,6 +43,28 @@ class _UserDataDict(TypedDict):
     gpu_types: dict[str, int]
 
 
+@dataclass
+class UserPendingStats:
+    """User pending job resource statistics."""
+
+    username: str
+    pending_job_count: int
+    pending_cpus: int
+    pending_memory_gb: float
+    pending_gpus: int
+    pending_gpu_types: str = ""
+
+
+class _UserPendingDataDict(TypedDict):
+    """Internal dictionary structure for aggregating user pending statistics."""
+
+    pending_job_count: int
+    pending_cpus: int
+    pending_memory_gb: float
+    pending_gpus: int
+    gpu_types: dict[str, int]
+
+
 class UserOverviewTab(VerticalScroll):
     """Tab widget displaying user-level overview."""
 
@@ -49,6 +72,10 @@ class UserOverviewTab(VerticalScroll):
     UserOverviewTab {
         height: 100%;
         width: 100%;
+    }
+
+    #pending-overview-title {
+        margin-top: 1;
     }
     """
 
@@ -70,14 +97,18 @@ class UserOverviewTab(VerticalScroll):
         """
         super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.users: list[UserStats] = []
+        self.pending_users: list[UserPendingStats] = []
 
     def compose(self) -> ComposeResult:
         """Create the user overview layout."""
-        yield Static("[bold]👥 User Overview[/bold]", id="user-overview-title")
+        yield Static("[bold]👥 User Overview (Running)[/bold]", id="user-overview-title")
         yield DataTable(id="users_table")
+        yield Static("[bold]⏳ Pending Resources by User[/bold]", id="pending-overview-title")
+        yield DataTable(id="pending_users_table")
 
     def on_mount(self) -> None:
-        """Initialize the data table."""
+        """Initialize the data tables."""
+        # Initialize running users table
         users_table = self.query_one("#users_table", DataTable)
         users_table.cursor_type = "row"
         users_table.add_columns(
@@ -89,9 +120,24 @@ class UserOverviewTab(VerticalScroll):
             "GPU Types",
             "Nodes",
         )
-        # If we already have users data, update the table
+
+        # Initialize pending users table
+        pending_table = self.query_one("#pending_users_table", DataTable)
+        pending_table.cursor_type = "row"
+        pending_table.add_columns(
+            "User",
+            "Pending Jobs",
+            "CPUs Requested",
+            "Memory (GB)",
+            "GPUs Requested",
+            "GPU Types",
+        )
+
+        # If we already have data, update the tables
         if self.users:
             self.update_users(self.users)
+        if self.pending_users:
+            self.update_pending_users(self.pending_users)
 
     def update_users(self, users: list[UserStats]) -> None:
         """Update the user data table.
@@ -131,6 +177,43 @@ class UserOverviewTab(VerticalScroll):
         if cursor_row is not None and users_table.row_count > 0:
             new_row = min(cursor_row, users_table.row_count - 1)
             users_table.move_cursor(row=new_row)
+
+    def update_pending_users(self, pending_users: list[UserPendingStats]) -> None:
+        """Update the pending users data table.
+
+        Args:
+            pending_users: List of pending user statistics to display.
+        """
+        try:
+            pending_table = self.query_one("#pending_users_table", DataTable)
+        except Exception:
+            # Table might not be mounted yet, store pending_users for later
+            self.pending_users = pending_users
+            return
+
+        # Save cursor position
+        cursor_row = pending_table.cursor_row
+
+        pending_table.clear()
+
+        # Already sorted by pending_cpus in aggregate_pending_user_stats
+        self.pending_users = pending_users
+
+        for user in pending_users:
+            gpu_types_display = user.pending_gpu_types if user.pending_gpu_types else "N/A"
+            pending_table.add_row(
+                user.username,
+                str(user.pending_job_count),
+                str(user.pending_cpus),
+                f"{user.pending_memory_gb:.1f}",
+                str(user.pending_gpus) if user.pending_gpus > 0 else "0",
+                gpu_types_display,
+            )
+
+        # Restore cursor position
+        if cursor_row is not None and pending_table.row_count > 0:
+            new_row = min(cursor_row, pending_table.row_count - 1)
+            pending_table.move_cursor(row=new_row)
 
     @staticmethod
     def _parse_tres(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
@@ -342,3 +425,92 @@ class UserOverviewTab(VerticalScroll):
             )
 
         return UserOverviewTab._convert_to_user_stats(user_data)
+
+    @staticmethod
+    def aggregate_pending_user_stats(jobs: list[tuple[str, ...]]) -> list[UserPendingStats]:
+        """Aggregate pending jobs into per-user statistics.
+
+        Similar to aggregate_user_stats but:
+        - Only includes PENDING/PD jobs
+        - Accounts for array job sizes
+
+        Args:
+            jobs: List of job tuples from squeue
+                (JobID, Name, User, Partition, State, Time, Nodes, NodeList, [TRES]).
+
+        Returns:
+            List of UserPendingStats objects sorted by pending CPUs (descending).
+        """
+        # Job tuple indices
+        job_id_index = 0
+        username_index = 2
+        state_index = 4
+        tres_index = 8
+        min_job_fields = 8
+
+        def _default_pending_data() -> _UserPendingDataDict:
+            """Create default pending data dictionary."""
+            return {
+                "pending_job_count": 0,
+                "pending_cpus": 0,
+                "pending_memory_gb": 0.0,
+                "pending_gpus": 0,
+                "gpu_types": defaultdict(int),
+            }
+
+        user_data: dict[str, _UserPendingDataDict] = defaultdict(_default_pending_data)
+
+        for job in jobs:
+            if len(job) < min_job_fields:
+                continue
+
+            # Only process pending jobs
+            state = job[state_index].strip().upper() if len(job) > state_index else ""
+            if state not in ("PENDING", "PD"):
+                continue
+
+            username = job[username_index].strip() if len(job) > username_index else ""
+            if not username:
+                continue
+
+            # Get array size (1 for non-array jobs)
+            job_id = job[job_id_index].strip() if len(job) > job_id_index else ""
+            array_size = parse_array_size(job_id)
+
+            data = user_data[username]
+            data["pending_job_count"] += array_size
+
+            # Parse TRES if available
+            tres_str = job[tres_index].strip() if len(job) > tres_index else ""
+            if not tres_str:
+                continue
+
+            cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+            data["pending_cpus"] += cpus * array_size
+            data["pending_memory_gb"] += memory_gb * array_size
+
+            # Process GPU entries
+            for gpu_type, gpu_count in gpu_entries:
+                scaled_count = gpu_count * array_size
+                data["pending_gpus"] += scaled_count
+                gpu_types_dict = data["gpu_types"]
+                if isinstance(gpu_types_dict, dict):
+                    gpu_types_dict[gpu_type] += scaled_count
+
+        # Convert to UserPendingStats list
+        result: list[UserPendingStats] = []
+        for username, data in user_data.items():
+            gpu_types_str = format_gpu_types(data["gpu_types"])
+            result.append(
+                UserPendingStats(
+                    username=username,
+                    pending_job_count=data["pending_job_count"],
+                    pending_cpus=data["pending_cpus"],
+                    pending_memory_gb=data["pending_memory_gb"],
+                    pending_gpus=data["pending_gpus"],
+                    pending_gpu_types=gpu_types_str,
+                )
+            )
+
+        # Sort by pending CPUs (descending) to show heaviest users first
+        return sorted(result, key=lambda u: u.pending_cpus, reverse=True)

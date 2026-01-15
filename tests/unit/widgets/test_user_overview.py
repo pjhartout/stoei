@@ -1,7 +1,7 @@
 """Unit tests for the UserOverviewTab widget."""
 
 import pytest
-from stoei.widgets.user_overview import UserOverviewTab, UserStats
+from stoei.widgets.user_overview import UserOverviewTab, UserPendingStats, UserStats
 
 
 class TestUserStats:
@@ -478,3 +478,208 @@ class TestUserOverviewTab:
         assert len(result) == 1
         assert result[0].total_gpus == 8  # Only h200, generic is skipped
         assert result[0].gpu_types == "8x H200"
+
+
+class TestUserPendingStats:
+    """Tests for the UserPendingStats dataclass."""
+
+    def test_user_pending_stats_creation(self) -> None:
+        """Test creating a UserPendingStats object."""
+        stats = UserPendingStats(
+            username="testuser",
+            pending_job_count=10,
+            pending_cpus=80,
+            pending_memory_gb=320.0,
+            pending_gpus=10,
+            pending_gpu_types="10x H200",
+        )
+        assert stats.username == "testuser"
+        assert stats.pending_job_count == 10
+        assert stats.pending_cpus == 80
+        assert stats.pending_memory_gb == 320.0
+        assert stats.pending_gpus == 10
+        assert stats.pending_gpu_types == "10x H200"
+
+    def test_user_pending_stats_default_gpu_types(self) -> None:
+        """Test UserPendingStats with default gpu_types."""
+        stats = UserPendingStats(
+            username="testuser",
+            pending_job_count=5,
+            pending_cpus=40,
+            pending_memory_gb=160.0,
+            pending_gpus=0,
+        )
+        assert stats.pending_gpu_types == ""
+
+
+class TestAggregatePendingUserStats:
+    """Tests for aggregate_pending_user_stats method."""
+
+    def test_aggregate_pending_empty_list(self) -> None:
+        """Test aggregating pending stats from empty job list."""
+        result = UserOverviewTab.aggregate_pending_user_stats([])
+        assert result == []
+
+    def test_aggregate_pending_no_pending_jobs(self) -> None:
+        """Test aggregating when there are no pending jobs."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "2", "node01,node02", "cpu=32,mem=256G"),
+            ("12346", "job2", "user2", "gpu", "COMPLETED", "0:30:00", "1", "node03", "cpu=16,mem=128G"),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 0
+
+    def test_aggregate_pending_single_user(self) -> None:
+        """Test aggregating pending stats for a single user."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].username == "user1"
+        assert result[0].pending_job_count == 1
+        assert result[0].pending_cpus == 32
+        assert result[0].pending_memory_gb == 256.0
+        assert result[0].pending_gpus == 4
+
+    def test_aggregate_pending_multiple_users(self) -> None:
+        """Test aggregating pending stats for multiple users."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
+            ("12346", "job2", "user2", "gpu", "PENDING", "0:00", "1", "(Resources)", "cpu=64,mem=512G,gres/gpu=8"),
+            ("12347", "job3", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=32G"),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 2
+        # Sorted by pending_cpus descending
+        assert result[0].username == "user2"
+        assert result[0].pending_cpus == 64
+        assert result[1].username == "user1"
+        assert result[1].pending_cpus == 32
+
+    def test_aggregate_pending_recognizes_pd_state(self) -> None:
+        """Test that 'PD' state is recognized as pending."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "PD", "0:00", "1", "(Priority)", "cpu=16,mem=128G"),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].pending_job_count == 1
+        assert result[0].pending_cpus == 16
+
+    def test_aggregate_pending_array_job_expands(self) -> None:
+        """Test that pending array jobs are expanded."""
+        jobs = [
+            # Array job with 50 tasks
+            (
+                "47700_[0-49]",
+                "array_job",
+                "user1",
+                "gpu",
+                "PENDING",
+                "0:00",
+                "1",
+                "(Priority)",
+                "cpu=8,mem=32G,gres/gpu=1",
+            ),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].pending_job_count == 50
+        assert result[0].pending_cpus == 400  # 8 * 50
+        assert result[0].pending_memory_gb == 1600.0  # 32 * 50
+        assert result[0].pending_gpus == 50  # 1 * 50
+
+    def test_aggregate_pending_mixed_array_and_regular(self) -> None:
+        """Test mix of array and regular pending jobs."""
+        jobs = [
+            # Regular pending job
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu=4"),
+            # Array job with 10 tasks
+            ("47700_[0-9]", "array", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=8,mem=32G,gres/gpu=1"),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 1
+        # 1 regular + 10 array = 11 jobs
+        assert result[0].pending_job_count == 11
+        # 32 + (8*10) = 112 CPUs
+        assert result[0].pending_cpus == 112
+        # 256 + (32*10) = 576 GB
+        assert result[0].pending_memory_gb == 576.0
+        # 4 + (1*10) = 14 GPUs
+        assert result[0].pending_gpus == 14
+
+    def test_aggregate_pending_array_with_throttle(self) -> None:
+        """Test that array job with throttle still counts all tasks."""
+        jobs = [
+            # Array job with 100 tasks and %10 throttle
+            ("47700_[0-99%10]", "throttled", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=4,mem=16G"),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].pending_job_count == 100
+        assert result[0].pending_cpus == 400  # 4 * 100
+
+    def test_aggregate_pending_single_array_task_not_expanded(self) -> None:
+        """Test that single array task is not expanded."""
+        jobs = [
+            ("47700_5", "single_task", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=8,mem=32G"),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].pending_job_count == 1
+        assert result[0].pending_cpus == 8
+
+    def test_aggregate_pending_with_gpu_types(self) -> None:
+        """Test aggregating pending stats with GPU types."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=32,mem=256G,gres/gpu:h200=8"),
+            ("12346", "job2", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=16,mem=128G,gres/gpu:a100=4"),
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].pending_gpus == 12
+        # GPU types are formatted as lowercase from parsing
+        assert result[0].pending_gpu_types == "4x a100, 8x h200"
+
+    def test_aggregate_pending_without_tres(self) -> None:
+        """Test aggregating pending stats without TRES field."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)"),  # No TRES
+        ]
+        result = UserOverviewTab.aggregate_pending_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].pending_job_count == 1
+        assert result[0].pending_cpus == 0  # No TRES data
+
+    async def test_update_pending_users(self) -> None:
+        """Test updating pending users - requires mounted widget."""
+        from textual.app import App
+
+        class UserTestApp(App[None]):
+            def compose(self):
+                yield UserOverviewTab(id="user-overview")
+
+        app = UserTestApp()
+        async with app.run_test(size=(80, 24)):
+            user_tab = app.query_one("#user-overview", UserOverviewTab)
+            pending_users = [
+                UserPendingStats(
+                    username="user1",
+                    pending_job_count=10,
+                    pending_cpus=80,
+                    pending_memory_gb=320.0,
+                    pending_gpus=10,
+                    pending_gpu_types="10x H200",
+                ),
+                UserPendingStats(
+                    username="user2",
+                    pending_job_count=5,
+                    pending_cpus=40,
+                    pending_memory_gb=160.0,
+                    pending_gpus=5,
+                    pending_gpu_types="5x A100",
+                ),
+            ]
+            user_tab.update_pending_users(pending_users)
+            assert len(user_tab.pending_users) == 2
