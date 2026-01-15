@@ -3,7 +3,6 @@
 
 import argparse
 import random
-import sys
 
 # Constants for parsing
 # All-users tuples now include Partition:
@@ -42,6 +41,30 @@ MOCK_JOBS_ALL_USERS = [
         "8",
         "(Resources)",
         "cpu=64,mem=512G,node=8,gres/gpu=32",
+    ),
+    # Pending array job with 50 tasks - demonstrates array expansion
+    (
+        "47700_[0-49]",
+        "array_train",
+        "testuser",
+        "gpu",
+        "PENDING",
+        "0:00",
+        "1",
+        "(Priority)",
+        "cpu=8,mem=32G,gres/gpu=1",
+    ),
+    # Pending array job with throttle - 100 tasks with %10 throttle
+    (
+        "47701_[0-99%10]",
+        "throttled_array",
+        "testuser",
+        "gpu",
+        "PENDING",
+        "0:00",
+        "1",
+        "(Resources)",
+        "cpu=4,mem=16G,gres/gpu:h200=2",
     ),
     (
         "47587",
@@ -313,8 +336,8 @@ def main() -> None:
     parser.add_argument("-o", "--format", default=None)
     parser.add_argument("-O", "--Format", default=None)
     parser.add_argument("-a", "--all", action="store_true")
-    parser.add_argument("-t", "--states", default=None)
-    parser.add_argument("--noheader", action="store_true")
+    parser.add_argument("-t", "--states", default=None) # Add support for -t
+    parser.add_argument("--noheader", action="store_true") # Add support for --noheader
 
     args = parser.parse_args()
 
@@ -371,17 +394,12 @@ def main() -> None:
     has_user_field = args.format and "%.8u" in args.format
     has_tres_field = args.format and "%t" in args.format
 
-    _print_header(args.noheader, using_all_users_jobs, has_tres_field)
-    _print_jobs(selected_jobs, using_all_users_jobs, has_tres_field)
-
-
-def _print_header(noheader: bool, using_all_users: bool, has_tres: bool) -> None:
-    """Print the header line."""
-    if noheader:
-        return
-    if using_all_users:
-        if has_tres:
-            print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)|TRES")
+    if not args.noheader:
+        if using_all_users_jobs:
+             if has_tres_field:
+                print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)|TRES")
+             else:
+                print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)")
         else:
             print("     JOBID|           NAME|    USER|   STATE|      TIME|NODE|NODELIST(REASON)")
     else:
