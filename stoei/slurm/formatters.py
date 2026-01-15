@@ -405,6 +405,6 @@ def format_compact_timeline(
 
     # Append requeue indicator if restarts > 0
     if restarts > 0:
-        result = f"{result} ↻{restarts}"
+        result = f"{result}  ↻ {restarts}"
 
     return result

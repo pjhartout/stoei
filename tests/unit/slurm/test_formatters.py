@@ -370,7 +370,7 @@ class TestFormatCompactTimeline:
             "RUNNING",
             restarts=3,
         )
-        assert "↻3" in result
+        assert "↻ 3" in result
 
     def test_handles_empty_times(self) -> None:
         """Test handling of empty time values."""
