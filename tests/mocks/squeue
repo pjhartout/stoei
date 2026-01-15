@@ -3,7 +3,6 @@
 
 import argparse
 import random
-import sys
 
 # Constants for parsing
 # All-users tuples now include Partition:
@@ -40,6 +39,30 @@ MOCK_JOBS_ALL_USERS = [
         "8",
         "(Resources)",
         "cpu=64,mem=512G,node=8,gres/gpu=32",
+    ),
+    # Pending array job with 50 tasks - demonstrates array expansion
+    (
+        "47700_[0-49]",
+        "array_train",
+        "testuser",
+        "gpu",
+        "PENDING",
+        "0:00",
+        "1",
+        "(Priority)",
+        "cpu=8,mem=32G,gres/gpu=1",
+    ),
+    # Pending array job with throttle - 100 tasks with %10 throttle
+    (
+        "47701_[0-99%10]",
+        "throttled_array",
+        "testuser",
+        "gpu",
+        "PENDING",
+        "0:00",
+        "1",
+        "(Resources)",
+        "cpu=4,mem=16G,gres/gpu:h200=2",
     ),
     (
         "47587",
@@ -240,10 +263,10 @@ def print_fixed_width(jobs):
         job = _normalize_all_users_job(job)
         if len(job) < MIN_JOB_FIELDS_WITH_USER:
             continue
-            
+
         job_id, name, user, partition, state, time, nodes, nodelist = job[:MIN_JOB_FIELDS_WITH_USER]
         tres = job[8] if len(job) >= MIN_JOB_FIELDS_WITH_TRES else ""
-        
+
         # Pad fields to match expected fixed width
         line = (
             f"{job_id:<20}"
@@ -268,12 +291,12 @@ def main() -> None:
     parser.add_argument("-a", "--all", action="store_true")
     parser.add_argument("-t", "--states", default=None) # Add support for -t
     parser.add_argument("--noheader", action="store_true") # Add support for --noheader
-    
+
     args = parser.parse_args()
 
     # Determine mode
     is_fixed_width = args.Format is not None
-    
+
     # Filter states if specified
     allowed_states = args.states.split(",") if args.states else None
 
@@ -288,7 +311,7 @@ def main() -> None:
         # Determine format - check if user field is in format string
         has_user_field = args.format and "%.8u" in args.format
         is_all_users = args.all or (not args.user and has_user_field)
-        
+
         if is_all_users and has_user_field:
             jobs = [_normalize_all_users_job(j) for j in MOCK_JOBS_ALL_USERS]
             using_all_users_jobs = True
@@ -325,7 +348,7 @@ def main() -> None:
     # Regular output formatting
     has_user_field = args.format and "%.8u" in args.format
     has_tres_field = args.format and "%t" in args.format
-    
+
     if not args.noheader:
         if using_all_users_jobs:
              if has_tres_field:
