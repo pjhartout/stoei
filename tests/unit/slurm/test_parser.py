@@ -82,7 +82,7 @@ class TestParseSqueueOutput:
         assert result == []
 
     def test_parse_header_only(self) -> None:
-        header_only = "     JOBID|        JOBNAME|   STATE|      TIME|   NODES|      NODELIST"
+        header_only = "JOBID|JOBNAME|STATE|TIME|NODES|NODELIST|SUBMIT_TIME|START_TIME"
         result = parse_squeue_output(header_only)
         assert result == []
 
@@ -119,7 +119,7 @@ class TestParseSacctOutput:
         assert max_req == 0
 
     def test_parse_header_only(self) -> None:
-        header_only = "JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList"
+        header_only = "JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList|Submit|Start|End"
         jobs, total, _requeues, _max_req = parse_sacct_output(header_only)
 
         assert jobs == []
@@ -127,8 +127,8 @@ class TestParseSacctOutput:
 
     def test_parse_invalid_restart_count(self) -> None:
         """Test handling of non-numeric restart counts."""
-        output = """JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList
-12345|test_job|RUNNING|invalid|01:00:00|0:0|node01"""
+        output = """JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList|Submit|Start|End
+12345|test_job|RUNNING|invalid|01:00:00|0:0|node01|2024-01-15T10:00:00|2024-01-15T10:01:00|Unknown"""
         jobs, _total, requeues, max_req = parse_sacct_output(output)
 
         # Should handle the invalid value gracefully
@@ -138,9 +138,9 @@ class TestParseSacctOutput:
 
     def test_sort_handles_non_numeric_job_id(self) -> None:
         """Test sorting with non-numeric job IDs."""
-        output = """JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList
-abc123|test1|RUNNING|0|01:00:00|0:0|node01
-12345|test2|RUNNING|0|01:00:00|0:0|node02"""
+        output = """JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList|Submit|Start|End
+abc123|test1|RUNNING|0|01:00:00|0:0|node01|2024-01-15T10:00:00|2024-01-15T10:01:00|Unknown
+12345|test2|RUNNING|0|01:00:00|0:0|node02|2024-01-15T10:00:00|2024-01-15T10:01:00|Unknown"""
         jobs, _, _, _ = parse_sacct_output(output)
 
         # Should not crash, order may vary

@@ -20,7 +20,9 @@ _SQUEUE_STATE = 2
 _SQUEUE_TIME = 3
 _SQUEUE_NODES = 4
 _SQUEUE_NODELIST = 5
-_SQUEUE_MIN_FIELDS = 6
+_SQUEUE_SUBMIT_TIME = 6
+_SQUEUE_START_TIME = 7
+_SQUEUE_MIN_FIELDS = 8
 
 # Tuple field indices for sacct output
 _SACCT_JOB_ID = 0
@@ -30,7 +32,10 @@ _SACCT_RESTARTS = 3
 _SACCT_ELAPSED = 4
 _SACCT_EXIT_CODE = 5
 _SACCT_NODELIST = 6
-_SACCT_MIN_FIELDS = 7
+_SACCT_SUBMIT = 7
+_SACCT_START = 8
+_SACCT_END = 9
+_SACCT_MIN_FIELDS = 10
 
 
 class JobState(Enum):
@@ -58,6 +63,9 @@ class Job:
     restarts: int = 0
     exit_code: str = ""
     is_active: bool = False  # True for running/pending jobs
+    submit_time: str = ""  # ISO format or SLURM format
+    start_time: str = ""  # ISO format or SLURM format
+    end_time: str = ""  # ISO format or SLURM format
 
     @property
     def state_category(self) -> JobState:
@@ -192,6 +200,8 @@ class JobCache:
                 nodes=job_tuple[_SQUEUE_NODES].strip(),
                 node_list=job_tuple[_SQUEUE_NODELIST].strip(),
                 is_active=True,
+                submit_time=job_tuple[_SQUEUE_SUBMIT_TIME].strip(),
+                start_time=job_tuple[_SQUEUE_START_TIME].strip(),
             )
             jobs.append(job)
 
@@ -220,6 +230,9 @@ class JobCache:
                 restarts=int(restarts_str) if restarts_str.isdigit() else 0,
                 exit_code=job_tuple[_SACCT_EXIT_CODE].strip(),
                 is_active=False,
+                submit_time=job_tuple[_SACCT_SUBMIT].strip(),
+                start_time=job_tuple[_SACCT_START].strip(),
+                end_time=job_tuple[_SACCT_END].strip(),
             )
             jobs.append(job)
 
