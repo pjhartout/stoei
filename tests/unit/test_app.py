@@ -1040,3 +1040,182 @@ class TestCalculatePendingResources:
         assert stats.pending_by_partition["cpu"].cpus == 64
         assert stats.pending_by_partition["cpu"].memory_gb == 512.0
         assert stats.pending_by_partition["cpu"].gpus == 8
+
+
+class TestCalculatePendingResourcesWithArrays:
+    """Tests for _calculate_pending_resources with array job expansion."""
+
+    @pytest.fixture(autouse=True)
+    def mock_slurm(self) -> None:
+        """Mock SLURM availability check."""
+        with patch("stoei.app.check_slurm_available", return_value=(True, None)):
+            yield
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Create a SlurmMonitor instance for testing."""
+        return SlurmMonitor()
+
+    def test_pending_array_job_expands_job_count(self, app: SlurmMonitor) -> None:
+        """Test that pending array jobs expand job count."""
+        app._all_users_jobs = [
+            # Array job with 50 tasks
+            ("47700_[0-49]", "array_train", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=8,mem=32G"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 50
+
+    def test_pending_array_job_multiplies_resources(self, app: SlurmMonitor) -> None:
+        """Test that pending array jobs multiply resource requests."""
+        app._all_users_jobs = [
+            # Array job with 10 tasks, each requesting 8 CPUs, 32G memory, 1 GPU
+            (
+                "47700_[0-9]",
+                "array_job",
+                "user1",
+                "gpu",
+                "PENDING",
+                "0:00",
+                "1",
+                "(Priority)",
+                "cpu=8,mem=32G,gres/gpu=1",
+            ),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 10
+        assert stats.pending_cpus == 80  # 8 * 10
+        assert stats.pending_memory_gb == 320.0  # 32 * 10
+        assert stats.pending_gpus == 10  # 1 * 10
+
+    def test_mixed_regular_and_array_pending_jobs(self, app: SlurmMonitor) -> None:
+        """Test mix of regular and array pending jobs."""
+        app._all_users_jobs = [
+            # Regular pending job
+            (
+                "12345",
+                "regular_job",
+                "user1",
+                "gpu",
+                "PENDING",
+                "0:00",
+                "1",
+                "(Priority)",
+                "cpu=32,mem=256G,gres/gpu=4",
+            ),
+            # Array job with 50 tasks
+            (
+                "47700_[0-49]",
+                "array_job",
+                "user2",
+                "gpu",
+                "PENDING",
+                "0:00",
+                "1",
+                "(Priority)",
+                "cpu=8,mem=32G,gres/gpu=1",
+            ),
+            # Running job (should not be counted)
+            ("12346", "running_job", "user3", "gpu", "RUNNING", "1:00:00", "1", "node01", "cpu=8,mem=32G"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        # 1 regular + 50 array tasks = 51 pending jobs
+        assert stats.pending_jobs_count == 51
+        # CPUs: 32 (regular) + 50*8 (array) = 432
+        assert stats.pending_cpus == 432
+        # Memory: 256 (regular) + 50*32 (array) = 1856
+        assert stats.pending_memory_gb == 1856.0
+        # GPUs: 4 (regular) + 50*1 (array) = 54
+        assert stats.pending_gpus == 54
+
+    def test_array_job_with_throttle(self, app: SlurmMonitor) -> None:
+        """Test that array job with throttle still counts all tasks."""
+        app._all_users_jobs = [
+            # Array job with 100 tasks and %10 throttle
+            ("47700_[0-99%10]", "throttled", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=4,mem=16G"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 100
+        assert stats.pending_cpus == 400  # 4 * 100
+        assert stats.pending_memory_gb == 1600.0  # 16 * 100
+
+    def test_single_array_task_not_expanded(self, app: SlurmMonitor) -> None:
+        """Test that single array task (e.g., 12345_5) is not expanded."""
+        app._all_users_jobs = [
+            # Single array task that is pending
+            ("47700_5", "single_task", "user1", "gpu", "PENDING", "0:00", "1", "(Priority)", "cpu=8,mem=32G"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+        assert stats.pending_jobs_count == 1
+        assert stats.pending_cpus == 8
+        assert stats.pending_memory_gb == 32.0
+
+    def test_array_expansion_per_partition(self, app: SlurmMonitor) -> None:
+        """Test that array expansion is tracked per partition."""
+        app._all_users_jobs = [
+            # Array job in gpu partition with 10 tasks
+            (
+                "47700_[0-9]",
+                "gpu_array",
+                "user1",
+                "gpu",
+                "PENDING",
+                "0:00",
+                "1",
+                "(Priority)",
+                "cpu=8,mem=32G,gres/gpu=1",
+            ),
+            # Array job in cpu partition with 20 tasks
+            ("47701_[0-19]", "cpu_array", "user2", "cpu", "PENDING", "0:00", "1", "(Priority)", "cpu=16,mem=64G"),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+
+        assert stats.pending_jobs_count == 30  # 10 + 20
+
+        # Check per-partition stats
+        assert stats.pending_by_partition["gpu"].jobs_count == 10
+        assert stats.pending_by_partition["gpu"].cpus == 80  # 8 * 10
+        assert stats.pending_by_partition["gpu"].gpus == 10  # 1 * 10
+
+        assert stats.pending_by_partition["cpu"].jobs_count == 20
+        assert stats.pending_by_partition["cpu"].cpus == 320  # 16 * 20
+        assert stats.pending_by_partition["cpu"].gpus == 0
+
+    def test_array_gpu_types_aggregation(self, app: SlurmMonitor) -> None:
+        """Test that GPU types are correctly aggregated for array jobs."""
+        app._all_users_jobs = [
+            # Array job with 5 tasks requesting h200 GPUs
+            (
+                "47700_[0-4]",
+                "h200_job",
+                "user1",
+                "gpu",
+                "PENDING",
+                "0:00",
+                "1",
+                "(Priority)",
+                "cpu=8,mem=32G,gres/gpu:h200=2",
+            ),
+            # Array job with 3 tasks requesting a100 GPUs
+            (
+                "47701_[0-2]",
+                "a100_job",
+                "user2",
+                "gpu",
+                "PENDING",
+                "0:00",
+                "1",
+                "(Priority)",
+                "cpu=8,mem=32G,gres/gpu:a100=4",
+            ),
+        ]
+        stats = ClusterStats()
+        app._calculate_pending_resources(stats)
+
+        assert stats.pending_gpus == 22  # 5*2 + 3*4 = 10 + 12
+        assert stats.pending_gpus_by_type == {"h200": 10, "a100": 12}
