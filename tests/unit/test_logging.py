@@ -84,7 +84,7 @@ class TestRemoveTuiSink:
         # No new messages should be captured by our sink
         assert len(messages_after_remove) == initial_count
 
-    def test_restores_stdout_handler(self) -> None:
+    def test_stdout_handler_stays_none(self) -> None:
         from stoei.logger import _state, add_tui_sink, remove_tui_sink
 
         # Use a real callable instead of MagicMock to avoid loguru
@@ -92,25 +92,27 @@ class TestRemoveTuiSink:
         def sink_func(message: object) -> None:
             pass
 
-        # Before adding TUI sink, stdout handler may or may not exist
+        # stdout handler should be None (not added by default to keep terminal clean)
+        assert _state.stdout_handler_id is None
+
         # Add and remove TUI sink
         sink_id = add_tui_sink(sink_func)
 
-        # After adding TUI sink, stdout handler should be removed
+        # After adding TUI sink, stdout handler should still be None
         assert _state.stdout_handler_id is None
 
         remove_tui_sink(sink_id)
 
-        # After removing TUI sink, stdout handler should be restored
-        assert _state.stdout_handler_id is not None
+        # After removing TUI sink, stdout handler should stay None (not restored)
+        assert _state.stdout_handler_id is None
 
 
 class TestLoggingState:
     """Tests for _LoggingState class."""
 
-    def test_initial_stdout_handler(self) -> None:
+    def test_initial_stdout_handler_is_none(self) -> None:
         from stoei.logger import _state
 
-        # State should have stdout handler (or it may have been removed by tests)
-        # The important thing is that the state object exists
+        # stdout handler should be None by default to avoid interfering with TUI
         assert hasattr(_state, "stdout_handler_id")
+        assert _state.stdout_handler_id is None

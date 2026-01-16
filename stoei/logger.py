@@ -1,11 +1,10 @@
 """Logging configuration using loguru.
 
 Logs are stored in the logs/ folder and kept for 1 week.
-Output goes to both stdout and file.
+Output goes to file only by default (to avoid interfering with TUI).
 """
 
 import os
-import sys
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
@@ -63,24 +62,17 @@ _default_log_dir = Path.cwd() / "logs"
 LOG_DIR = Path(os.environ.get("STOEI_LOG_DIR", str(_default_log_dir))).expanduser().resolve()
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-# Configure stdout handler with colors (only when not in TUI mode)
-STDOUT_FORMAT = (
-    "<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | "
-    "<cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>"
-)
-
 
 class _LoggingState:
-    """Internal state tracker for logging configuration."""
+    """Internal state tracker for logging configuration.
+
+    Note: stdout handler is NOT added by default to avoid interfering with TUI.
+    Logs go to file only during normal operation.
+    """
 
     def __init__(self) -> None:
-        """Initialize logging state with stdout handler."""
-        self.stdout_handler_id: int | None = logger.add(
-            sys.stdout,
-            level="INFO",
-            format=STDOUT_FORMAT,
-            colorize=True,
-        )
+        """Initialize logging state without stdout handler."""
+        self.stdout_handler_id: int | None = None
 
 
 _state = _LoggingState()
@@ -133,18 +125,11 @@ def add_tui_sink(sink_func: Callable[[object], None], level: str = "WARNING") ->
 
 
 def remove_tui_sink(sink_id: int) -> None:
-    """Remove the TUI sink and restore stdout logging.
+    """Remove the TUI sink.
+
+    Note: stdout logging is NOT restored to keep terminal clean.
 
     Args:
         sink_id: The sink ID returned by add_tui_sink.
     """
     logger.remove(sink_id)
-
-    # Restore stdout handler
-    if _state.stdout_handler_id is None:
-        _state.stdout_handler_id = logger.add(
-            sys.stdout,
-            level="INFO",
-            format=STDOUT_FORMAT,
-            colorize=True,
-        )
