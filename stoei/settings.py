@@ -17,6 +17,11 @@ LOG_LEVELS: tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
 MIN_LOG_LINES = 200
 DEFAULT_MAX_LOG_LINES = 2000
 
+# Log viewer settings (for viewing job log files)
+MIN_LOG_VIEWER_LINES = 500
+MAX_LOG_VIEWER_LINES = 100000
+DEFAULT_LOG_VIEWER_LINES = 10000
+
 # Refresh interval settings (in seconds)
 MIN_REFRESH_INTERVAL = 1.0
 MAX_REFRESH_INTERVAL = 300.0
@@ -37,6 +42,7 @@ class Settings:
     max_log_lines: int = DEFAULT_MAX_LOG_LINES
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
     job_history_days: int = DEFAULT_JOB_HISTORY_DAYS
+    log_viewer_lines: int = DEFAULT_LOG_VIEWER_LINES
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object]) -> Settings:
@@ -74,12 +80,21 @@ class Settings:
         ):
             job_history_days = DEFAULT_JOB_HISTORY_DAYS
 
+        log_viewer_lines = _coerce_int(data.get("log_viewer_lines"))
+        if (
+            log_viewer_lines is None
+            or log_viewer_lines < MIN_LOG_VIEWER_LINES
+            or log_viewer_lines > MAX_LOG_VIEWER_LINES
+        ):
+            log_viewer_lines = DEFAULT_LOG_VIEWER_LINES
+
         return cls(
             theme=theme,
             log_level=log_level,
             max_log_lines=max_log_lines,
             refresh_interval=refresh_interval,
             job_history_days=job_history_days,
+            log_viewer_lines=log_viewer_lines,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -201,7 +216,7 @@ def _coerce_float(value: object) -> float | None:
     """
     if isinstance(value, bool):
         return None
-    if isinstance(value, (int, float)):
+    if isinstance(value, int | float):
         return float(value)
     if isinstance(value, str):
         try:
