@@ -7,6 +7,8 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
+from stoei.colors import get_theme_colors
+
 # Conversion constant: 1 TB = 1024 GB
 GB_PER_TB = 1024
 
@@ -165,14 +167,16 @@ class ClusterSidebar(VerticalScroll):
         if self._content_widget is not None:
             self._content_widget.update(self._content_markup)
 
-    @staticmethod
-    def _color_pct(pct: float, *, green_threshold: float = 50.0, yellow_threshold: float = 25.0) -> str:
-        """Color code a percentage with Rich markup."""
-        if pct >= green_threshold:
-            return f"[green]{pct:.1f}%[/green]"
-        if pct >= yellow_threshold:
-            return f"[yellow]{pct:.1f}%[/yellow]"
-        return f"[red]{pct:.1f}%[/red]"
+    def _color_pct(self, pct: float, *, green_threshold: float = 50.0, yellow_threshold: float = 25.0) -> str:
+        """Color code a percentage with Rich markup using theme colors."""
+        try:
+            colors = get_theme_colors(self.app)
+        except (LookupError, RuntimeError):
+            # Fallback when not mounted to an app
+            colors = get_theme_colors(None)
+        # Inverted logic: high percentage = good (more resources free)
+        color = colors.pct_color(pct, high_threshold=green_threshold, mid_threshold=yellow_threshold, invert=True)
+        return f"[{color}]{pct:.1f}%[/{color}]"
 
     def _append_gpu_section(self, lines: list[str], stats: ClusterStats, *, gpus_pct: float | None) -> None:
         """Append the GPU section to the sidebar output."""

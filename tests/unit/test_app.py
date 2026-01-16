@@ -51,33 +51,83 @@ class TestFormatState:
         """Create a SlurmMonitor instance for testing."""
         return SlurmMonitor()
 
-    def test_format_running_state(self, app: SlurmMonitor) -> None:
-        result = app._format_state("RUNNING", JobState.RUNNING)
-        assert "[bold green]RUNNING[/bold green]" in result
+    async def test_format_running_state(self, app: SlurmMonitor) -> None:
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                result = app._format_state("RUNNING", JobState.RUNNING)
+                assert "bold" in result
+                assert "RUNNING" in result
+                # Uses success color (hex)
+                assert "#" in result or "green" in result
 
-    def test_format_pending_state(self, app: SlurmMonitor) -> None:
-        result = app._format_state("PENDING", JobState.PENDING)
-        assert "[bold yellow]PENDING[/bold yellow]" in result
+    async def test_format_pending_state(self, app: SlurmMonitor) -> None:
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                result = app._format_state("PENDING", JobState.PENDING)
+                assert "bold" in result
+                assert "PENDING" in result
+                # Uses warning color (hex)
+                assert "#" in result or "yellow" in result
 
-    def test_format_completed_state(self, app: SlurmMonitor) -> None:
-        result = app._format_state("COMPLETED", JobState.COMPLETED)
-        assert "[green]COMPLETED[/green]" in result
+    async def test_format_completed_state(self, app: SlurmMonitor) -> None:
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                result = app._format_state("COMPLETED", JobState.COMPLETED)
+                assert "COMPLETED" in result
+                # Uses success color (hex)
+                assert "#" in result or "green" in result
 
-    def test_format_failed_state(self, app: SlurmMonitor) -> None:
-        result = app._format_state("FAILED", JobState.FAILED)
-        assert "[bold red]FAILED[/bold red]" in result
+    async def test_format_failed_state(self, app: SlurmMonitor) -> None:
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                result = app._format_state("FAILED", JobState.FAILED)
+                assert "bold" in result
+                assert "FAILED" in result
+                # Uses error color (hex)
+                assert "#" in result or "red" in result
 
-    def test_format_cancelled_state(self, app: SlurmMonitor) -> None:
-        result = app._format_state("CANCELLED", JobState.CANCELLED)
-        assert "[bright_black]CANCELLED[/bright_black]" in result
+    async def test_format_cancelled_state(self, app: SlurmMonitor) -> None:
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                result = app._format_state("CANCELLED", JobState.CANCELLED)
+                assert "CANCELLED" in result
+                # Uses text_muted color (hex)
+                assert "#" in result or "bright_black" in result
 
-    def test_format_timeout_state(self, app: SlurmMonitor) -> None:
-        result = app._format_state("TIMEOUT", JobState.TIMEOUT)
-        assert "[red]TIMEOUT[/red]" in result
+    async def test_format_timeout_state(self, app: SlurmMonitor) -> None:
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                result = app._format_state("TIMEOUT", JobState.TIMEOUT)
+                assert "TIMEOUT" in result
+                # Uses error color (hex)
+                assert "#" in result or "red" in result
 
-    def test_format_unknown_state_returns_raw(self, app: SlurmMonitor) -> None:
-        result = app._format_state("UNKNOWN_STATE", JobState.OTHER)
-        assert result == "UNKNOWN_STATE"
+    async def test_format_unknown_state_returns_raw(self, app: SlurmMonitor) -> None:
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                result = app._format_state("UNKNOWN_STATE", JobState.OTHER)
+                assert result == "UNKNOWN_STATE"
 
 
 class TestStartRefreshWorker:

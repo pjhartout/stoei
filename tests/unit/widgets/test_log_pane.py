@@ -37,17 +37,31 @@ class TestLogPane:
         assert pane.has_class("foo")
         assert pane.has_class("bar")
 
-    def test_level_colors_defined(self) -> None:
-        """Test all expected log levels have colors defined."""
+    def test_level_colors_via_theme_colors(self) -> None:
+        """Test that log levels get colors from theme colors."""
+        from stoei.colors import FALLBACK_COLORS, ThemeColors
+
+        # Create a ThemeColors instance to test level_color method
+        colors = ThemeColors(
+            success=FALLBACK_COLORS["success"],
+            warning=FALLBACK_COLORS["warning"],
+            error=FALLBACK_COLORS["error"],
+            primary=FALLBACK_COLORS["primary"],
+            accent=FALLBACK_COLORS["accent"],
+            secondary=FALLBACK_COLORS["secondary"],
+            foreground=FALLBACK_COLORS["foreground"],
+            text_muted=FALLBACK_COLORS["text_muted"],
+            background=FALLBACK_COLORS["background"],
+            surface=FALLBACK_COLORS["surface"],
+            panel=FALLBACK_COLORS["panel"],
+            border=FALLBACK_COLORS["border"],
+        )
+
         expected_levels = ["DEBUG", "INFO", "SUCCESS", "WARNING", "ERROR", "CRITICAL"]
         for level in expected_levels:
-            assert level in LogPane.LEVEL_COLORS
-
-    def test_level_colors_are_strings(self) -> None:
-        """Test all level colors are valid strings."""
-        for color in LogPane.LEVEL_COLORS.values():
+            color = colors.level_color(level)
             assert isinstance(color, str)
-            assert len(color) > 0
+            assert color.startswith("#") or color in ("dim", "bold")
 
 
 class TestLogPaneAddLog:
