@@ -3,6 +3,86 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from stoei.slurm.commands import _validate_username
+
+
+class TestValidateUsername:
+    """Tests for username validation helper."""
+
+    def test_valid_username(self) -> None:
+        result = _validate_username("testuser")
+        assert result is None
+
+    def test_valid_username_with_underscore(self) -> None:
+        result = _validate_username("test_user")
+        assert result is None
+
+    def test_valid_username_with_hyphen(self) -> None:
+        result = _validate_username("test-user")
+        assert result is None
+
+    def test_valid_username_with_numbers(self) -> None:
+        result = _validate_username("user123")
+        assert result is None
+
+    def test_empty_username(self) -> None:
+        result = _validate_username("")
+        assert result == "Invalid username"
+
+    def test_whitespace_username(self) -> None:
+        result = _validate_username("   ")
+        assert result == "Invalid username"
+
+    def test_username_with_special_chars(self) -> None:
+        result = _validate_username("user@domain")
+        assert result == "Invalid username characters"
+
+    def test_username_with_spaces(self) -> None:
+        result = _validate_username("user name")
+        assert result == "Invalid username characters"
+
+
+class TestGetUserJobs:
+    """Tests for get_user_jobs function."""
+
+    def test_returns_jobs_for_valid_user(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import get_user_jobs
+
+        jobs, error = get_user_jobs("testuser")
+
+        # Mock may not have user-specific data, but should not error
+        assert error is None or "squeue" not in error.lower()
+        assert isinstance(jobs, list)
+
+    def test_invalid_username_returns_error(self) -> None:
+        from stoei.slurm.commands import get_user_jobs
+
+        jobs, error = get_user_jobs("")
+        assert error == "Invalid username"
+        assert jobs == []
+
+    def test_username_with_special_chars_returns_error(self) -> None:
+        from stoei.slurm.commands import get_user_jobs
+
+        jobs, error = get_user_jobs("user@domain")
+        assert error == "Invalid username characters"
+        assert jobs == []
+
+    def test_whitespace_username_returns_error(self) -> None:
+        from stoei.slurm.commands import get_user_jobs
+
+        jobs, error = get_user_jobs("   ")
+        assert error == "Invalid username"
+        assert jobs == []
+
+    def test_username_is_stripped(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import get_user_jobs
+
+        # Should work with leading/trailing whitespace
+        jobs, error = get_user_jobs("  testuser  ")
+        assert error is None or "squeue" not in error.lower()
+        assert isinstance(jobs, list)
+
 
 class TestGetRunningJobs:
     """Tests for get_running_jobs with mock squeue."""

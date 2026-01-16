@@ -1404,3 +1404,78 @@ class NodeInfoScreen(Screen[None]):
     def action_close(self) -> None:
         """Close the modal."""
         self.dismiss(None)
+
+
+class UserInfoScreen(Screen[None]):
+    """Modal screen to display user information and their jobs."""
+
+    BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
+        ("escape", "close", "Close"),
+        ("q", "close", "Close"),
+    )
+
+    def __init__(
+        self,
+        username: str,
+        user_info: str,
+        error: str | None = None,
+    ) -> None:
+        """Initialize the user info screen.
+
+        Args:
+            username: The username being displayed.
+            user_info: Formatted user information string.
+            error: Optional error message if user info couldn't be retrieved.
+        """
+        super().__init__()
+        self.username = username
+        self.user_info = user_info
+        self.error = error
+
+    def compose(self) -> ComposeResult:
+        """Create the user info display layout.
+
+        Yields:
+            The widgets that make up the user info display.
+        """
+        with Vertical():
+            with Container(id="user-info-header"):
+                yield Static("👤  [bold]User Details[/bold]", id="user-info-title")
+                yield Static(f"User: [bold cyan]{self.username}[/bold cyan]", id="user-info-subtitle")
+
+            if self.error:
+                with Container(id="error-container"):
+                    yield Static("⚠️  [bold]Error[/bold]", id="error-icon")
+                    yield Static(self.error, id="error-text")
+            else:
+                with VerticalScroll(id="user-info-content"):
+                    yield Static(self.user_info, id="user-info-text")
+
+            with Container(id="user-info-footer"):
+                yield Static(
+                    "[bold]↑↓[/bold] Scroll | [bold]Esc[/bold] Close",
+                    id="hint-text",
+                )
+                yield Button("✕ Close", variant="default", id="close-button")
+
+    def on_mount(self) -> None:
+        """Focus the content area on mount for scrolling."""
+        try:
+            content = self.query_one("#user-info-content", VerticalScroll)
+            content.focus()
+        except Exception:
+            # If no content (error case), focus the close button
+            self.query_one("#close-button", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button press.
+
+        Args:
+            event: The button press event.
+        """
+        if event.button.id == "close-button":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        """Close the modal."""
+        self.dismiss(None)

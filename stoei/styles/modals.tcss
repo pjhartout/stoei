@@ -638,3 +638,101 @@ SettingsScreen #settings-cancel {
     margin: 0 1;
     background: $surface;
 }
+
+/* User Info Screen */
+UserInfoScreen {
+    layout: vertical;
+    background: $background;
+}
+
+UserInfoScreen > Vertical {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    background: $panel;
+}
+
+UserInfoScreen #user-info-header {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-bottom: heavy $accent;
+}
+
+UserInfoScreen #user-info-title {
+    width: 100%;
+    content-align: center middle;
+    color: $accent;
+    text-style: bold;
+}
+
+UserInfoScreen #user-info-subtitle {
+    width: 100%;
+    content-align: center middle;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+UserInfoScreen #user-info-content {
+    height: 1fr;
+    padding: 1 2;
+    background: $background;
+}
+
+UserInfoScreen #user-info-text {
+    width: 100%;
+    color: $foreground;
+}
+
+UserInfoScreen #error-container {
+    height: 1fr;
+    padding: 2;
+    content-align: center middle;
+    background: $background;
+}
+
+UserInfoScreen #error-icon {
+    width: 100%;
+    content-align: center middle;
+    color: $error;
+    text-style: bold;
+}
+
+UserInfoScreen #error-text {
+    width: 100%;
+    content-align: center middle;
+    color: $error;
+    margin-top: 1;
+}
+
+UserInfoScreen #user-info-footer {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-top: solid $border-muted;
+    layout: horizontal;
+    align: center middle;
+}
+
+UserInfoScreen #hint-text {
+    width: 1fr;
+    content-align: left middle;
+    color: $text-muted;
+    margin-right: 2;
+}
+
+UserInfoScreen #close-button {
+    width: auto;
+    min-width: 16;
+    background: $surface;
+}
+
+UserInfoScreen #close-button:focus {
+    border: tall $accent;
+}
+
+UserInfoScreen #user-info-content:focus {
+    border: tall $accent;
+}
