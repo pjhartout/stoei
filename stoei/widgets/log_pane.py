@@ -106,12 +106,12 @@ class LogPane(RichLog):
         # Type narrowing: we know this is a LoguruMessage at runtime
         if not hasattr(message, "record"):
             return
-        record = message.record  # type: ignore[union-attr]
+        record = message.record
         level_obj = record["level"]  # type: ignore[index]
-        level = level_obj.name  # type: ignore[union-attr]
+        level = level_obj.name
         msg = record["message"]  # type: ignore[index]
         timestamp_obj = record["time"]  # type: ignore[index]
-        timestamp = timestamp_obj.replace(tzinfo=None)  # type: ignore[union-attr]
+        timestamp = timestamp_obj.replace(tzinfo=None)
 
         # Call from app thread if available
         try:

@@ -1,7 +1,12 @@
 """Unit tests for the UserOverviewTab widget."""
 
 import pytest
-from stoei.widgets.user_overview import UserOverviewTab, UserPendingStats, UserStats
+from stoei.widgets.user_overview import (
+    UserEnergyStats,
+    UserOverviewTab,
+    UserPendingStats,
+    UserStats,
+)
 
 
 class TestUserStats:
@@ -683,3 +688,232 @@ class TestAggregatePendingUserStats:
             ]
             user_tab.update_pending_users(pending_users)
             assert len(user_tab.pending_users) == 2
+
+
+class TestUserEnergyStats:
+    """Tests for the UserEnergyStats dataclass."""
+
+    def test_user_energy_stats_creation(self) -> None:
+        """Test creating a UserEnergyStats object."""
+        stats = UserEnergyStats(
+            username="testuser",
+            total_energy_wh=1_234_567.0,
+            job_count=150,
+            gpu_hours=4500.0,
+            cpu_hours=89000.0,
+        )
+        assert stats.username == "testuser"
+        assert stats.total_energy_wh == 1_234_567.0
+        assert stats.job_count == 150
+        assert stats.gpu_hours == 4500.0
+        assert stats.cpu_hours == 89000.0
+
+
+class TestAggregateEnergyStats:
+    """Tests for aggregate_energy_stats method."""
+
+    def test_aggregate_energy_empty_list(self) -> None:
+        """Test aggregating energy stats from empty job list."""
+        result = UserOverviewTab.aggregate_energy_stats([])
+        assert result == []
+
+    def test_aggregate_energy_single_user(self) -> None:
+        """Test aggregating energy stats for a single user."""
+        # Job format: (JobID, User, Elapsed, NCPUS, AllocTRES)
+        jobs = [
+            ("12345", "user1", "01:00:00", "32", "cpu=32,mem=256G,gres/gpu:h200=8"),
+        ]
+        result = UserOverviewTab.aggregate_energy_stats(jobs)
+        assert len(result) == 1
+        assert result[0].username == "user1"
+        assert result[0].job_count == 1
+        assert result[0].gpu_hours == 8.0  # 8 GPUs * 1 hour
+        assert result[0].cpu_hours == 32.0  # 32 CPUs * 1 hour
+        # Energy: 8 H200 GPUs * 700W * 1h + 32 CPUs * 10W * 1h = 5600 + 320 = 5920 Wh
+        assert result[0].total_energy_wh == 5920.0
+
+    def test_aggregate_energy_multiple_users(self) -> None:
+        """Test aggregating energy stats for multiple users."""
+        jobs = [
+            ("12345", "user1", "02:00:00", "32", "cpu=32,mem=256G,gres/gpu:a100=4"),
+            ("12346", "user2", "01:00:00", "64", "cpu=64,mem=512G,gres/gpu:h200=8"),
+            ("12347", "user1", "00:30:00", "16", "cpu=16,mem=128G,gres/gpu:a100=2"),
+        ]
+        result = UserOverviewTab.aggregate_energy_stats(jobs)
+        assert len(result) == 2
+
+        # Find user1 and user2
+        user1 = next(u for u in result if u.username == "user1")
+        user2 = next(u for u in result if u.username == "user2")
+
+        assert user1.job_count == 2
+        assert user2.job_count == 1
+
+        # User1: 4 A100 * 2h + 2 A100 * 0.5h = 8 + 1 = 9 GPU-hours
+        assert user1.gpu_hours == 9.0
+
+        # User2: 8 H200 * 1h = 8 GPU-hours
+        assert user2.gpu_hours == 8.0
+
+    def test_aggregate_energy_with_days(self) -> None:
+        """Test aggregating energy with multi-day jobs."""
+        jobs = [
+            ("12345", "user1", "1-12:00:00", "64", "cpu=64,mem=512G,gres/gpu:h200=8"),
+        ]
+        result = UserOverviewTab.aggregate_energy_stats(jobs)
+        assert len(result) == 1
+
+        # Duration: 1 day + 12 hours = 36 hours
+        assert result[0].gpu_hours == 8.0 * 36.0  # 288 GPU-hours
+        assert result[0].cpu_hours == 64.0 * 36.0  # 2304 CPU-hours
+
+    def test_aggregate_energy_sorted_by_energy(self) -> None:
+        """Test that results are sorted by energy (descending)."""
+        jobs = [
+            ("12345", "small_user", "01:00:00", "8", "cpu=8,mem=32G"),
+            ("12346", "big_user", "10:00:00", "128", "cpu=128,mem=1024G,gres/gpu:h200=16"),
+            ("12347", "medium_user", "02:00:00", "32", "cpu=32,mem=256G,gres/gpu:a100=4"),
+        ]
+        result = UserOverviewTab.aggregate_energy_stats(jobs)
+        assert len(result) == 3
+
+        # Should be sorted by total_energy_wh descending
+        assert result[0].username == "big_user"
+        assert result[1].username == "medium_user"
+        assert result[2].username == "small_user"
+
+    def test_aggregate_energy_no_gpus(self) -> None:
+        """Test aggregating energy with CPU-only jobs."""
+        jobs = [
+            ("12345", "user1", "02:00:00", "64", "cpu=64,mem=256G"),
+        ]
+        result = UserOverviewTab.aggregate_energy_stats(jobs)
+        assert len(result) == 1
+        assert result[0].gpu_hours == 0.0
+        assert result[0].cpu_hours == 128.0  # 64 CPUs * 2 hours
+        # Energy: 64 CPUs * 10W * 2h = 1280 Wh
+        assert result[0].total_energy_wh == 1280.0
+
+    def test_aggregate_energy_skips_generic_when_specific_exists(self) -> None:
+        """Test that generic GPU entries are skipped when specific types exist."""
+        jobs = [
+            # Both generic and specific GPU types (should only count specific)
+            ("12345", "user1", "01:00:00", "32", "cpu=32,mem=256G,gres/gpu=8,gres/gpu:h200=8"),
+        ]
+        result = UserOverviewTab.aggregate_energy_stats(jobs)
+        assert len(result) == 1
+        # Should only count 8 GPUs, not 16
+        assert result[0].gpu_hours == 8.0
+
+    def test_aggregate_energy_zero_elapsed(self) -> None:
+        """Test that jobs with zero elapsed time are skipped."""
+        jobs = [
+            ("12345", "user1", "00:00:00", "32", "cpu=32,mem=256G,gres/gpu:h200=8"),
+            ("12346", "user1", "01:00:00", "32", "cpu=32,mem=256G,gres/gpu:h200=8"),
+        ]
+        result = UserOverviewTab.aggregate_energy_stats(jobs)
+        assert len(result) == 1
+        assert result[0].job_count == 1  # Only the non-zero job counted
+
+    def test_aggregate_energy_empty_username(self) -> None:
+        """Test that jobs with empty username are skipped."""
+        jobs = [
+            ("12345", "", "01:00:00", "32", "cpu=32,mem=256G,gres/gpu:h200=8"),
+            ("12346", "user1", "01:00:00", "32", "cpu=32,mem=256G,gres/gpu:h200=8"),
+        ]
+        result = UserOverviewTab.aggregate_energy_stats(jobs)
+        assert len(result) == 1
+        assert result[0].username == "user1"
+
+
+class TestUserOverviewSubtabs:
+    """Tests for sub-tab functionality in UserOverviewTab."""
+
+    def test_initial_subtab_is_running(self) -> None:
+        """Test that initial active subtab is 'running'."""
+        tab = UserOverviewTab(id="test-tab")
+        assert tab.active_subtab == "running"
+
+    async def test_switch_subtab_pending(self) -> None:
+        """Test switching to pending subtab."""
+        from textual.app import App
+
+        class SubtabTestApp(App[None]):
+            def compose(self):
+                yield UserOverviewTab(id="user-overview")
+
+        app = SubtabTestApp()
+        async with app.run_test(size=(80, 24)):
+            user_tab = app.query_one("#user-overview", UserOverviewTab)
+
+            # Initially running
+            assert user_tab.active_subtab == "running"
+
+            # Switch to pending
+            user_tab.switch_subtab("pending")
+            assert user_tab.active_subtab == "pending"
+
+    async def test_switch_subtab_energy(self) -> None:
+        """Test switching to energy subtab."""
+        from textual.app import App
+
+        class SubtabTestApp(App[None]):
+            def compose(self):
+                yield UserOverviewTab(id="user-overview")
+
+        app = SubtabTestApp()
+        async with app.run_test(size=(80, 24)):
+            user_tab = app.query_one("#user-overview", UserOverviewTab)
+
+            # Switch to energy
+            user_tab.switch_subtab("energy")
+            assert user_tab.active_subtab == "energy"
+
+    async def test_switch_subtab_same_tab_no_change(self) -> None:
+        """Test that switching to the same subtab does nothing."""
+        from textual.app import App
+
+        class SubtabTestApp(App[None]):
+            def compose(self):
+                yield UserOverviewTab(id="user-overview")
+
+        app = SubtabTestApp()
+        async with app.run_test(size=(80, 24)):
+            user_tab = app.query_one("#user-overview", UserOverviewTab)
+
+            # Switch to running (already active)
+            user_tab.switch_subtab("running")
+            assert user_tab.active_subtab == "running"
+
+    async def test_update_energy_users(self) -> None:
+        """Test updating energy users table."""
+        from textual.app import App
+
+        class EnergyTestApp(App[None]):
+            def compose(self):
+                yield UserOverviewTab(id="user-overview")
+
+        app = EnergyTestApp()
+        async with app.run_test(size=(80, 24)):
+            user_tab = app.query_one("#user-overview", UserOverviewTab)
+            energy_users = [
+                UserEnergyStats(
+                    username="user1",
+                    total_energy_wh=1_234_567.0,
+                    job_count=150,
+                    gpu_hours=4500.0,
+                    cpu_hours=89000.0,
+                ),
+                UserEnergyStats(
+                    username="user2",
+                    total_energy_wh=500_000.0,
+                    job_count=75,
+                    gpu_hours=1500.0,
+                    cpu_hours=45000.0,
+                ),
+            ]
+            user_tab.update_energy_users(energy_users)
+            # Should be sorted by energy descending
+            assert len(user_tab.energy_users) == 2
+            assert user_tab.energy_users[0].username == "user1"
+            assert user_tab.energy_users[1].username == "user2"

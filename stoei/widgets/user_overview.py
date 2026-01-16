@@ -1,22 +1,35 @@
-"""User overview tab widget."""
+"""User overview tab widget with sub-tabs for running, pending, and energy views."""
 
 import contextlib
 import re
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import ClassVar, TypedDict
+from typing import ClassVar, Literal, TypedDict
 
 from textual.app import ComposeResult
-from textual.containers import VerticalScroll
+from textual.binding import Binding
+from textual.containers import Container, Horizontal, VerticalScroll
+from textual.message import Message
 from textual.widgets import DataTable, Static
 
+from stoei.logger import get_logger
 from stoei.slurm.array_parser import parse_array_size
+from stoei.slurm.energy import (
+    calculate_job_energy_wh,
+    format_energy,
+    parse_cpu_count_from_tres,
+    parse_elapsed_to_seconds,
+    parse_gpu_info_from_tres,
+)
 from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
     calculate_total_gpus,
     format_gpu_types,
+    has_specific_gpu_types,
     parse_gpu_entries,
 )
+
+logger = get_logger(__name__)
 
 
 @dataclass
@@ -65,8 +78,45 @@ class _UserPendingDataDict(TypedDict):
     gpu_types: dict[str, int]
 
 
+@dataclass
+class UserEnergyStats:
+    """User energy usage statistics over a historical period."""
+
+    username: str
+    total_energy_wh: float  # Total energy in Watt-hours
+    job_count: int  # Number of completed jobs
+    gpu_hours: float  # Total GPU-hours used
+    cpu_hours: float  # Total CPU-hours used
+
+
+class _UserEnergyDataDict(TypedDict):
+    """Internal dictionary structure for aggregating user energy statistics."""
+
+    total_energy_wh: float
+    job_count: int
+    gpu_hours: float
+    cpu_hours: float
+
+
+class SubtabSwitched(Message):
+    """Message sent when a sub-tab within the user overview is switched."""
+
+    def __init__(self, subtab_name: str) -> None:
+        """Initialize the SubtabSwitched message.
+
+        Args:
+            subtab_name: Name of the sub-tab that was switched to.
+        """
+        super().__init__()
+        self.subtab_name = subtab_name
+
+
+# Type alias for subtab names
+SubtabName = Literal["running", "pending", "energy"]
+
+
 class UserOverviewTab(VerticalScroll):
-    """Tab widget displaying user-level overview."""
+    """Tab widget displaying user-level overview with sub-tabs."""
 
     DEFAULT_CSS: ClassVar[str] = """
     UserOverviewTab {
@@ -74,10 +124,40 @@ class UserOverviewTab(VerticalScroll):
         width: 100%;
     }
 
-    #pending-overview-title {
-        margin-top: 1;
+    #user-subtab-header {
+        height: 1;
+        width: 100%;
+        margin-bottom: 1;
+    }
+
+    .subtab-link {
+        margin-right: 2;
+    }
+
+    .subtab-link.active {
+        text-style: bold;
+    }
+
+    .subtab-content {
+        height: 1fr;
+        width: 100%;
+    }
+
+    .subtab-hidden {
+        display: none;
+    }
+
+    #energy-period-info {
+        margin-bottom: 1;
+        color: $text-muted;
     }
     """
+
+    BINDINGS: ClassVar[list[Binding]] = [
+        Binding("r", "switch_subtab_running", "Running", show=False),
+        Binding("p", "switch_subtab_pending", "Pending", show=False),
+        Binding("e", "switch_subtab_energy", "Energy", show=False),
+    ]
 
     def __init__(
         self,
@@ -98,13 +178,35 @@ class UserOverviewTab(VerticalScroll):
         super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.users: list[UserStats] = []
         self.pending_users: list[UserPendingStats] = []
+        self.energy_users: list[UserEnergyStats] = []
+        self._active_subtab: SubtabName = "running"
 
     def compose(self) -> ComposeResult:
-        """Create the user overview layout."""
-        yield Static("[bold]👥 User Overview (Running)[/bold]", id="user-overview-title")
-        yield DataTable(id="users_table")
-        yield Static("[bold]⏳ Pending Resources by User[/bold]", id="pending-overview-title")
-        yield DataTable(id="pending_users_table")
+        """Create the user overview layout with sub-tabs."""
+        # Sub-tab header with keyboard shortcuts
+        with Horizontal(id="user-subtab-header"):
+            yield Static(
+                "[bold]👥 User Overview[/bold]  "
+                "[bold reverse] r [/bold reverse]Running  "
+                "[dim]p[/dim] Pending  "
+                "[dim]e[/dim] Energy",
+                id="subtab-header-text",
+            )
+
+        # Running users sub-tab (default visible)
+        with Container(id="subtab-running", classes="subtab-content"):
+            yield DataTable(id="users_table")
+
+        # Pending users sub-tab (hidden by default)
+        with Container(id="subtab-pending", classes="subtab-content subtab-hidden"):
+            yield DataTable(id="pending_users_table")
+
+        # Energy usage sub-tab (hidden by default)
+        with Container(id="subtab-energy", classes="subtab-content subtab-hidden"):
+            yield Static(
+                "[dim]Energy usage over the last 6 months (100% utilization estimate)[/dim]", id="energy-period-info"
+            )
+            yield DataTable(id="energy_users_table")
 
     def on_mount(self) -> None:
         """Initialize the data tables."""
@@ -133,11 +235,103 @@ class UserOverviewTab(VerticalScroll):
             "GPU Types",
         )
 
+        # Initialize energy users table
+        energy_table = self.query_one("#energy_users_table", DataTable)
+        energy_table.cursor_type = "row"
+        energy_table.add_columns(
+            "User",
+            "Jobs (6mo)",
+            "Energy",
+            "GPU-hours",
+            "CPU-hours",
+        )
+
         # If we already have data, update the tables
         if self.users:
             self.update_users(self.users)
         if self.pending_users:
             self.update_pending_users(self.pending_users)
+        if self.energy_users:
+            self.update_energy_users(self.energy_users)
+
+    @property
+    def active_subtab(self) -> SubtabName:
+        """Get the currently active sub-tab name."""
+        return self._active_subtab
+
+    def switch_subtab(self, subtab: SubtabName) -> None:
+        """Switch to a different sub-tab.
+
+        Args:
+            subtab: Name of the sub-tab to switch to ('running', 'pending', or 'energy').
+        """
+        if subtab == self._active_subtab:
+            return
+
+        logger.debug(f"Switching user overview subtab from {self._active_subtab} to {subtab}")
+
+        # Update header to show active tab
+        self._update_subtab_header(subtab)
+
+        # Hide all subtab containers
+        for container_id in ["subtab-running", "subtab-pending", "subtab-energy"]:
+            try:
+                container = self.query_one(f"#{container_id}", Container)
+                container.add_class("subtab-hidden")
+            except Exception as exc:
+                logger.debug(f"Failed to hide container {container_id}: {exc}")
+
+        # Show the active subtab container
+        active_container_id = f"subtab-{subtab}"
+        try:
+            active_container = self.query_one(f"#{active_container_id}", Container)
+            active_container.remove_class("subtab-hidden")
+
+            # Focus the appropriate table
+            table_ids = {
+                "running": "users_table",
+                "pending": "pending_users_table",
+                "energy": "energy_users_table",
+            }
+            table_id = table_ids.get(subtab)
+            if table_id:
+                table = self.query_one(f"#{table_id}", DataTable)
+                table.focus()
+        except Exception as exc:
+            logger.debug(f"Failed to show container {active_container_id}: {exc}")
+
+        self._active_subtab = subtab
+        self.post_message(SubtabSwitched(subtab))
+
+    def _update_subtab_header(self, active: SubtabName) -> None:
+        """Update the sub-tab header to highlight the active tab.
+
+        Args:
+            active: The active sub-tab name.
+        """
+        try:
+            header = self.query_one("#subtab-header-text", Static)
+
+            # Build header with active tab highlighted
+            running_style = "[bold reverse] r [/bold reverse]Running" if active == "running" else "[dim]r[/dim] Running"
+            pending_style = "[bold reverse] p [/bold reverse]Pending" if active == "pending" else "[dim]p[/dim] Pending"
+            energy_style = "[bold reverse] e [/bold reverse]Energy" if active == "energy" else "[dim]e[/dim] Energy"
+
+            header.update(f"[bold]👥 User Overview[/bold]  {running_style}  {pending_style}  {energy_style}")
+        except Exception as exc:
+            logger.debug(f"Failed to update subtab header: {exc}")
+
+    def action_switch_subtab_running(self) -> None:
+        """Switch to the Running sub-tab."""
+        self.switch_subtab("running")
+
+    def action_switch_subtab_pending(self) -> None:
+        """Switch to the Pending sub-tab."""
+        self.switch_subtab("pending")
+
+    def action_switch_subtab_energy(self) -> None:
+        """Switch to the Energy sub-tab."""
+        self.switch_subtab("energy")
 
     def update_users(self, users: list[UserStats]) -> None:
         """Update the user data table.
@@ -214,6 +408,42 @@ class UserOverviewTab(VerticalScroll):
         if cursor_row is not None and pending_table.row_count > 0:
             new_row = min(cursor_row, pending_table.row_count - 1)
             pending_table.move_cursor(row=new_row)
+
+    def update_energy_users(self, energy_users: list[UserEnergyStats]) -> None:
+        """Update the energy users data table.
+
+        Args:
+            energy_users: List of user energy statistics to display.
+        """
+        try:
+            energy_table = self.query_one("#energy_users_table", DataTable)
+        except Exception:
+            # Table might not be mounted yet, store energy_users for later
+            self.energy_users = energy_users
+            return
+
+        # Save cursor position
+        cursor_row = energy_table.cursor_row
+
+        energy_table.clear()
+
+        # Sort by total energy (descending) to show heaviest users first
+        sorted_users = sorted(energy_users, key=lambda u: u.total_energy_wh, reverse=True)
+        self.energy_users = sorted_users
+
+        for user in sorted_users:
+            energy_table.add_row(
+                user.username,
+                str(user.job_count),
+                format_energy(user.total_energy_wh),
+                f"{user.gpu_hours:,.0f}",
+                f"{user.cpu_hours:,.0f}",
+            )
+
+        # Restore cursor position
+        if cursor_row is not None and energy_table.row_count > 0:
+            new_row = min(cursor_row, energy_table.row_count - 1)
+            energy_table.move_cursor(row=new_row)
 
     @staticmethod
     def _parse_tres(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
@@ -514,3 +744,109 @@ class UserOverviewTab(VerticalScroll):
 
         # Sort by pending CPUs (descending) to show heaviest users first
         return sorted(result, key=lambda u: u.pending_cpus, reverse=True)
+
+    @staticmethod
+    def aggregate_energy_stats(jobs: list[tuple[str, ...]]) -> list[UserEnergyStats]:
+        """Aggregate job history into per-user energy statistics.
+
+        Calculates energy consumption based on GPU and CPU usage, assuming 100%
+        utilization for the job duration.
+
+        Args:
+            jobs: List of job tuples from sacct energy history query.
+                Format: (JobID, User, Elapsed, NCPUS, AllocTRES).
+
+        Returns:
+            List of UserEnergyStats objects sorted by total energy (descending).
+        """
+        # Job tuple indices for energy history format
+        user_index = 1
+        elapsed_index = 2
+        ncpus_index = 3
+        tres_index = 4
+        min_job_fields = 5
+        seconds_per_hour = 3600.0
+
+        def _default_energy_data() -> _UserEnergyDataDict:
+            """Create default energy data dictionary."""
+            return {
+                "total_energy_wh": 0.0,
+                "job_count": 0,
+                "gpu_hours": 0.0,
+                "cpu_hours": 0.0,
+            }
+
+        user_data: dict[str, _UserEnergyDataDict] = defaultdict(_default_energy_data)
+
+        for job in jobs:
+            if len(job) < min_job_fields:
+                continue
+
+            username = job[user_index].strip() if len(job) > user_index else ""
+            if not username:
+                continue
+
+            elapsed_str = job[elapsed_index].strip() if len(job) > elapsed_index else ""
+            duration_seconds = parse_elapsed_to_seconds(elapsed_str)
+            if duration_seconds <= 0:
+                continue
+
+            duration_hours = duration_seconds / seconds_per_hour
+
+            # Parse CPU count - try NCPUS field first, then TRES
+            ncpus_str = job[ncpus_index].strip() if len(job) > ncpus_index else ""
+            try:
+                cpu_count = int(ncpus_str) if ncpus_str else 0
+            except ValueError:
+                cpu_count = 0
+
+            # Fall back to TRES for CPU count if NCPUS is missing
+            tres_str = job[tres_index].strip() if len(job) > tres_index else ""
+            if cpu_count == 0 and tres_str:
+                cpu_count = parse_cpu_count_from_tres(tres_str)
+
+            # Parse GPU info from TRES
+            gpu_entries = parse_gpu_info_from_tres(tres_str)
+
+            # Calculate total GPUs, skipping generic if specific types exist
+            gpu_count = 0
+            primary_gpu_type = "gpu"
+            has_specific = has_specific_gpu_types(gpu_entries)
+
+            for gpu_type, count in gpu_entries:
+                if has_specific and gpu_type.lower() == "gpu":
+                    continue
+                gpu_count += count
+                if gpu_type.lower() != "gpu":
+                    primary_gpu_type = gpu_type
+
+            # Calculate energy for this job
+            energy_wh = calculate_job_energy_wh(
+                gpu_count=gpu_count,
+                gpu_type=primary_gpu_type,
+                cpu_count=cpu_count,
+                duration_seconds=duration_seconds,
+            )
+
+            # Update user aggregates
+            data = user_data[username]
+            data["total_energy_wh"] += energy_wh
+            data["job_count"] += 1
+            data["gpu_hours"] += gpu_count * duration_hours
+            data["cpu_hours"] += cpu_count * duration_hours
+
+        # Convert to UserEnergyStats list
+        result: list[UserEnergyStats] = []
+        for username, data in user_data.items():
+            result.append(
+                UserEnergyStats(
+                    username=username,
+                    total_energy_wh=data["total_energy_wh"],
+                    job_count=data["job_count"],
+                    gpu_hours=data["gpu_hours"],
+                    cpu_hours=data["cpu_hours"],
+                )
+            )
+
+        # Sort by total energy (descending) to show heaviest users first
+        return sorted(result, key=lambda u: u.total_energy_wh, reverse=True)

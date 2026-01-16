@@ -23,6 +23,7 @@ from stoei.slurm.array_parser import parse_array_size
 from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
     cancel_job,
+    get_all_job_history_6months,
     get_all_running_jobs,
     get_cluster_nodes,
     get_job_history,
@@ -77,6 +78,7 @@ LOADING_STEPS = [
     LoadingStep("user_running", "Fetching your running jobs...", weight=1.0),
     LoadingStep("user_history", "Fetching your job history...", weight=2.0),
     LoadingStep("all_running", "Fetching all running jobs...", weight=2.0),
+    LoadingStep("energy_history", "Fetching 6-month energy history...", weight=3.0),
     LoadingStep("aggregate_users", "Aggregating user statistics...", weight=1.0),
     LoadingStep("cluster_stats", "Calculating cluster statistics...", weight=1.0),
     LoadingStep("finalize", "Finalizing...", weight=0.5),
@@ -141,6 +143,7 @@ class SlurmMonitor(App[None]):
         self._log_sink_id: int | None = None
         self._cluster_nodes: list[dict[str, str]] = []
         self._all_users_jobs: list[tuple[str, ...]] = []
+        self._energy_history_jobs: list[tuple[str, ...]] = []  # 6-month energy history (loaded once at startup)
         self._is_narrow: bool = False
         self._loading_screen: LoadingScreen | None = None
         self._job_row_keys: dict[str, RowKey] = {}
@@ -259,9 +262,9 @@ class SlurmMonitor(App[None]):
         self._last_history_stats = (total_jobs, total_requeues, max_requeues)
 
         # Build job cache from fetched data
-        self._loading_update_step(8)
+        self._loading_update_step(9)
         self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-        self._loading_complete_step(8, "Ready")
+        self._loading_complete_step(9, "Ready")
 
         # Mark loading complete and transition
         if self._loading_screen:
@@ -294,7 +297,10 @@ class SlurmMonitor(App[None]):
         # Step 5: Fetch all running jobs (for user overview)
         self._load_step_all_running_jobs()
 
-        # Steps 6-7: Calculate statistics
+        # Step 6: Fetch 6-month energy history (only at startup)
+        self._load_step_energy_history()
+
+        # Steps 7-8: Calculate statistics
         self._load_step_statistics()
 
         return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
@@ -361,15 +367,27 @@ class SlurmMonitor(App[None]):
             self._loading_complete_step(5, f"{len(all_running)} jobs")
         self._all_users_jobs = all_running
 
-    def _load_step_statistics(self) -> None:
-        """Execute steps 6-7: Calculate user and cluster statistics."""
+    def _load_step_energy_history(self) -> None:
+        """Execute step 6: Fetch 6-month energy history (only at startup)."""
         self._loading_update_step(6)
-        user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
-        self._loading_complete_step(6, f"{len(user_stats)} users")
+        energy_jobs, error = get_all_job_history_6months()
+        if error:
+            self._loading_fail_step(6, error)
+            logger.warning(f"Failed to get 6-month energy history: {error}")
+            energy_jobs = []
+        else:
+            self._loading_complete_step(6, f"{len(energy_jobs)} jobs")
+        self._energy_history_jobs = energy_jobs
 
+    def _load_step_statistics(self) -> None:
+        """Execute steps 7-8: Calculate user and cluster statistics."""
         self._loading_update_step(7)
+        user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
+        self._loading_complete_step(7, f"{len(user_stats)} users")
+
+        self._loading_update_step(8)
         cluster_stats = self._calculate_cluster_stats()
-        self._loading_complete_step(7, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
+        self._loading_complete_step(8, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
 
     def _show_slurm_error(self) -> None:
         """Show SLURM unavailable error screen."""
@@ -1244,7 +1262,7 @@ class SlurmMonitor(App[None]):
         return node_infos
 
     def _update_user_overview(self) -> None:
-        """Update the user overview tab with running and pending job stats."""
+        """Update the user overview tab with running, pending, and energy stats."""
         try:
             user_tab = self.query_one("#user-overview", UserOverviewTab)
 
@@ -1265,6 +1283,13 @@ class SlurmMonitor(App[None]):
             pending_stats = UserOverviewTab.aggregate_pending_user_stats(self._all_users_jobs)
             logger.debug(f"Updating pending user stats with {len(pending_stats)} users")
             user_tab.update_pending_users(pending_stats)
+
+            # Energy stats (from 6-month history, loaded once at startup)
+            if self._energy_history_jobs:
+                energy_stats = UserOverviewTab.aggregate_energy_stats(self._energy_history_jobs)
+                job_count = len(self._energy_history_jobs)
+                logger.debug(f"Updating energy stats with {len(energy_stats)} users from {job_count} historical jobs")
+                user_tab.update_energy_users(energy_stats)
         except Exception as exc:
             logger.error(f"Failed to update user overview: {exc}", exc_info=True)
 

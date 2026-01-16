@@ -785,3 +785,82 @@ def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
 
     logger.debug(f"Found {len(jobs)} jobs for user {username}")
     return jobs, None
+
+
+# Fields for 6-month energy history query
+ENERGY_HISTORY_FIELDS = [
+    "JobID",
+    "User",
+    "Elapsed",
+    "NCPUS",
+    "AllocTRES",
+]
+
+# Number of months for energy history
+ENERGY_HISTORY_MONTHS = 6
+
+
+def get_all_job_history_6months() -> tuple[list[tuple[str, ...]], str | None]:
+    """Get 6 months of completed job history for all users.
+
+    This is used for energy consumption calculations. Only fetches completed
+    jobs (not running or pending) to get accurate elapsed times.
+
+    Returns:
+        Tuple of (jobs list, optional error message).
+        Each job tuple contains: (JobID, User, Elapsed, NCPUS, AllocTRES).
+    """
+    try:
+        sacct = resolve_executable("sacct")
+        format_str = ",".join(ENERGY_HISTORY_FIELDS)
+        command = [
+            sacct,
+            "--allusers",
+            f"--format={format_str}",
+            "-S",
+            f"now-{ENERGY_HISTORY_MONTHS}months",
+            "-X",  # No job steps, only main job entries
+            "-P",  # Parseable output with | delimiter
+            "--state=COMPLETED,FAILED,CANCELLED,TIMEOUT,NODE_FAIL,PREEMPTED",
+            "--noheader",
+        ]
+        logger.debug(f"Running sacct command for {ENERGY_HISTORY_MONTHS}-month energy history")
+
+        # Use longer timeout for potentially large query
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=60,  # 60 second timeout for large history
+            check=False,
+        )
+    except FileNotFoundError:
+        logger.exception("sacct not found")
+        return [], "sacct not found"
+    except subprocess.TimeoutExpired:
+        logger.exception("Timeout getting 6-month job history")
+        return [], "Timeout getting job history (try shorter period)"
+    except subprocess.SubprocessError:
+        logger.exception("Error getting 6-month job history")
+        return [], "Error getting job history"
+
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() or "Unknown error"
+        logger.warning(f"sacct returned non-zero exit code: {result.returncode}, error: {error_msg}")
+        return [], f"sacct error: {error_msg}"
+
+    # Parse pipe-delimited output
+    jobs: list[tuple[str, ...]] = []
+    lines = result.stdout.strip().split("\n")
+
+    for line in lines:
+        if not line.strip():
+            continue
+
+        parts = line.split("|")
+        # We expect 5 fields: JobID, User, Elapsed, NCPUS, AllocTRES
+        if len(parts) >= len(ENERGY_HISTORY_FIELDS):
+            jobs.append(tuple(parts[: len(ENERGY_HISTORY_FIELDS)]))
+
+    logger.info(f"Fetched {len(jobs)} jobs from {ENERGY_HISTORY_MONTHS}-month history for energy calculation")
+    return jobs, None

@@ -1,0 +1,71 @@
+{
+  "_comment": "TDP (Thermal Design Power) values in Watts for energy calculations. Edit this file to add or modify hardware TDP values.",
+  "_units": "All values are in Watts (W)",
+  "_source": "Values based on manufacturer specifications assuming 100% utilization",
+  
+  "gpu": {
+    "_comment": "GPU TDP values by model name (case-insensitive matching)",
+    "_default": 300,
+    
+    "NVIDIA Hopper/Ada": {
+      "H200": 700,
+      "H100": 700,
+      "L40S": 350,
+      "L40": 350,
+      "L4": 72
+    },
+    
+    "NVIDIA Ampere": {
+      "A100": 400,
+      "A100-80GB": 400,
+      "A100-40GB": 400,
+      "A40": 300,
+      "A30": 165,
+      "A16": 250,
+      "A10": 150,
+      "A10G": 150,
+      "A2": 60
+    },
+    
+    "NVIDIA Volta": {
+      "V100": 300,
+      "V100S": 250
+    },
+    
+    "NVIDIA Turing/Pascal": {
+      "T4": 70,
+      "P100": 250,
+      "P40": 250,
+      "P4": 75
+    },
+    
+    "NVIDIA RTX": {
+      "RTX6000": 300,
+      "RTX5000": 230,
+      "RTX4090": 450,
+      "RTX4080": 320,
+      "RTX3090": 350,
+      "RTX3080": 320
+    },
+    
+    "AMD Instinct": {
+      "MI300X": 750,
+      "MI300A": 760,
+      "MI250X": 560,
+      "MI250": 500,
+      "MI210": 300,
+      "MI100": 300,
+      "MI50": 300
+    },
+    
+    "Intel": {
+      "MAX1550": 600,
+      "MAX1100": 300
+    }
+  },
+  
+  "cpu": {
+    "_comment": "CPU TDP estimate per core. Server CPUs typically 150-300W for 32-64 cores.",
+    "_default_per_core": 10
+  }
+}
