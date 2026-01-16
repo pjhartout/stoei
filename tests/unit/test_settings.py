@@ -5,6 +5,7 @@ from pathlib import Path
 
 from stoei.settings import (
     DEFAULT_JOB_HISTORY_DAYS,
+    DEFAULT_LOG_VIEWER_LINES,
     DEFAULT_MAX_LOG_LINES,
     DEFAULT_REFRESH_INTERVAL,
     Settings,
@@ -23,6 +24,7 @@ def test_load_settings_defaults_when_missing(tmp_path: Path, monkeypatch) -> Non
     assert settings.max_log_lines == DEFAULT_MAX_LOG_LINES
     assert settings.refresh_interval == DEFAULT_REFRESH_INTERVAL
     assert settings.job_history_days == DEFAULT_JOB_HISTORY_DAYS
+    assert settings.log_viewer_lines == DEFAULT_LOG_VIEWER_LINES
 
 
 def test_save_settings_roundtrip(tmp_path: Path, monkeypatch) -> None:
@@ -34,6 +36,7 @@ def test_save_settings_roundtrip(tmp_path: Path, monkeypatch) -> None:
         max_log_lines=500,
         refresh_interval=10.0,
         job_history_days=14,
+        log_viewer_lines=5000,
     )
     save_settings(original)
     loaded = load_settings()
@@ -97,3 +100,39 @@ def test_load_settings_job_history_days_from_string(tmp_path: Path, monkeypatch)
     settings_path.write_text(json.dumps({"job_history_days": "21"}))
     settings = load_settings()
     assert settings.job_history_days == 21
+
+
+def test_load_settings_valid_log_viewer_lines(tmp_path: Path, monkeypatch) -> None:
+    """Valid log_viewer_lines values are loaded correctly."""
+    monkeypatch.setenv("STOEI_CONFIG_DIR", str(tmp_path))
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"log_viewer_lines": 5000}))
+    settings = load_settings()
+    assert settings.log_viewer_lines == 5000
+
+
+def test_load_settings_log_viewer_lines_below_min_defaults(tmp_path: Path, monkeypatch) -> None:
+    """Log viewer lines below minimum falls back to default."""
+    monkeypatch.setenv("STOEI_CONFIG_DIR", str(tmp_path))
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"log_viewer_lines": 100}))  # Below MIN_LOG_VIEWER_LINES (500)
+    settings = load_settings()
+    assert settings.log_viewer_lines == DEFAULT_LOG_VIEWER_LINES
+
+
+def test_load_settings_log_viewer_lines_above_max_defaults(tmp_path: Path, monkeypatch) -> None:
+    """Log viewer lines above maximum falls back to default."""
+    monkeypatch.setenv("STOEI_CONFIG_DIR", str(tmp_path))
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"log_viewer_lines": 200000}))  # Above MAX_LOG_VIEWER_LINES (100000)
+    settings = load_settings()
+    assert settings.log_viewer_lines == DEFAULT_LOG_VIEWER_LINES
+
+
+def test_load_settings_log_viewer_lines_from_string(tmp_path: Path, monkeypatch) -> None:
+    """Log viewer lines can be parsed from string."""
+    monkeypatch.setenv("STOEI_CONFIG_DIR", str(tmp_path))
+    settings_path = tmp_path / "settings.json"
+    settings_path.write_text(json.dumps({"log_viewer_lines": "8000"}))
+    settings = load_settings()
+    assert settings.log_viewer_lines == 8000

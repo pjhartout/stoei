@@ -3,6 +3,9 @@
 import asyncio
 import contextlib
 import re
+import shutil
+import subprocess
+from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import ClassVar
@@ -17,11 +20,50 @@ from textual.widgets import Button, Input, Static
 
 from stoei.editor import open_in_editor
 from stoei.logger import get_logger
+from stoei.settings import load_settings
 
 logger = get_logger(__name__)
 
 # Timeout for file loading operations (in seconds)
 FILE_LOAD_TIMEOUT = 1.0
+
+
+def _copy_to_clipboard(text: str) -> bool:
+    """Copy text to clipboard using system commands.
+
+    Tries multiple clipboard commands for cross-platform support.
+
+    Args:
+        text: Text to copy to clipboard.
+
+    Returns:
+        True if successful, False otherwise.
+    """
+    # Try different clipboard commands in order of preference
+    clipboard_cmds = [
+        ("xclip", ["-selection", "clipboard"]),
+        ("xsel", ["--clipboard", "--input"]),
+        ("wl-copy", []),
+        ("pbcopy", []),  # macOS
+    ]
+
+    for cmd, args in clipboard_cmds:
+        if shutil.which(cmd):
+            try:
+                # Commands are from a hardcoded list, not user input
+                subprocess.run(  # noqa: S603
+                    [cmd, *args],
+                    input=text,
+                    text=True,
+                    check=True,
+                    capture_output=True,
+                )
+            except (subprocess.CalledProcessError, OSError):
+                continue
+            else:
+                return True
+
+    return False
 
 
 class LogViewerScreen(Screen[None]):
@@ -30,6 +72,7 @@ class LogViewerScreen(Screen[None]):
     BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
         ("escape", "close_or_cancel_search", "Close"),
         ("q", "close", "Close"),
+        ("c", "copy_path", "Copy path"),
         ("e", "open_in_editor", "Open in $EDITOR"),
         ("g", "scroll_top", "Go to top"),
         ("G", "scroll_bottom", "Go to bottom"),
@@ -40,18 +83,16 @@ class LogViewerScreen(Screen[None]):
         ("N", "previous_match", "Previous match"),
     )
 
-    # Maximum file size to load (in bytes) - larger files are truncated from the start
-    MAX_FILE_SIZE: ClassVar[int] = 512 * 1024  # 512 KB
-
     # Spinner frames for loading indicator
     SPINNER_FRAMES: ClassVar[tuple[str, ...]] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
-    def __init__(self, filepath: str, log_type: str) -> None:
+    def __init__(self, filepath: str, log_type: str, max_lines: int | None = None) -> None:
         """Initialize the log viewer screen.
 
         Args:
             filepath: Path to the log file.
             log_type: Type of log (e.g., "stdout" or "stderr").
+            max_lines: Maximum number of lines to display (truncates from start if exceeded).
         """
         super().__init__()
         self.filepath = filepath
@@ -60,9 +101,16 @@ class LogViewerScreen(Screen[None]):
         self._raw_contents: str = ""  # Store raw content without line numbers
         self.load_error: str | None = None
         self.truncated: bool = False
+        self._total_lines: int = 0  # Total lines in file (for truncated files)
         self._start_line: int = 1  # Starting line number (for truncated files)
         self._show_line_numbers: bool = True  # Line numbers shown by default
         self._use_markup: bool = True  # Whether to use Rich markup (fallback to False on errors)
+        # Max lines from settings or default
+        if max_lines is not None:
+            self._max_lines = max_lines
+        else:
+            settings = load_settings()
+            self._max_lines = settings.log_viewer_lines
         # Search state
         self._search_term: str = ""
         self._search_active: bool = False
@@ -113,7 +161,7 @@ class LogViewerScreen(Screen[None]):
                 yield Static("", id="log-search-status")
 
             with Container(id="log-viewer-footer"):
-                hint = "[b]g/G[/b] ↕ [b]/[/b] Search [b]n/N[/b] Next/Prev [b]l[/b] Line# [b]Esc[/b]"
+                hint = "[b]c[/b] Copy path [b]g/G[/b] ↕ [b]/[/b] Search [b]n/N[/b] Next/Prev [b]l[/b] Line#"
                 yield Static(hint, id="log-hint-text")
                 yield Button("📝 Open in $EDITOR", variant="primary", id="editor-button")
                 yield Button("✕ Close", variant="default", id="log-close-button")
@@ -238,10 +286,12 @@ class LogViewerScreen(Screen[None]):
 
         # Add truncation header if needed
         if self.truncated:
-            truncated_size_mb = Path(self.filepath).stat().st_size / (1024 * 1024)
+            displayed_lines = self._raw_contents.count("\n") + 1
             truncate_header = (
-                f"[bold yellow]⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
-                f"of {truncated_size_mb:.1f} MB)[/bold yellow]\n"
+                f"[bold yellow]⚠ File truncated: showing last {displayed_lines:,} of "
+                f"{self._total_lines:,} lines[/bold yellow]\n"
+                f"[dim]Path: {self.filepath}[/dim]\n"
+                f"[dim]Press 'c' to copy filepath for detailed investigation[/dim]\n"
                 f"[bright_black]{'─' * 60}[/bright_black]\n\n"
             )
             content_with_markup = truncate_header + content_with_markup
@@ -266,10 +316,12 @@ class LogViewerScreen(Screen[None]):
 
         # Add plain truncation header if needed
         if self.truncated:
-            truncated_size_mb = Path(self.filepath).stat().st_size / (1024 * 1024)
+            displayed_lines = self._raw_contents.count("\n") + 1
             truncate_header = (
-                f"⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
-                f"of {truncated_size_mb:.1f} MB)\n"
+                f"⚠ File truncated: showing last {displayed_lines:,} of "
+                f"{self._total_lines:,} lines\n"
+                f"Path: {self.filepath}\n"
+                f"Press 'c' to copy filepath for detailed investigation\n"
                 f"{'─' * 60}\n\n"
             )
             content_plain = truncate_header + content_plain
@@ -291,39 +343,29 @@ class LogViewerScreen(Screen[None]):
                 total_line_count += chunk.count(b"\n")
         return total_line_count
 
-    def _load_truncated_file(self, path: Path, file_size: int) -> None:
-        """Load a truncated version of a large file.
+    def _load_truncated_file(self, path: Path, total_lines: int) -> None:
+        """Load the last N lines of a large file.
 
         Args:
             path: Path to the file.
-            file_size: Total size of the file in bytes.
+            total_lines: Total number of lines in the file.
         """
-        logger.debug(f"Loading truncated file: {path} (size: {file_size} bytes)")
+        logger.debug(f"Loading truncated file: {path} (total lines: {total_lines})")
         self.truncated = True
+        self._total_lines = total_lines
 
-        logger.debug("Counting total lines in file")
-        total_line_count = self._count_total_lines(path)
-        logger.debug(f"Total line count: {total_line_count}")
+        # Read last N lines using deque for memory efficiency
+        logger.debug(f"Reading last {self._max_lines} lines")
+        last_lines: deque[str] = deque(maxlen=self._max_lines)
+        with path.open(encoding="utf-8", errors="replace") as f:
+            for line in f:
+                last_lines.append(line.rstrip("\n"))
 
-        logger.debug(f"Seeking to position {file_size - self.MAX_FILE_SIZE}")
-        with path.open("rb") as f:
-            f.seek(file_size - self.MAX_FILE_SIZE)
-            tail_bytes = f.read()
-        logger.debug(f"Read {len(tail_bytes)} tail bytes")
-
-        tail_text = tail_bytes.decode("utf-8", errors="replace")
-        first_newline = tail_text.find("\n")
-        skipped_partial_lines = 0
-        if first_newline != -1:
-            tail_text = tail_text[first_newline + 1 :]
-            skipped_partial_lines = 1
-            logger.debug("Skipped partial first line")
-
-        tail_line_count = tail_text.count("\n") + 1
-        self._start_line = max(1, total_line_count - tail_line_count + 2 - skipped_partial_lines)
+        tail_line_count = len(last_lines)
+        self._start_line = max(1, total_lines - tail_line_count + 1)
         logger.debug(f"Tail contains {tail_line_count} lines, starting at line {self._start_line}")
 
-        self._raw_contents = tail_text
+        self._raw_contents = "\n".join(last_lines)
         logger.debug(f"Raw contents: {len(self._raw_contents)} characters")
 
         # Use the safe display content method
@@ -333,20 +375,21 @@ class LogViewerScreen(Screen[None]):
 
         logger.info(
             f"Loaded log file (truncated): {self.filepath} "
-            f"({file_size} bytes, showing last {self.MAX_FILE_SIZE} bytes, "
+            f"(showing last {tail_line_count} of {total_lines} lines, "
             f"starting at line {self._start_line})"
         )
 
     def _load_file(self) -> None:
         """Load the file contents.
 
-        For large files, only the last MAX_FILE_SIZE bytes are loaded
+        For large files (exceeding max_lines), only the last N lines are loaded
         to maintain UI responsiveness.
         """
         logger.debug(f"Loading file: {self.filepath}")
         path = Path(self.filepath)
         self.truncated = False
         self._start_line = 1
+        self._total_lines = 0
 
         if not path.exists():
             self.load_error = f"File does not exist: {self.filepath}"
@@ -370,22 +413,28 @@ class LogViewerScreen(Screen[None]):
                 logger.info(f"Loaded empty log file: {self.filepath}")
                 return
 
-            if file_size <= self.MAX_FILE_SIZE:
-                logger.debug(f"File within size limit ({self.MAX_FILE_SIZE} bytes), reading entire file")
+            # Count total lines first to determine if truncation is needed
+            logger.debug("Counting total lines in file")
+            total_lines = self._count_total_lines(path)
+            logger.debug(f"Total lines: {total_lines}, max_lines: {self._max_lines}")
+
+            if total_lines <= self._max_lines:
+                logger.debug(f"File within line limit ({self._max_lines} lines), reading entire file")
                 # Read raw file content - this may contain markup-like text
-                self._raw_contents = path.read_text()
+                self._raw_contents = path.read_text(encoding="utf-8", errors="replace")
                 logger.debug(f"Read {len(self._raw_contents)} characters from file")
                 self._start_line = 1
+                self._total_lines = total_lines
                 # Generate display content
                 logger.debug("Generating display content")
                 self.file_contents, self._use_markup = self._get_safe_display_content()
                 logger.debug(f"Display content generated: {len(self.file_contents)} chars, markup={self._use_markup}")
             else:
-                logger.debug("File exceeds size limit, loading truncated")
-                self._load_truncated_file(path, file_size)
+                logger.debug(f"File exceeds line limit ({total_lines} > {self._max_lines}), loading truncated")
+                self._load_truncated_file(path, total_lines)
                 return
 
-            logger.info(f"Loaded log file: {self.filepath} ({file_size} bytes)")
+            logger.info(f"Loaded log file: {self.filepath} ({total_lines} lines)")
         except PermissionError:
             self.load_error = f"Permission denied: {self.filepath}"
             logger.warning(self.load_error)
@@ -714,6 +763,20 @@ class LogViewerScreen(Screen[None]):
         """Close the modal."""
         self.dismiss(None)
 
+    def action_copy_path(self) -> None:
+        """Copy the file path to clipboard."""
+        if _copy_to_clipboard(self.filepath):
+            self.app.notify(f"Copied: {self.filepath}", timeout=3)
+            logger.debug(f"Copied filepath to clipboard: {self.filepath}")
+        else:
+            # Fallback: show the path in a notification that can be manually copied
+            self.app.notify(
+                f"Path: {self.filepath}\n(Clipboard unavailable - select from terminal)",
+                severity="warning",
+                timeout=10,
+            )
+            logger.warning("Clipboard not available, showing path in notification")
+
     def action_close_or_cancel_search(self) -> None:
         """Close the search bar if active, otherwise close the modal."""
         if self._search_active:
@@ -839,10 +902,12 @@ class LogViewerScreen(Screen[None]):
                 display_content = highlighted_content
 
             if self.truncated:
-                truncated_size_mb = Path(self.filepath).stat().st_size / (1024 * 1024)
+                displayed_lines = self._raw_contents.count("\n") + 1
                 truncate_header = (
-                    f"[bold yellow]⚠ File truncated (showing last ~{self.MAX_FILE_SIZE // 1024} KB "
-                    f"of {truncated_size_mb:.1f} MB)[/bold yellow]\n"
+                    f"[bold yellow]⚠ File truncated: showing last {displayed_lines:,} of "
+                    f"{self._total_lines:,} lines[/bold yellow]\n"
+                    f"[dim]Path: {self.filepath}[/dim]\n"
+                    f"[dim]Press 'c' to copy filepath for detailed investigation[/dim]\n"
                     f"[bright_black]{'─' * 60}[/bright_black]\n\n"
                 )
                 display_content = truncate_header + display_content

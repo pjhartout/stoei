@@ -699,6 +699,112 @@ class TestLogViewerFileLoading:
         assert problematic_content.strip() in screen.file_contents
 
 
+class TestLogViewerLineTruncation:
+    """Tests for line-based truncation in LogViewerScreen."""
+
+    def test_line_based_truncation_with_custom_max_lines(self, tmp_path: Path) -> None:
+        """Test that files exceeding max_lines are truncated."""
+        log_file = tmp_path / "large.log"
+        # Create 500 lines
+        lines = [f"Line {i:04d}\n" for i in range(500)]
+        log_file.write_text("".join(lines))
+
+        # Set max_lines to 100
+        screen = LogViewerScreen(str(log_file), "stdout", max_lines=100)
+        screen._load_file()
+
+        assert screen.load_error is None
+        assert screen.truncated is True
+        assert screen._total_lines == 500
+        # Should contain last 100 lines (400-499)
+        assert "Line 0400" in screen._raw_contents
+        assert "Line 0499" in screen._raw_contents
+        # Should NOT contain first lines
+        assert "Line 0000" not in screen._raw_contents
+        assert "Line 0099" not in screen._raw_contents
+
+    def test_file_under_max_lines_not_truncated(self, tmp_path: Path) -> None:
+        """Test that files under max_lines are not truncated."""
+        log_file = tmp_path / "small.log"
+        # Create 50 lines
+        lines = [f"Line {i:02d}\n" for i in range(50)]
+        log_file.write_text("".join(lines))
+
+        screen = LogViewerScreen(str(log_file), "stdout", max_lines=100)
+        screen._load_file()
+
+        assert screen.load_error is None
+        assert screen.truncated is False
+        # Should contain all lines
+        assert "Line 00" in screen._raw_contents
+        assert "Line 49" in screen._raw_contents
+
+    def test_truncation_header_shows_line_count(self, tmp_path: Path) -> None:
+        """Test that truncation header displays line counts."""
+        log_file = tmp_path / "large.log"
+        # Create 200 lines
+        lines = [f"Line {i:03d}\n" for i in range(200)]
+        log_file.write_text("".join(lines))
+
+        screen = LogViewerScreen(str(log_file), "stdout", max_lines=50)
+        screen._load_file()
+
+        assert screen.truncated is True
+        # Header should mention line counts
+        assert "showing last" in screen.file_contents.lower()
+        assert "200" in screen.file_contents  # Total lines
+        assert "50" in screen.file_contents  # Displayed lines
+        # Should mention filepath and copy hint
+        assert str(log_file) in screen.file_contents
+        assert "copy" in screen.file_contents.lower()
+
+    def test_start_line_calculated_correctly(self, tmp_path: Path) -> None:
+        """Test that _start_line is calculated correctly for truncated files."""
+        log_file = tmp_path / "large.log"
+        # Create 300 lines
+        lines = [f"Line {i:03d}\n" for i in range(300)]
+        log_file.write_text("".join(lines))
+
+        screen = LogViewerScreen(str(log_file), "stdout", max_lines=100)
+        screen._load_file()
+
+        assert screen.truncated is True
+        assert screen._total_lines == 300
+        # Start line should be 201 (300 - 100 + 1)
+        assert screen._start_line == 201
+
+    def test_max_lines_from_settings_default(self, tmp_path: Path) -> None:
+        """Test that max_lines uses settings default when not specified."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Line 1\n")
+
+        screen = LogViewerScreen(str(log_file), "stdout")
+        # Should use default from settings (10000)
+        assert screen._max_lines == 10000
+
+
+class TestLogViewerCopyPath:
+    """Tests for copy path functionality in LogViewerScreen."""
+
+    def test_action_copy_path_exists(self, tmp_path: Path) -> None:
+        """Test that action_copy_path method exists."""
+        log_file = tmp_path / "test.log"
+        log_file.write_text("Test content")
+        screen = LogViewerScreen(str(log_file), "stdout")
+        assert hasattr(screen, "action_copy_path")
+        assert callable(screen.action_copy_path)
+
+    def test_copy_path_binding_exists(self) -> None:
+        """Test that 'c' keybinding is defined for copy path."""
+        bindings = LogViewerScreen.BINDINGS
+        binding_keys = [b[0] for b in bindings]
+        assert "c" in binding_keys
+
+        # Find the copy path binding
+        copy_binding = next(b for b in bindings if b[0] == "c")
+        assert copy_binding[1] == "copy_path"
+
+
 class TestCancelConfirmScreen:
     """Tests for CancelConfirmScreen."""
 
