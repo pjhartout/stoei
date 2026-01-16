@@ -754,7 +754,7 @@ class UserOverviewTab(VerticalScroll):
 
         Args:
             jobs: List of job tuples from sacct energy history query.
-                Format: (JobID, User, Elapsed, NCPUS, AllocTRES).
+                Format: (JobID, User, Elapsed, NCPUS, AllocTRES, State).
 
         Returns:
             List of UserEnergyStats objects sorted by total energy (descending).
@@ -764,7 +764,7 @@ class UserOverviewTab(VerticalScroll):
         elapsed_index = 2
         ncpus_index = 3
         tres_index = 4
-        min_job_fields = 5
+        min_job_fields = 5  # State (index 5) is optional for backwards compatibility
         seconds_per_hour = 3600.0
 
         def _default_energy_data() -> _UserEnergyDataDict:
