@@ -1,6 +1,12 @@
 """Tests for SLURM output formatters."""
 
-from stoei.slurm.formatters import format_job_info, format_sacct_job_info, format_user_info, format_value
+from stoei.slurm.formatters import (
+    format_compact_timeline,
+    format_job_info,
+    format_sacct_job_info,
+    format_user_info,
+    format_value,
+)
 from stoei.widgets.user_overview import UserStats
 
 
@@ -317,6 +323,133 @@ class TestFormatValueEdgeCases:
         """Test unknown state uses white color."""
         result = format_value("JobState", "CUSTOMSTATE")
         assert "white" in result
+
+
+class TestFormatCompactTimeline:
+    """Tests for compact timeline formatting."""
+
+    def test_running_job_shows_submit_and_start(self) -> None:
+        """Test running job shows submit time and start time."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "2024-01-15T10:35:00",
+            "",
+            "RUNNING",
+        )
+        assert "10:30" in result or "01-15" in result
+        assert "10:35" in result or "01-15" in result
+        assert "→" in result
+
+    def test_pending_job_shows_submit_and_waiting(self) -> None:
+        """Test pending job shows submit time with waiting icon."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "Unknown",
+            "",
+            "PENDING",
+        )
+        assert "10:30" in result or "01-15" in result
+        assert "⏳" in result
+
+    def test_completed_job_shows_full_timeline(self) -> None:
+        """Test completed job shows full timeline."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "2024-01-15T10:35:00",
+            "2024-01-15T11:00:00",
+            "COMPLETED",
+        )
+        assert "10:30" in result or "01-15" in result
+        assert "10:35" in result or "01-15" in result
+        assert "11:00" in result or "01-15" in result
+
+    def test_requeue_indicator_shown(self) -> None:
+        """Test requeue indicator is shown when restarts > 0."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "2024-01-15T10:35:00",
+            "",
+            "RUNNING",
+            restarts=3,
+        )
+        assert "↻ 3" in result
+
+    def test_handles_empty_times(self) -> None:
+        """Test handling of empty time values."""
+        result = format_compact_timeline("", "", "", "UNKNOWN")
+        assert result == "—"
+
+    def test_handles_unknown_start_time(self) -> None:
+        """Test handling of Unknown start time."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "Unknown",
+            "",
+            "RUNNING",
+        )
+        assert "⏳" in result
+
+    def test_failed_job_shows_full_timeline(self) -> None:
+        """Test failed job shows submit, start, and end times."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "2024-01-15T10:35:00",
+            "2024-01-15T10:40:00",
+            "FAILED",
+        )
+        assert "→" in result
+        assert "10:40" in result or "01-15" in result
+
+    def test_cancelled_job_shows_timeline(self) -> None:
+        """Test cancelled job shows timeline."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "2024-01-15T10:35:00",
+            "2024-01-15T10:36:00",
+            "CANCELLED",
+        )
+        assert "→" in result
+
+    def test_timeout_job_shows_timeline(self) -> None:
+        """Test timeout job shows timeline."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "2024-01-15T10:35:00",
+            "2024-01-15T11:35:00",
+            "TIMEOUT",
+        )
+        assert "→" in result
+
+    def test_zero_restarts_no_indicator(self) -> None:
+        """Test zero restarts does not show indicator."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "2024-01-15T10:35:00",
+            "",
+            "RUNNING",
+            restarts=0,
+        )
+        assert "↻" not in result
+
+    def test_handles_na_time(self) -> None:
+        """Test handling of N/A time value."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "N/A",
+            "",
+            "RUNNING",
+        )
+        assert "⏳" in result
+
+    def test_handles_none_time(self) -> None:
+        """Test handling of None time value."""
+        result = format_compact_timeline(
+            "2024-01-15T10:30:00",
+            "None",
+            "",
+            "RUNNING",
+        )
+        assert "⏳" in result
 
 
 class TestFormatUserInfo:

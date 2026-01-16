@@ -80,20 +80,20 @@ def sample_scontrol_output_failed() -> str:
 @pytest.fixture
 def sample_squeue_output() -> str:
     """Sample squeue output for testing."""
-    return """     JOBID|        JOBNAME|   STATE|      TIME|   NODES|      NODELIST
-     12345|       test_job| RUNNING|   1:23:45|       1|   gpu-node-01
-     12348|    pending_job| PENDING|      0:00|       1|      (Priority)
-     12349|   array_job_1| RUNNING|   0:30:00|       2|gpu-node-[02-03]"""
+    return """JOBID|JOBNAME|STATE|TIME|NODES|NODELIST|SUBMIT_TIME|START_TIME
+12345|test_job|RUNNING|1:23:45|1|gpu-node-01|2024-01-15T10:00:00|2024-01-15T10:01:00
+12348|pending_job|PENDING|0:00|1|(Priority)|2024-01-15T11:00:00|Unknown
+12349|array_job_1|RUNNING|0:30:00|2|gpu-node-[02-03]|2024-01-15T09:30:00|2024-01-15T09:31:00"""
 
 
 @pytest.fixture
 def sample_sacct_output() -> str:
     """Sample sacct output for testing."""
-    return """JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList
-12345|test_job|RUNNING|0|01:23:45|0:0|gpu-node-01
-12346|completed_job|COMPLETED|2|00:30:00|0:0|cpu-node-05
-12347|failed_job|FAILED|0|00:05:00|1:0|gpu-node-02
-12340|old_job|COMPLETED|1|02:00:00|0:0|cpu-node-01"""
+    return """JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList|Submit|Start|End
+12345|test_job|RUNNING|0|01:23:45|0:0|gpu-node-01|2024-01-15T10:00:00|2024-01-15T10:01:00|Unknown
+12346|completed_job|COMPLETED|2|00:30:00|0:0|cpu-node-05|2024-01-15T09:00:00|2024-01-15T09:05:00|2024-01-15T09:35:00
+12347|failed_job|FAILED|0|00:05:00|1:0|gpu-node-02|2024-01-15T08:00:00|2024-01-15T08:01:00|2024-01-15T08:06:00
+12340|old_job|COMPLETED|1|02:00:00|0:0|cpu-node-01|2024-01-14T10:00:00|2024-01-14T10:05:00|2024-01-14T12:05:00"""
 
 
 @pytest.fixture

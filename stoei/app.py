@@ -32,7 +32,7 @@ from stoei.slurm.commands import (
     get_running_jobs,
     get_user_jobs,
 )
-from stoei.slurm.formatters import format_user_info
+from stoei.slurm.formatters import format_compact_timeline, format_user_info
 from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
     calculate_total_gpus,
@@ -121,7 +121,7 @@ class SlurmMonitor(App[None]):
         ("shift+tab", "previous_tab", "Previous Tab"),
         ("question_mark", "show_help", "Help"),
     ]
-    JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList")
+    JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList", "Timeline")
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         """Provide default values for custom theme variables."""
@@ -204,7 +204,9 @@ class SlurmMonitor(App[None]):
 
         jobs_table = self.query_one("#jobs_table", DataTable)
         jobs_table.cursor_type = "row"
-        self._job_table_column_keys = jobs_table.add_columns("JobID", "Name", "State", "Time", "Nodes", "NodeList")
+        self._job_table_column_keys = jobs_table.add_columns(
+            "JobID", "Name", "State", "Time", "Nodes", "NodeList", "Timeline"
+        )
         logger.debug("Jobs table columns added, ready for data")
 
         # Show loading screen and start step-by-step loading
@@ -797,6 +799,13 @@ class SlurmMonitor(App[None]):
     def _job_row_values(self, job: Job) -> list[str]:
         """Build the row values for a job."""
         state_display = self._format_state(job.state, job.state_category)
+        timeline = format_compact_timeline(
+            job.submit_time,
+            job.start_time,
+            job.end_time,
+            job.state,
+            job.restarts,
+        )
         return [
             job.job_id,
             job.name,
@@ -804,6 +813,7 @@ class SlurmMonitor(App[None]):
             job.time,
             job.nodes,
             job.node_list,
+            timeline,
         ]
 
     def _job_id_from_row_index(self, jobs_table: DataTable, row_index: int | None) -> str | None:
