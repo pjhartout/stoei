@@ -7,6 +7,7 @@ from rich.text import Text
 from textual._context import NoActiveAppError
 from textual.widgets import RichLog
 
+from stoei.colors import get_theme_colors
 from stoei.settings import DEFAULT_MAX_LOG_LINES
 
 if TYPE_CHECKING:
@@ -25,16 +26,6 @@ class LogPane(RichLog):
     """
 
     DEFAULT_MAX_LINES: ClassVar[int] = DEFAULT_MAX_LOG_LINES
-
-    # Log level to color mapping
-    LEVEL_COLORS: ClassVar[dict[str, str]] = {
-        "DEBUG": "dim cyan",
-        "INFO": "green",
-        "SUCCESS": "bold green",
-        "WARNING": "yellow",
-        "ERROR": "bold red",
-        "CRITICAL": "bold white on red",
-    }
 
     def __init__(
         self,
@@ -79,18 +70,21 @@ class LogPane(RichLog):
 
         time_str = timestamp.strftime("%H:%M:%S")
         level_upper = level.upper()
-        color = self.LEVEL_COLORS.get(level_upper, "white")
+
+        # Get theme colors, with app access check
+        try:
+            app = self.app
+            colors = get_theme_colors(app)
+        except (LookupError, RuntimeError, NoActiveAppError):
+            return
+
+        color = colors.level_color(level_upper)
 
         # Build styled text
         log_text = Text()
         log_text.append(f"{time_str} ", style="dim")
         log_text.append(f"[{level_upper:^8}] ", style=color)
         log_text.append(message)
-
-        try:
-            _ = self.app
-        except (LookupError, RuntimeError, NoActiveAppError):
-            return
 
         self.write(log_text)
 
@@ -106,12 +100,12 @@ class LogPane(RichLog):
         # Type narrowing: we know this is a LoguruMessage at runtime
         if not hasattr(message, "record"):
             return
-        record = message.record  # type: ignore[union-attr]
+        record = message.record
         level_obj = record["level"]  # type: ignore[index]
-        level = level_obj.name  # type: ignore[union-attr]
+        level = level_obj.name
         msg = record["message"]  # type: ignore[index]
         timestamp_obj = record["time"]  # type: ignore[index]
-        timestamp = timestamp_obj.replace(tzinfo=None)  # type: ignore[union-attr]
+        timestamp = timestamp_obj.replace(tzinfo=None)
 
         # Call from app thread if available
         try:

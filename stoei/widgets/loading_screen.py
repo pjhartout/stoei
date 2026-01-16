@@ -10,6 +10,7 @@ from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import Label, ProgressBar, Static
 
+from stoei.colors import get_theme_colors
 from stoei.logger import get_logger
 
 logger = get_logger(__name__)
@@ -37,7 +38,7 @@ class LoadingScreen(Screen[None]):
     DEFAULT_CSS: ClassVar[str] = """
     LoadingScreen {
         align: center middle;
-        background: #0d1117;
+        background: $background;
     }
 
     #loading-container {
@@ -45,8 +46,8 @@ class LoadingScreen(Screen[None]):
         max-width: 80;
         height: auto;
         max-height: 90%;
-        background: #161b22;
-        border: heavy #58a6ff;
+        background: $surface;
+        border: heavy $accent;
         padding: 2;
     }
 
@@ -54,7 +55,7 @@ class LoadingScreen(Screen[None]):
         text-align: center;
         text-style: bold;
         margin-bottom: 1;
-        color: #79c0ff;
+        color: $primary;
     }
 
     #spinner-container {
@@ -66,45 +67,45 @@ class LoadingScreen(Screen[None]):
     #spinner {
         text-align: center;
         text-style: bold;
-        color: #a371f7;
+        color: $accent;
     }
 
     #current-step {
         text-align: center;
         margin-bottom: 1;
-        color: #c9d1d9;
+        color: $foreground;
     }
 
     #progress-bar {
         margin-bottom: 1;
-        color: #238636;
-        background: #21262d;
+        color: $success;
+        background: $panel;
     }
 
     #progress-label {
         text-align: center;
         margin-bottom: 1;
-        color: #8b949e;
+        color: $text-muted;
     }
 
     #step-log-container {
         height: 12;
-        border: round #30363d;
+        border: round $border;
         padding: 0 1;
         margin-top: 1;
-        background: #0d1117;
+        background: $background;
     }
 
     #step-log-title {
         text-style: bold;
         margin-bottom: 0;
-        color: #58a6ff;
+        color: $primary;
     }
 
     #step-log {
         height: 100%;
         scrollbar-gutter: stable;
-        color: #c9d1d9;
+        color: $foreground;
     }
 
     .step-entry {
@@ -112,15 +113,15 @@ class LoadingScreen(Screen[None]):
     }
 
     .step-completed {
-        color: #3fb950;
+        color: $success;
     }
 
     .step-in-progress {
-        color: #d29922;
+        color: $warning;
     }
 
     .step-error {
-        color: #f85149;
+        color: $error;
     }
     """
 
@@ -165,8 +166,9 @@ class LoadingScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         """Create the loading screen layout."""
+        # Use plain text in compose - CSS will style it
         with Container(id="loading-container"):
-            yield Label("[bold #79c0ff]🚀 STOEI Loading[/bold #79c0ff]", id="loading-title")
+            yield Label("[bold]🚀 STOEI Loading[/bold]", id="loading-title")
 
             with Container(id="spinner-container"):
                 yield Static(self.SPINNER_FRAMES[0], id="spinner")
@@ -175,7 +177,7 @@ class LoadingScreen(Screen[None]):
             yield ProgressBar(id="progress-bar", total=100, show_eta=False)
             yield Label("0%", id="progress-label")
 
-            yield Label("[bold #58a6ff]Loading Steps:[/bold #58a6ff]", id="step-log-title")
+            yield Label("[bold]Loading Steps:[/bold]", id="step-log-title")
             with VerticalScroll(id="step-log-container"):
                 yield Static("", id="step-log")
 
@@ -189,8 +191,11 @@ class LoadingScreen(Screen[None]):
         """Animate the spinner."""
         self._spinner_frame = (self._spinner_frame + 1) % len(self.SPINNER_FRAMES)
         try:
+            colors = get_theme_colors(self.app)
             spinner = self.query_one("#spinner", Static)
-            spinner.update(f"[bold #a371f7]{self.SPINNER_FRAMES[self._spinner_frame]}[/bold #a371f7] Loading...")
+            spinner.update(
+                f"[bold {colors.accent}]{self.SPINNER_FRAMES[self._spinner_frame]}[/bold {colors.accent}] Loading..."
+            )
         except Exception as exc:
             logger.debug(f"Spinner update failed: {exc}")
 
@@ -211,11 +216,12 @@ class LoadingScreen(Screen[None]):
 
         # Update UI
         try:
+            colors = get_theme_colors(self.app)
             current_step_label = self.query_one("#current-step", Label)
-            current_step_label.update(f"[#d29922]●[/#d29922] {step.description}")
+            current_step_label.update(f"[{colors.warning}]●[/{colors.warning}] {step.description}")
 
             # Add to log
-            self._add_log_entry(f"[#d29922]▶[/#d29922] {step.name}...")
+            self._add_log_entry(f"[{colors.warning}]▶[/{colors.warning}] {step.name}...")
         except Exception as exc:
             logger.debug(f"Failed to update loading UI: {exc}")
 
@@ -242,6 +248,7 @@ class LoadingScreen(Screen[None]):
 
         # Update UI
         try:
+            colors = get_theme_colors(self.app)
             progress_bar = self.query_one("#progress-bar", ProgressBar)
             progress_bar.update(progress=progress_pct)
 
@@ -249,9 +256,9 @@ class LoadingScreen(Screen[None]):
             progress_label.update(f"{progress_pct:.0f}%")
 
             # Update log with completion
-            time_str = f"[#8b949e]{elapsed:.1f}s[/#8b949e]"
-            detail_str = f" - [#8b949e]{message}[/#8b949e]" if message else ""
-            self._add_log_entry(f"[#3fb950]✓[/#3fb950] {step.name}{detail_str} {time_str}")
+            time_str = f"[{colors.text_muted}]{elapsed:.1f}s[/{colors.text_muted}]"
+            detail_str = f" - [{colors.text_muted}]{message}[/{colors.text_muted}]" if message else ""
+            self._add_log_entry(f"[{colors.success}]✓[/{colors.success}] {step.name}{detail_str} {time_str}")
         except Exception as exc:
             logger.debug(f"Failed to update loading UI: {exc}")
 
@@ -270,7 +277,10 @@ class LoadingScreen(Screen[None]):
 
         # Update log with failure
         try:
-            self._add_log_entry(f"[#f85149]✗[/#f85149] {step.name}: [#f85149]{error}[/#f85149]")
+            colors = get_theme_colors(self.app)
+            self._add_log_entry(
+                f"[{colors.error}]✗[/{colors.error}] {step.name}: [{colors.error}]{error}[/{colors.error}]"
+            )
         except Exception as exc:
             logger.debug(f"Failed to update loading UI: {exc}")
 
@@ -298,17 +308,18 @@ class LoadingScreen(Screen[None]):
         logger.info(f"Loading complete in {total_time:.2f}s")
 
         try:
+            colors = get_theme_colors(self.app)
             current_step_label = self.query_one("#current-step", Label)
-            current_step_label.update("[#3fb950]✓[/#3fb950] Loading complete!")
+            current_step_label.update(f"[{colors.success}]✓[/{colors.success}] Loading complete!")
 
             progress_bar = self.query_one("#progress-bar", ProgressBar)
             progress_bar.update(progress=100)
 
             progress_label = self.query_one("#progress-label", Label)
-            progress_label.update(f"[#3fb950]100%[/#3fb950] - {total_time:.1f}s total")
+            progress_label.update(f"[{colors.success}]100%[/{colors.success}] - {total_time:.1f}s total")
 
             spinner = self.query_one("#spinner", Static)
-            spinner.update("[bold #3fb950]✓[/bold #3fb950] Ready!")
+            spinner.update(f"[bold {colors.success}]✓[/bold {colors.success}] Ready!")
         except Exception as exc:
             logger.debug(f"Failed to update loading UI: {exc}")
 

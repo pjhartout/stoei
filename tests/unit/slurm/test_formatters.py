@@ -1,5 +1,6 @@
 """Tests for SLURM output formatters."""
 
+from stoei.colors import FALLBACK_COLORS
 from stoei.slurm.formatters import (
     format_compact_timeline,
     format_job_info,
@@ -8,6 +9,31 @@ from stoei.slurm.formatters import (
     format_value,
 )
 from stoei.widgets.user_overview import UserStats
+
+
+def _has_color(result: str, color_name: str) -> bool:
+    """Check if result contains a color (either name or hex value).
+
+    Args:
+        result: The formatted string to check.
+        color_name: Semantic color name (success, warning, error, primary, accent, text_muted).
+
+    Returns:
+        True if the result contains a color markup.
+    """
+    # Check for ANSI color name (legacy)
+    ansi_map = {
+        "success": "green",
+        "warning": "yellow",
+        "error": "red",
+        "primary": "cyan",
+        "accent": "cyan",
+        "text_muted": "bright_black",
+    }
+    if color_name in ansi_map and ansi_map[color_name] in result.lower():
+        return True
+    # Check for hex color from fallback colors
+    return bool(color_name in FALLBACK_COLORS and FALLBACK_COLORS[color_name] in result)
 
 
 class TestFormatValue:
@@ -23,50 +49,53 @@ class TestFormatValue:
 
     def test_running_state(self) -> None:
         result = format_value("JobState", "RUNNING")
-        assert "green" in result
+        assert _has_color(result, "success")
         assert "RUNNING" in result
 
     def test_pending_state(self) -> None:
         result = format_value("JobState", "PENDING")
-        assert "yellow" in result
+        assert _has_color(result, "warning")
         assert "PENDING" in result
 
     def test_failed_state(self) -> None:
         result = format_value("JobState", "FAILED")
-        assert "red" in result
+        assert _has_color(result, "error")
         assert "FAILED" in result
 
     def test_completed_state(self) -> None:
         result = format_value("JobState", "COMPLETED")
-        assert "cyan" in result
+        # COMPLETED uses success color (green) now
+        assert _has_color(result, "success")
         assert "COMPLETED" in result
 
     def test_successful_exit_code(self) -> None:
         result = format_value("ExitCode", "0:0")
-        assert "green" in result
+        assert _has_color(result, "success")
         assert "✓" in result
 
     def test_failed_exit_code(self) -> None:
         result = format_value("ExitCode", "1:0")
-        assert "red" in result
+        assert _has_color(result, "error")
         assert "✗" in result
 
     def test_path_formatting(self) -> None:
         result = format_value("WorkDir", "/home/user/project")
-        assert "cyan" in result
+        assert _has_color(result, "primary")
         assert "italic" in result
 
     def test_time_formatting(self) -> None:
         result = format_value("RunTime", "01:23:45")
-        assert "yellow" in result
+        assert _has_color(result, "warning")
 
     def test_tres_formatting(self) -> None:
         result = format_value("TRES", "cpu=4,mem=16G")
-        assert "magenta" in result
+        # TRES uses accent color now
+        assert _has_color(result, "accent")
 
     def test_node_list_formatting(self) -> None:
         result = format_value("NodeList", "gpu-node-01")
-        assert "blue" in result
+        # Node lists use primary color now
+        assert _has_color(result, "primary")
 
 
 class TestFormatJobInfo:
@@ -188,7 +217,7 @@ class TestFormatSacctJobInfo:
 
         result = format_sacct_job_info(parsed)
 
-        assert "red" in result
+        assert _has_color(result, "error")
         assert "FAILED" in result
 
     def test_format_remaining_fields(self) -> None:
@@ -220,23 +249,23 @@ class TestFormatValueEdgeCases:
     def test_state_with_extra_info(self) -> None:
         """Test state value with additional info."""
         result = format_value("JobState", "RUNNING by 12345")
-        assert "green" in result
+        assert _has_color(result, "success")
         assert "RUNNING" in result
 
     def test_derived_exit_code(self) -> None:
         """Test DerivedExitCode formatting."""
         result = format_value("DerivedExitCode", "1:0")
-        assert "red" in result
+        assert _has_color(result, "error")
 
     def test_stdin_path(self) -> None:
         """Test StdIn path formatting."""
         result = format_value("StdIn", "/dev/null")
-        assert "cyan" in result
+        assert _has_color(result, "primary")
 
     def test_command_formatting(self) -> None:
         """Test Command path formatting."""
         result = format_value("Command", "/path/to/script.sh")
-        assert "cyan" in result
+        assert _has_color(result, "primary")
 
     def test_time_with_na(self) -> None:
         """Test time value with N/A."""
@@ -266,12 +295,12 @@ class TestFormatValueEdgeCases:
     def test_gres_formatting(self) -> None:
         """Test Gres formatting."""
         result = format_value("Gres", "gpu:1")
-        assert "magenta" in result
+        assert _has_color(result, "accent")
 
     def test_req_tres_formatting(self) -> None:
         """Test ReqTRES formatting."""
         result = format_value("ReqTRES", "cpu=4,mem=16G")
-        assert "magenta" in result
+        assert _has_color(result, "accent")
 
     def test_batch_host_formatting(self) -> None:
         """Test BatchHost is returned as-is (no special formatting)."""
@@ -282,7 +311,7 @@ class TestFormatValueEdgeCases:
     def test_req_node_list_formatting(self) -> None:
         """Test ReqNodeList node formatting."""
         result = format_value("ReqNodeList", "gpu-node-[01-04]")
-        assert "blue" in result
+        assert _has_color(result, "primary")
 
     def test_regular_value(self) -> None:
         """Test regular value without special formatting."""
@@ -292,37 +321,39 @@ class TestFormatValueEdgeCases:
     def test_cancelled_state(self) -> None:
         """Test CANCELLED state formatting."""
         result = format_value("JobState", "CANCELLED")
-        assert "magenta" in result
+        # CANCELLED uses text_muted color now
+        assert _has_color(result, "text_muted")
 
     def test_timeout_state(self) -> None:
         """Test TIMEOUT state formatting."""
         result = format_value("JobState", "TIMEOUT")
-        assert "red" in result
+        assert _has_color(result, "error")
 
     def test_node_fail_state(self) -> None:
         """Test NODE_FAIL state formatting."""
         result = format_value("JobState", "NODE_FAIL")
-        assert "red" in result
+        assert _has_color(result, "error")
 
     def test_preempted_state(self) -> None:
         """Test PREEMPTED state formatting."""
         result = format_value("JobState", "PREEMPTED")
-        assert "yellow" in result
+        assert _has_color(result, "warning")
 
     def test_suspended_state(self) -> None:
         """Test SUSPENDED state formatting."""
         result = format_value("JobState", "SUSPENDED")
-        assert "yellow" in result
+        assert _has_color(result, "warning")
 
     def test_completing_state(self) -> None:
         """Test COMPLETING state formatting."""
         result = format_value("JobState", "COMPLETING")
-        assert "green" in result
+        assert _has_color(result, "success")
 
-    def test_unknown_state_uses_white(self) -> None:
-        """Test unknown state uses white color."""
+    def test_unknown_state_uses_foreground(self) -> None:
+        """Test unknown state uses foreground color."""
         result = format_value("JobState", "CUSTOMSTATE")
-        assert "white" in result
+        # Unknown states use foreground color
+        assert _has_color(result, "foreground") or FALLBACK_COLORS["foreground"] in result
 
 
 class TestFormatCompactTimeline:
@@ -539,7 +570,7 @@ class TestFormatUserInfo:
         assert "No active jobs" in result
 
     def test_format_job_state_colors_running(self) -> None:
-        """Test that running state is colored green."""
+        """Test that running state is colored with success color."""
         user_stats = UserStats(
             username="testuser",
             job_count=1,
@@ -554,10 +585,10 @@ class TestFormatUserInfo:
 
         result = format_user_info("testuser", user_stats, jobs)
 
-        assert "green" in result
+        assert _has_color(result, "success")
 
     def test_format_job_state_colors_pending(self) -> None:
-        """Test that pending state is colored yellow."""
+        """Test that pending state is colored with warning color."""
         user_stats = UserStats(
             username="testuser",
             job_count=1,
@@ -572,7 +603,7 @@ class TestFormatUserInfo:
 
         result = format_user_info("testuser", user_stats, jobs)
 
-        assert "yellow" in result
+        assert _has_color(result, "warning")
 
     def test_format_truncates_long_values(self) -> None:
         """Test that long values are truncated."""
@@ -629,7 +660,7 @@ class TestFormatUserInfo:
 
         assert "GPU Types" in result
         assert "H100" in result
-        assert "magenta" in result
+        assert _has_color(result, "accent")
 
     def test_format_skips_short_job_tuples(self) -> None:
         """Test that job tuples with fewer than 6 fields are skipped."""

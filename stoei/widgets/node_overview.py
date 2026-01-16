@@ -7,6 +7,8 @@ from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import DataTable, Static
 
+from stoei.colors import get_theme_colors
+
 
 @dataclass
 class NodeInfo:
@@ -174,16 +176,13 @@ class NodeOverviewTab(VerticalScroll):
         Returns:
             Formatted percentage string.
         """
-        # Thresholds for color coding: red >= 90%, yellow >= 70%, green < 70%
-        red_threshold = 90.0
-        yellow_threshold = 70.0
-
-        if pct >= red_threshold:
-            return f"[red]{pct:.1f}%[/red]"
-        elif pct >= yellow_threshold:
-            return f"[yellow]{pct:.1f}%[/yellow]"
-        else:
-            return f"[green]{pct:.1f}%[/green]"
+        try:
+            colors = get_theme_colors(self.app)
+        except (LookupError, RuntimeError):
+            # Fallback when not mounted to an app
+            colors = get_theme_colors(None)
+        color = colors.pct_color(pct, high_threshold=90.0, mid_threshold=70.0, invert=False)
+        return f"[{color}]{pct:.1f}%[/{color}]"
 
     def _format_state(self, state: str) -> str:
         """Format node state with color coding.
@@ -194,12 +193,10 @@ class NodeOverviewTab(VerticalScroll):
         Returns:
             Formatted state string.
         """
-        state_upper = state.upper()
-        if "ALLOCATED" in state_upper or "MIXED" in state_upper:
-            return f"[yellow]{state}[/yellow]"
-        elif "IDLE" in state_upper:
-            return f"[green]{state}[/green]"
-        elif "DOWN" in state_upper or "DRAIN" in state_upper:
-            return f"[red]{state}[/red]"
-        else:
-            return state
+        try:
+            colors = get_theme_colors(self.app)
+        except (LookupError, RuntimeError):
+            # Fallback when not mounted to an app
+            colors = get_theme_colors(None)
+        color = colors.state_color(state)
+        return f"[{color}]{state}[/{color}]"

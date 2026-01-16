@@ -1,8 +1,34 @@
 """Unit tests for the NodeOverviewTab widget."""
 
 import pytest
+from stoei.colors import FALLBACK_COLORS
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from textual.app import App
+
+
+def _has_color(result: str, color_name: str) -> bool:
+    """Check if result contains a color (either name or hex value).
+
+    Args:
+        result: The formatted string to check.
+        color_name: Semantic color name (success, warning, error) or ANSI name (green, yellow, red).
+
+    Returns:
+        True if the result contains a color markup.
+    """
+    # Map ANSI names to semantic names
+    ansi_to_semantic = {
+        "green": "success",
+        "yellow": "warning",
+        "red": "error",
+    }
+    semantic_name = ansi_to_semantic.get(color_name, color_name)
+
+    # Check for ANSI color name (legacy)
+    if f"[{color_name}]" in result:
+        return True
+    # Check for hex color from fallback colors
+    return bool(semantic_name in FALLBACK_COLORS and FALLBACK_COLORS[semantic_name] in result)
 
 
 class TestNodeInfo:
@@ -145,52 +171,53 @@ class TestNodeOverviewTab:
     def test_format_pct_high_usage(self, node_tab: NodeOverviewTab) -> None:
         """Test percentage formatting for high usage (>=90%)."""
         result = node_tab._format_pct(95.0)
-        assert "[red]" in result
+        assert _has_color(result, "red")
         assert "95.0" in result
 
     def test_format_pct_medium_usage(self, node_tab: NodeOverviewTab) -> None:
         """Test percentage formatting for medium usage (70-90%)."""
         result = node_tab._format_pct(80.0)
-        assert "[yellow]" in result
+        assert _has_color(result, "yellow")
         assert "80.0" in result
 
     def test_format_pct_low_usage(self, node_tab: NodeOverviewTab) -> None:
         """Test percentage formatting for low usage (<70%)."""
         result = node_tab._format_pct(50.0)
-        assert "[green]" in result
+        assert _has_color(result, "green")
         assert "50.0" in result
 
     def test_format_state_idle(self, node_tab: NodeOverviewTab) -> None:
         """Test state formatting for IDLE nodes."""
         result = node_tab._format_state("IDLE")
-        assert "[green]" in result
+        assert _has_color(result, "green")
         assert "IDLE" in result
 
     def test_format_state_allocated(self, node_tab: NodeOverviewTab) -> None:
         """Test state formatting for ALLOCATED nodes."""
         result = node_tab._format_state("ALLOCATED")
-        assert "[yellow]" in result
+        assert _has_color(result, "yellow")
         assert "ALLOCATED" in result
 
     def test_format_state_mixed(self, node_tab: NodeOverviewTab) -> None:
         """Test state formatting for MIXED nodes."""
         result = node_tab._format_state("MIXED")
-        assert "[yellow]" in result
+        assert _has_color(result, "yellow")
         assert "MIXED" in result
 
     def test_format_state_down(self, node_tab: NodeOverviewTab) -> None:
         """Test state formatting for DOWN nodes."""
         result = node_tab._format_state("DOWN")
-        assert "[red]" in result
+        assert _has_color(result, "red")
         assert "DOWN" in result
 
     def test_format_state_drain(self, node_tab: NodeOverviewTab) -> None:
         """Test state formatting for DRAIN nodes."""
         result = node_tab._format_state("DRAIN")
-        assert "[red]" in result
+        assert _has_color(result, "red")
         assert "DRAIN" in result
 
     def test_format_state_unknown(self, node_tab: NodeOverviewTab) -> None:
         """Test state formatting for unknown states."""
         result = node_tab._format_state("UNKNOWN")
-        assert result == "UNKNOWN"
+        # Unknown states still get a color (foreground color from theme)
+        assert "UNKNOWN" in result

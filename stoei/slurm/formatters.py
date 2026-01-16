@@ -5,10 +5,34 @@ from __future__ import annotations
 from datetime import datetime
 from typing import TYPE_CHECKING
 
+from stoei.colors import FALLBACK_COLORS, ThemeColors
 from stoei.slurm.parser import parse_scontrol_output
 
 if TYPE_CHECKING:
     from stoei.widgets.user_overview import UserStats
+
+
+def _get_default_colors() -> ThemeColors:
+    """Get default theme colors for formatting.
+
+    Returns:
+        ThemeColors instance with fallback colors.
+    """
+    return ThemeColors(
+        success=FALLBACK_COLORS["success"],
+        warning=FALLBACK_COLORS["warning"],
+        error=FALLBACK_COLORS["error"],
+        primary=FALLBACK_COLORS["primary"],
+        accent=FALLBACK_COLORS["accent"],
+        secondary=FALLBACK_COLORS["secondary"],
+        foreground=FALLBACK_COLORS["foreground"],
+        text_muted=FALLBACK_COLORS["text_muted"],
+        background=FALLBACK_COLORS["background"],
+        surface=FALLBACK_COLORS["surface"],
+        panel=FALLBACK_COLORS["panel"],
+        border=FALLBACK_COLORS["border"],
+    )
+
 
 # Fields categorized for better display
 JOB_CATEGORIES: dict[str, tuple[str, list[str]]] = {
@@ -69,57 +93,63 @@ JOB_CATEGORIES: dict[str, tuple[str, list[str]]] = {
     ),
 }
 
-# State color mapping using Rich markup
-STATE_COLORS: dict[str, str] = {
-    "RUNNING": "bold green",
-    "PENDING": "bold yellow",
-    "COMPLETED": "bold cyan",
-    "FAILED": "bold red",
-    "CANCELLED": "bold magenta",
-    "TIMEOUT": "bold red",
-    "NODE_FAIL": "bold red",
-    "PREEMPTED": "bold yellow",
-    "SUSPENDED": "bold yellow",
-    "COMPLETING": "bold green",
-}
+
+def _get_state_color(state: str, colors: ThemeColors) -> str:
+    """Get the hex color for a job state.
+
+    Args:
+        state: Job state string (e.g., 'RUNNING', 'PENDING').
+        colors: Theme colors to use.
+
+    Returns:
+        Hex color string for the state.
+    """
+    return colors.state_color(state)
 
 
-def format_value(key: str, value: str) -> str:
+def format_value(key: str, value: str, colors: ThemeColors | None = None) -> str:
     """Format a value with appropriate coloring based on key and content.
 
     Args:
         key: The field name.
         value: The field value.
+        colors: Optional theme colors. Uses fallback colors if not provided.
 
     Returns:
         Formatted string with Rich markup.
     """
+    if colors is None:
+        colors = _get_default_colors()
+
     if not value or value in ("(null)", "N/A", "None", ""):
         return "[italic](not set)[/italic]"
 
     # State coloring
     if key in ("JobState", "State"):
         base_state = value.split()[0]  # Handle "RUNNING by 12345" etc.
-        color = STATE_COLORS.get(base_state, "white")
-        formatted = f"[{color}]{value}[/{color}]"
+        color = _get_state_color(base_state, colors)
+        formatted = f"[bold {color}]{value}[/bold {color}]"
     # Exit codes
     elif "ExitCode" in key:
-        formatted = "[green]0:0 ✓[/green]" if value == "0:0" else f"[red]{value} ✗[/red]"
+        if value == "0:0":
+            formatted = f"[{colors.success}]0:0 ✓[/{colors.success}]"
+        else:
+            formatted = f"[{colors.error}]{value} ✗[/{colors.error}]"
     # Paths
     elif key in ("WorkDir", "StdErr", "StdOut", "StdIn", "Command"):
-        formatted = f"[italic cyan]{value}[/italic cyan]"
+        formatted = f"[italic {colors.primary}]{value}[/italic {colors.primary}]"
     # Time values
     elif "Time" in key and value not in ("Unknown", "N/A"):
-        formatted = f"[yellow]{value}[/yellow]"
+        formatted = f"[{colors.warning}]{value}[/{colors.warning}]"
     # Numbers and resources
     elif key in ("NumNodes", "NumCPUs", "NumTasks", "Priority", "Nice", "Restarts"):
         formatted = f"[bold]{value}[/bold]"
     # TRES (trackable resources)
     elif "TRES" in key or key == "Gres":
-        formatted = f"[magenta]{value}[/magenta]"
+        formatted = f"[{colors.accent}]{value}[/{colors.accent}]"
     # Node lists
     elif "Node" in key and key != "NumNodes":
-        formatted = f"[blue]{value}[/blue]"
+        formatted = f"[{colors.primary}]{value}[/{colors.primary}]"
     else:
         formatted = value
 
@@ -429,6 +459,7 @@ def format_user_info(
     username: str,
     user_stats: UserStats,
     jobs: list[tuple[str, ...]],
+    colors: ThemeColors | None = None,
 ) -> str:
     """Format user information with their jobs for display.
 
@@ -437,22 +468,29 @@ def format_user_info(
         user_stats: Aggregated user statistics from UserStats.
         jobs: List of job tuples for this user.
             Each tuple: (JobID, Name, Partition, State, Time, Nodes, NodeList, TRES).
+        colors: Optional theme colors. Uses fallback colors if not provided.
 
     Returns:
         Formatted string with Rich markup for display.
     """
+    if colors is None:
+        colors = _get_default_colors()
+
     lines: list[str] = []
+    c = colors  # Short alias for cleaner formatting
 
     # Summary section
     lines.append("\n[bold reverse] 👤 User Summary [/bold reverse]")
-    lines.append(f"  [bold cyan]{'Username':.<24}[/bold cyan] [bold]{username}[/bold]")
-    lines.append(f"  [bold cyan]{'Total Jobs':.<24}[/bold cyan] [bold]{user_stats.job_count}[/bold]")
-    lines.append(f"  [bold cyan]{'Total CPUs':.<24}[/bold cyan] {user_stats.total_cpus}")
-    lines.append(f"  [bold cyan]{'Total Memory (GB)':.<24}[/bold cyan] {user_stats.total_memory_gb:.1f}")
-    lines.append(f"  [bold cyan]{'Total GPUs':.<24}[/bold cyan] {user_stats.total_gpus}")
+    lines.append(f"  [bold {c.primary}]{'Username':.<24}[/bold {c.primary}] [bold]{username}[/bold]")
+    lines.append(f"  [bold {c.primary}]{'Total Jobs':.<24}[/bold {c.primary}] [bold]{user_stats.job_count}[/bold]")
+    lines.append(f"  [bold {c.primary}]{'Total CPUs':.<24}[/bold {c.primary}] {user_stats.total_cpus}")
+    lines.append(f"  [bold {c.primary}]{'Total Memory (GB)':.<24}[/bold {c.primary}] {user_stats.total_memory_gb:.1f}")
+    lines.append(f"  [bold {c.primary}]{'Total GPUs':.<24}[/bold {c.primary}] {user_stats.total_gpus}")
     if user_stats.gpu_types:
-        lines.append(f"  [bold cyan]{'GPU Types':.<24}[/bold cyan] [magenta]{user_stats.gpu_types}[/magenta]")
-    lines.append(f"  [bold cyan]{'Total Nodes':.<24}[/bold cyan] {user_stats.total_nodes}")
+        lines.append(
+            f"  [bold {c.primary}]{'GPU Types':.<24}[/bold {c.primary}] [{c.accent}]{user_stats.gpu_types}[/{c.accent}]"
+        )
+    lines.append(f"  [bold {c.primary}]{'Total Nodes':.<24}[/bold {c.primary}] {user_stats.total_nodes}")
 
     # Jobs by state
     running_count = 0
@@ -467,8 +505,12 @@ def format_user_info(
                 pending_count += 1
 
     lines.append("\n[bold reverse] 📊 Jobs by State [/bold reverse]")
-    lines.append(f"  [bold cyan]{'Running':.<24}[/bold cyan] [bold green]{running_count}[/bold green]")
-    lines.append(f"  [bold cyan]{'Pending':.<24}[/bold cyan] [bold yellow]{pending_count}[/bold yellow]")
+    lines.append(
+        f"  [bold {c.primary}]{'Running':.<24}[/bold {c.primary}] [bold {c.success}]{running_count}[/bold {c.success}]"
+    )
+    lines.append(
+        f"  [bold {c.primary}]{'Pending':.<24}[/bold {c.primary}] [bold {c.warning}]{pending_count}[/bold {c.warning}]"
+    )
 
     # Jobs list
     if jobs:
@@ -493,10 +535,9 @@ def format_user_info(
 
             # Color-code the state
             state_upper = state.strip().upper()
-            if state_upper in ("RUNNING", "R"):
-                state_display = f"[bold green]{state:<8}[/bold green]"
-            elif state_upper in ("PENDING", "PD"):
-                state_display = f"[bold yellow]{state:<8}[/bold yellow]"
+            state_color = colors.state_color(state_upper)
+            if state_upper in ("RUNNING", "R", "PENDING", "PD"):
+                state_display = f"[bold {state_color}]{state:<8}[/bold {state_color}]"
             else:
                 state_display = f"{state:<8}"
 

@@ -17,6 +17,7 @@ from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import ColumnKey, RowKey
 from textual.worker import Worker, WorkerState
 
+from stoei.colors import get_theme_colors
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
 from stoei.settings import Settings, load_settings, save_settings
 from stoei.slurm.array_parser import parse_array_size
@@ -869,13 +870,14 @@ class SlurmMonitor(App[None]):
         Returns:
             Rich-formatted state string.
         """
+        colors = get_theme_colors(self)
         state_formats = {
-            JobState.RUNNING: f"[bold green]{state}[/bold green]",
-            JobState.PENDING: f"[bold yellow]{state}[/bold yellow]",
-            JobState.COMPLETED: f"[green]{state}[/green]",
-            JobState.FAILED: f"[bold red]{state}[/bold red]",
-            JobState.CANCELLED: f"[bright_black]{state}[/bright_black]",
-            JobState.TIMEOUT: f"[red]{state}[/red]",
+            JobState.RUNNING: f"[bold {colors.success}]{state}[/bold {colors.success}]",
+            JobState.PENDING: f"[bold {colors.warning}]{state}[/bold {colors.warning}]",
+            JobState.COMPLETED: f"[{colors.success}]{state}[/{colors.success}]",
+            JobState.FAILED: f"[bold {colors.error}]{state}[/bold {colors.error}]",
+            JobState.CANCELLED: f"[{colors.text_muted}]{state}[/{colors.text_muted}]",
+            JobState.TIMEOUT: f"[{colors.error}]{state}[/{colors.error}]",
         }
         return state_formats.get(category, state)
 

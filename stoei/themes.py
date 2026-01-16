@@ -140,20 +140,20 @@ OPENCODE_THEME_PALETTES = (
     OpencodeThemePalette(
         name="Nord",
         theme_id=NORD_THEME_NAME,
-        primary="#88c0d0",
-        secondary="#2e3440",
-        accent="#88c0d0",
-        warning="#d08770",
-        error="#bf616a",
-        success="#a3be8c",
-        background_weak="#222938",
-        background_strong="#1c202a",
-        background_stronger="#181c24",
-        border="#4a5163",
-        border_muted="#343a47",
-        text_base="#e5e9f0",
-        text_muted="#a4adbf",
-        text_strong="#f8fafc",
+        primary="#88c0d0",  # nord8 - bright primary accent (ice)
+        secondary="#2e3440",  # nord0 - origin polar night
+        accent="#88c0d0",  # nord8 - bright primary accent
+        warning="#ebcb8b",  # nord13 - yellow (official warning color)
+        error="#bf616a",  # nord11 - red
+        success="#a3be8c",  # nord14 - green
+        background_weak="#434c5e",  # nord2 - surface/selection color
+        background_strong="#2e3440",  # nord0 - origin polar night (main background)
+        background_stronger="#3b4252",  # nord1 - elevated panels, headers, odd rows
+        border="#4c566a",  # nord3 - brightest polar night shade
+        border_muted="#434c5e",  # nord2 - even brighter shade
+        text_base="#e5e9f0",  # nord5 - brighter snow storm shade
+        text_muted="#d8dee9",  # nord4 - origin snow storm
+        text_strong="#eceff4",  # nord6 - brightest snow storm
     ),
     OpencodeThemePalette(
         name="Catppuccin",

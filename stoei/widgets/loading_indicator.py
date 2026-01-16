@@ -15,7 +15,7 @@ class LoadingIndicator(Static):
         width: 14;
         height: 1;
         content-align: center middle;
-        color: #a371f7;
+        color: $accent;
     }
     """
 

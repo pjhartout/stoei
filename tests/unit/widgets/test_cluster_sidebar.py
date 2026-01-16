@@ -1,7 +1,33 @@
 """Unit tests for the ClusterSidebar widget."""
 
 import pytest
+from stoei.colors import FALLBACK_COLORS
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats, PendingPartitionStats
+
+
+def _has_color(result: str, color_name: str) -> bool:
+    """Check if result contains a color (either name or hex value).
+
+    Args:
+        result: The formatted string to check.
+        color_name: Semantic color name (success, warning, error) or ANSI name (green, yellow, red).
+
+    Returns:
+        True if the result contains a color markup.
+    """
+    # Map ANSI names to semantic names
+    ansi_to_semantic = {
+        "green": "success",
+        "yellow": "warning",
+        "red": "error",
+    }
+    semantic_name = ansi_to_semantic.get(color_name, color_name)
+
+    # Check for ANSI color name (legacy)
+    if f"[{color_name}]" in result:
+        return True
+    # Check for hex color from fallback colors
+    return bool(semantic_name in FALLBACK_COLORS and FALLBACK_COLORS[semantic_name] in result)
 
 
 class TestClusterStats:
@@ -134,21 +160,21 @@ class TestClusterSidebar:
         stats = ClusterStats(total_nodes=100, free_nodes=60)
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
-        assert "[green]" in rendered
+        assert _has_color(rendered, "green")
 
     def test_render_stats_color_coding_medium_availability(self, cluster_sidebar: ClusterSidebar) -> None:
         """Test color coding for medium availability (25-50%)."""
         stats = ClusterStats(total_nodes=100, free_nodes=30)
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
-        assert "[yellow]" in rendered
+        assert _has_color(rendered, "yellow")
 
     def test_render_stats_color_coding_low_availability(self, cluster_sidebar: ClusterSidebar) -> None:
         """Test color coding for low availability (<25%)."""
         stats = ClusterStats(total_nodes=100, free_nodes=10)
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
-        assert "[red]" in rendered
+        assert _has_color(rendered, "red")
 
     def test_render_stats_loading_state(self, cluster_sidebar: ClusterSidebar) -> None:
         """Test that loading state shows loading message."""
@@ -190,23 +216,23 @@ class TestClusterSidebar:
 
     def test_render_stats_boundary_values(self, cluster_sidebar: ClusterSidebar) -> None:
         """Test rendering with boundary percentage values."""
-        # Exactly 50% (should be green)
+        # Exactly 50% (should be green/success)
         stats = ClusterStats(total_nodes=100, free_nodes=50)
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
-        assert "[green]" in rendered
+        assert _has_color(rendered, "green")
 
-        # Exactly 25% (should be yellow)
+        # Exactly 25% (should be yellow/warning)
         stats = ClusterStats(total_nodes=100, free_nodes=25)
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
-        assert "[yellow]" in rendered
+        assert _has_color(rendered, "yellow")
 
-        # Just below 25% (should be red)
+        # Just below 25% (should be red/error)
         stats = ClusterStats(total_nodes=100, free_nodes=24)
         cluster_sidebar.update_stats(stats)
         rendered = cluster_sidebar._render_stats()
-        assert "[red]" in rendered
+        assert _has_color(rendered, "red")
 
     def test_render_stats_memory_formatting(self, cluster_sidebar: ClusterSidebar) -> None:
         """Test that memory values are formatted with one decimal place."""
