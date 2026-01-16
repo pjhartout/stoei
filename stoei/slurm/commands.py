@@ -2,6 +2,7 @@
 
 import subprocess
 import time
+from datetime import datetime, timedelta
 
 from stoei.logger import get_logger
 from stoei.slurm.formatters import format_job_info, format_node_info, format_sacct_job_info
@@ -784,4 +785,114 @@ def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
         jobs.append((job_id, name, partition, state, time_used, num_nodes, node_list, tres))
 
     logger.debug(f"Found {len(jobs)} jobs for user {username}")
+    return jobs, None
+
+
+# Fields for 6-month energy history query
+# Note: State is included for filtering since --state flag is unreliable on some SLURM versions
+ENERGY_HISTORY_FIELDS = [
+    "JobID",
+    "User",
+    "Elapsed",
+    "NCPUS",
+    "AllocTRES",
+    "State",
+]
+
+# States to include for energy calculations (completed jobs only)
+ENERGY_VALID_STATES = frozenset(
+    {
+        "COMPLETED",
+        "FAILED",
+        "CANCELLED",
+        "TIMEOUT",
+        "NODE_FAIL",
+        "PREEMPTED",
+        "OUT_OF_MEMORY",
+    }
+)
+
+# Number of months for energy history
+ENERGY_HISTORY_MONTHS = 6
+
+
+def get_all_job_history_6months() -> tuple[list[tuple[str, ...]], str | None]:
+    """Get 6 months of completed job history for all users.
+
+    This is used for energy consumption calculations. Only fetches completed
+    jobs (not running or pending) to get accurate elapsed times.
+
+    Returns:
+        Tuple of (jobs list, optional error message).
+        Each job tuple contains: (JobID, User, Elapsed, NCPUS, AllocTRES, State).
+    """
+    try:
+        sacct = resolve_executable("sacct")
+        format_str = ",".join(ENERGY_HISTORY_FIELDS)
+
+        # Calculate start date (SLURM doesn't universally support "now-Xmonths" syntax)
+        start_date = datetime.now() - timedelta(days=ENERGY_HISTORY_MONTHS * 30)
+        start_date_str = start_date.strftime("%Y-%m-%d")
+
+        # Note: We don't use --state filter because it's unreliable on some SLURM versions
+        # (e.g., "CANCELLED by <uid>" doesn't match --state=CANCELLED)
+        # Instead, we filter by state in Python after fetching
+        command = [
+            sacct,
+            "--allusers",
+            f"--format={format_str}",
+            "-S",
+            start_date_str,
+            "-X",  # No job steps, only main job entries
+            "-P",  # Parseable output with | delimiter
+            "--noheader",
+        ]
+        logger.debug(f"Running sacct command for {ENERGY_HISTORY_MONTHS}-month energy history (since {start_date_str})")
+
+        # Use longer timeout for potentially large query
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=60,  # 60 second timeout for large history
+            check=False,
+        )
+    except FileNotFoundError:
+        logger.exception("sacct not found")
+        return [], "sacct not found"
+    except subprocess.TimeoutExpired:
+        logger.exception("Timeout getting 6-month job history")
+        return [], "Timeout getting job history (try shorter period)"
+    except subprocess.SubprocessError:
+        logger.exception("Error getting 6-month job history")
+        return [], "Error getting job history"
+
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() or "Unknown error"
+        logger.warning(f"sacct returned non-zero exit code: {result.returncode}, error: {error_msg}")
+        return [], f"sacct error: {error_msg}"
+
+    # Parse pipe-delimited output
+    jobs: list[tuple[str, ...]] = []
+    lines = result.stdout.strip().split("\n")
+    skipped_states = 0
+
+    for line in lines:
+        if not line.strip():
+            continue
+
+        parts = line.split("|")
+        # We expect 6 fields: JobID, User, Elapsed, NCPUS, AllocTRES, State
+        if len(parts) >= len(ENERGY_HISTORY_FIELDS):
+            # Filter by state - get the base state (e.g., "CANCELLED" from "CANCELLED by 12345")
+            state = parts[5].split()[0] if parts[5] else ""
+            if state not in ENERGY_VALID_STATES:
+                skipped_states += 1
+                continue
+            jobs.append(tuple(parts[: len(ENERGY_HISTORY_FIELDS)]))
+
+    logger.info(
+        f"Fetched {len(jobs)} jobs from {ENERGY_HISTORY_MONTHS}-month history "
+        f"for energy calculation (skipped {skipped_states} with invalid states)"
+    )
     return jobs, None
