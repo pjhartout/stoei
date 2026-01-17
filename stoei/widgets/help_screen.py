@@ -7,6 +7,46 @@ from textual.containers import Container, Vertical, VerticalScroll
 from textual.screen import Screen
 from textual.widgets import Button, Static
 
+from stoei.keybindings import Actions, KeybindingConfig, get_default_config
+
+# Key display names for prettier formatting
+KEY_DISPLAY_NAMES: dict[str, str] = {
+    "question_mark": "?",
+    "slash": "/",
+    "escape": "Esc",
+    "ctrl+q": "Ctrl+Q",
+    "ctrl+h": "Ctrl+H",
+    "ctrl+r": "Ctrl+R",
+    "ctrl+s": "Ctrl+S",
+    "ctrl+o": "Ctrl+O",
+    "ctrl+g": "Ctrl+G",
+    "ctrl+comma": "Ctrl+,",
+    "ctrl+i": "Ctrl+I",
+    "ctrl+c": "Ctrl+C",
+    "ctrl+n": "Ctrl+N",
+    "ctrl+p": "Ctrl+P",
+    "ctrl+u": "Ctrl+U",
+    "ctrl+d": "Ctrl+D",
+    "ctrl+v": "Ctrl+V",
+    "alt+v": "Alt+V",
+    "alt+less": "Alt+<",
+    "alt+greater": "Alt+>",
+}
+
+
+def _format_key(key: str | None) -> str:
+    """Format a key for display.
+
+    Args:
+        key: The key string from keybindings.
+
+    Returns:
+        Human-readable key display.
+    """
+    if key is None:
+        return ""
+    return KEY_DISPLAY_NAMES.get(key, key)
+
 
 class HelpScreen(Screen[None]):
     """Modal screen displaying all keybindings."""
@@ -17,16 +57,35 @@ class HelpScreen(Screen[None]):
         ("?", "close", "Close"),
     )
 
+    def __init__(
+        self,
+        keybindings: KeybindingConfig | None = None,
+        name: str | None = None,
+        id: str | None = None,
+        classes: str | None = None,
+    ) -> None:
+        """Initialize the help screen.
+
+        Args:
+            keybindings: Optional keybinding configuration to display.
+            name: The name of the screen.
+            id: The ID of the screen.
+            classes: CSS classes for the screen.
+        """
+        super().__init__(name=name, id=id, classes=classes)
+        self._keybindings = keybindings or get_default_config()
+
     def compose(self) -> ComposeResult:
         """Create the help screen layout.
 
         Yields:
             The widgets that make up the help screen.
         """
+        mode_display = self._keybindings.preset.upper()
         with Vertical(id="help-container"):
             with Container(id="help-header"):
                 yield Static(
-                    "❓  [bold]Keyboard Shortcuts[/bold]",
+                    f"❓  [bold]Keyboard Shortcuts[/bold] [dim]({mode_display} mode)[/dim]",
                     id="help-title",
                 )
 
@@ -46,6 +105,8 @@ class HelpScreen(Screen[None]):
         Returns:
             Formatted help text with keybindings.
         """
+        kb = self._keybindings
+
         sections = [
             self._format_section(
                 "Navigation",
@@ -60,12 +121,22 @@ class HelpScreen(Screen[None]):
                 ],
             ),
             self._format_section(
+                "Table Filtering & Sorting",
+                [
+                    (_format_key(kb.get_key(Actions.FILTER_SHOW)), "Show filter bar"),
+                    (_format_key(kb.get_key(Actions.FILTER_HIDE)), "Hide filter / Clear"),
+                    (_format_key(kb.get_key(Actions.SORT_CYCLE)), "Cycle sort order"),
+                    ("", "Filter syntax: 'state:RUNNING'"),
+                    ("", "or general search terms"),
+                ],
+            ),
+            self._format_section(
                 "Jobs Tab",
                 [
                     ("↑/↓", "Navigate jobs list"),
                     ("Enter", "View selected job details"),
-                    ("i", "Input job ID to view"),
-                    ("c", "Cancel selected job"),
+                    (_format_key(kb.get_key(Actions.JOB_INFO)), "Input job ID to view"),
+                    (_format_key(kb.get_key(Actions.JOB_CANCEL)), "Cancel selected job"),
                 ],
             ),
             self._format_section(
@@ -78,8 +149,8 @@ class HelpScreen(Screen[None]):
             self._format_section(
                 "Job/Node Details",
                 [
-                    ("o", "Open stdout log (jobs only)"),
-                    ("e", "Open stderr log (jobs only)"),
+                    (_format_key(kb.get_key(Actions.OPEN_STDOUT)), "Open stdout log (jobs only)"),
+                    (_format_key(kb.get_key(Actions.OPEN_STDERR)), "Open stderr log (jobs only)"),
                     ("↑/↓", "Scroll content"),
                     ("Esc/q", "Close dialog"),
                 ],
@@ -87,12 +158,12 @@ class HelpScreen(Screen[None]):
             self._format_section(
                 "Log Viewer",
                 [
-                    ("g", "Go to top"),
-                    ("G", "Go to bottom"),
-                    ("l", "Toggle line numbers"),
-                    ("r", "Reload file"),
-                    ("e", "Open in $EDITOR"),
-                    ("/", "Search (if available)"),
+                    (_format_key(kb.get_key(Actions.LOG_TOP)), "Go to top"),
+                    (_format_key(kb.get_key(Actions.LOG_BOTTOM)), "Go to bottom"),
+                    (_format_key(kb.get_key(Actions.LOG_LINE_NUMBERS)), "Toggle line numbers"),
+                    (_format_key(kb.get_key(Actions.LOG_RELOAD)), "Reload file"),
+                    (_format_key(kb.get_key(Actions.LOG_EDITOR)), "Open in $EDITOR"),
+                    (_format_key(kb.get_key(Actions.LOG_SEARCH)), "Search"),
                     ("Esc/q", "Close viewer"),
                 ],
             ),
@@ -105,7 +176,7 @@ class HelpScreen(Screen[None]):
                     ("←/→", "Cycle dropdown options"),
                     ("Enter", "Confirm selection / Next field"),
                     ("Home/End", "First / Last field"),
-                    ("t/l/m", "Jump to Theme/Level/Max"),
+                    ("t/l/m/k", "Jump to Theme/Level/Max/Keybind"),
                     ("Ctrl+S", "Save settings"),
                     ("Esc/q", "Cancel and close"),
                 ],
@@ -113,10 +184,10 @@ class HelpScreen(Screen[None]):
             self._format_section(
                 "General",
                 [
-                    ("r", "Refresh data now"),
-                    ("s", "Open settings"),
-                    ("?", "Show this help screen"),
-                    ("q", "Quit application"),
+                    (_format_key(kb.get_key(Actions.REFRESH)), "Refresh data now"),
+                    (_format_key(kb.get_key(Actions.SETTINGS)), "Open settings"),
+                    (_format_key(kb.get_key(Actions.HELP)), "Show this help screen"),
+                    (_format_key(kb.get_key(Actions.QUIT)), "Quit application"),
                 ],
             ),
         ]

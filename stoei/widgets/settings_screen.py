@@ -12,6 +12,7 @@ from textual.widgets import Button, Input, Select, Static
 
 from stoei.logger import get_logger
 from stoei.settings import (
+    KEYBIND_MODES,
     LOG_LEVELS,
     MAX_JOB_HISTORY_DAYS,
     MAX_REFRESH_INTERVAL,
@@ -41,6 +42,7 @@ class SettingsScreen(Screen[Settings | None]):
         ("m", "jump_max_lines", "Jump to Max Lines"),
         ("r", "jump_refresh", "Jump to Refresh Interval"),
         ("h", "jump_history", "Jump to History Days"),
+        ("k", "jump_keybind", "Jump to Keybind Mode"),
     )
 
     # Order of focusable widgets for navigation
@@ -50,6 +52,7 @@ class SettingsScreen(Screen[Settings | None]):
         "#settings-max-lines",
         "#settings-refresh-interval",
         "#settings-job-history-days",
+        "#settings-keybind-mode",
         "#settings-save",
         "#settings-cancel",
     )
@@ -95,6 +98,14 @@ class SettingsScreen(Screen[Settings | None]):
                 classes="settings-label",
             )
             yield Input(str(self._settings.job_history_days), id="settings-job-history-days")
+            yield Static("Keybind mode", classes="settings-label")
+            yield Select(
+                [(mode.capitalize(), mode) for mode in KEYBIND_MODES],
+                value=self._settings.keybind_mode,
+                prompt="Select keybind mode",
+                allow_blank=False,
+                id="settings-keybind-mode",
+            )
             with Container(id="settings-button-row"):
                 yield Button("💾 Save", variant="primary", id="settings-save")
                 yield Button("✕ Cancel", variant="default", id="settings-cancel")
@@ -317,7 +328,7 @@ class SettingsScreen(Screen[Settings | None]):
         if validated is not None:
             self.dismiss(validated)
 
-    def _validate_all_settings(self) -> Settings | None:
+    def _validate_all_settings(self) -> Settings | None:  # noqa: PLR0911
         """Validate all settings fields and return Settings if valid, None otherwise."""
         theme = self._validate_theme()
         if theme is None:
@@ -339,12 +350,17 @@ class SettingsScreen(Screen[Settings | None]):
         if job_history_days is None:
             return None
 
+        keybind_mode = self._validate_keybind_mode()
+        if keybind_mode is None:
+            return None
+
         return Settings(
             theme=theme,
             log_level=log_level,
             max_log_lines=max_lines,
             refresh_interval=refresh_interval,
             job_history_days=job_history_days,
+            keybind_mode=keybind_mode,
         )
 
     def _validate_theme(self) -> str | None:
@@ -414,3 +430,23 @@ class SettingsScreen(Screen[Settings | None]):
             )
             return None
         return job_history_days
+
+    def _validate_keybind_mode(self) -> str | None:
+        """Validate and return keybind mode selection."""
+        keybind_select = self.query_one("#settings-keybind-mode", Select)
+        keybind_value = keybind_select.value
+        if not isinstance(keybind_value, str) or keybind_value not in KEYBIND_MODES:
+            logger.warning("Invalid keybind mode selection")
+            self.app.notify("Please select a valid keybind mode", severity="warning")
+            return None
+        return keybind_value
+
+    def action_jump_keybind(self) -> None:
+        """Jump focus to the keybind mode selector."""
+        # Don't jump if currently typing in the input field
+        if isinstance(self.focused, Input):
+            return
+        try:
+            self.query_one("#settings-keybind-mode", Select).focus()
+        except Exception as exc:
+            logger.debug(f"Failed to focus keybind mode selector: {exc}")

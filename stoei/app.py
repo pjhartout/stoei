@@ -6,18 +6,18 @@ import time
 from pathlib import Path
 from typing import ClassVar
 
-from rich.console import RenderableType
 from textual._path import CSSPathType
 from textual.app import App, ComposeResult
-from textual.binding import BindingType
+from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.events import Key
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Static
-from textual.widgets.data_table import ColumnKey, RowKey
+from textual.widgets.data_table import RowKey
 from textual.worker import Worker, WorkerState
 
 from stoei.colors import get_theme_colors
+from stoei.keybindings import Actions, KeybindingConfig
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
 from stoei.settings import Settings, load_settings, save_settings
 from stoei.slurm.array_parser import parse_array_size
@@ -46,6 +46,7 @@ from stoei.slurm.gpu_parser import (
 from stoei.slurm.validation import check_slurm_available
 from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats, PendingPartitionStats
+from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
 from stoei.widgets.help_screen import HelpScreen
 from stoei.widgets.loading_indicator import LoadingIndicator
 from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
@@ -109,22 +110,34 @@ class SlurmMonitor(App[None]):
         "text-on-success": "ansi_black",
     }
     BINDINGS: ClassVar[list[BindingType]] = [
-        ("q", "quit", "Quit"),
-        ("r", "refresh", "Refresh Now"),
-        ("s", "show_settings", "Settings"),
-        ("i", "show_job_info", "Job Info"),
-        ("enter", "show_selected_job_info", "View Selected Job"),
-        ("c", "cancel_job", "Cancel Job"),
-        ("1", "switch_tab_jobs", "Jobs Tab"),
-        ("2", "switch_tab_nodes", "Nodes Tab"),
-        ("3", "switch_tab_users", "Users Tab"),
-        ("4", "switch_tab_logs", "Logs Tab"),
-        ("left", "previous_tab", "Previous Tab"),
-        ("right", "next_tab", "Next Tab"),
-        ("shift+tab", "previous_tab", "Previous Tab"),
-        ("question_mark", "show_help", "Help"),
+        # Essential bindings (shown in footer)
+        Binding("question_mark", "show_help", "Help", show=True, priority=True),
+        Binding("q", "quit", "Quit", show=True),
+        Binding("r", "refresh", "Refresh", show=True),
+        Binding("s", "show_settings", "Settings", show=True),
+        # Contextual bindings (hidden from footer, discoverable via ?)
+        Binding("i", "show_job_info", "Job Info", show=False),
+        Binding("enter", "show_selected_job_info", "View Selected Job", show=False),
+        Binding("c", "cancel_job", "Cancel Job", show=False),
+        # Tab navigation (hidden - use arrow keys or numbers)
+        Binding("1", "switch_tab_jobs", "Jobs Tab", show=False),
+        Binding("2", "switch_tab_nodes", "Nodes Tab", show=False),
+        Binding("3", "switch_tab_users", "Users Tab", show=False),
+        Binding("4", "switch_tab_logs", "Logs Tab", show=False),
+        Binding("left", "previous_tab", "Previous Tab", show=False),
+        Binding("right", "next_tab", "Next Tab", show=False),
+        Binding("shift+tab", "previous_tab", "Previous Tab", show=False),
     ]
     JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList", "Timeline")
+    JOB_TABLE_COLUMN_CONFIGS: ClassVar[list[ColumnConfig]] = [
+        ColumnConfig(name="JobID", key="jobid", sortable=True, filterable=True),
+        ColumnConfig(name="Name", key="name", sortable=True, filterable=True),
+        ColumnConfig(name="State", key="state", sortable=True, filterable=True),
+        ColumnConfig(name="Time", key="time", sortable=True, filterable=True),
+        ColumnConfig(name="Nodes", key="nodes", sortable=True, filterable=True),
+        ColumnConfig(name="NodeList", key="nodelist", sortable=True, filterable=True),
+        ColumnConfig(name="Timeline", key="timeline", sortable=False, filterable=True),
+    ]
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         """Provide default values for custom theme variables."""
@@ -147,10 +160,14 @@ class SlurmMonitor(App[None]):
         self._energy_history_jobs: list[tuple[str, ...]] = []  # 6-month energy history (loaded once at startup)
         self._is_narrow: bool = False
         self._loading_screen: LoadingScreen | None = None
-        self._job_row_keys: dict[str, RowKey] = {}
-        self._job_table_column_keys: list[ColumnKey] = []
         self._last_history_jobs: list[tuple[str, ...]] = []
         self._last_history_stats: tuple[int, int, int] = (0, 0, 0)
+        self._keybindings: KeybindingConfig = self._settings.get_keybindings()
+
+    @property
+    def keybindings(self) -> KeybindingConfig:
+        """Get the current keybinding configuration."""
+        return self._keybindings
 
     def compose(self) -> ComposeResult:
         """Create the UI layout.
@@ -170,7 +187,13 @@ class SlurmMonitor(App[None]):
                 with Container(id="tab-jobs-content", classes="tab-content"):
                     with Horizontal(id="jobs-header"):
                         yield Static("[bold]📋 My Jobs[/bold]", id="jobs-title")
-                    yield DataTable(id="jobs_table")
+                    yield FilterableDataTable(
+                        columns=self.JOB_TABLE_COLUMN_CONFIGS,
+                        keybind_mode=self._settings.keybind_mode,
+                        keybindings=self._keybindings,
+                        table_id="jobs_table",
+                        id="jobs-filterable-table",
+                    )
 
                 # Nodes tab
                 with Container(id="tab-nodes-content", classes="tab-content"):
@@ -206,12 +229,8 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.warning(f"Failed to set tab visibility: {exc}")
 
-        jobs_table = self.query_one("#jobs_table", DataTable)
-        jobs_table.cursor_type = "row"
-        self._job_table_column_keys = jobs_table.add_columns(
-            "JobID", "Name", "State", "Time", "Nodes", "NodeList", "Timeline"
-        )
-        logger.debug("Jobs table columns added, ready for data")
+        # Jobs table is now set up by FilterableDataTable
+        logger.debug("Jobs table ready for data")
 
         # Show loading screen and start step-by-step loading
         self._loading_screen = LoadingScreen(LOADING_STEPS)
@@ -477,6 +496,22 @@ class SlurmMonitor(App[None]):
             self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
             logger.info(f"Refresh interval changed from {old_interval}s to {new_interval}s")
 
+    def _apply_keybind_mode(self, settings: Settings) -> None:
+        """Apply keybind mode to all filterable tables.
+
+        Args:
+            settings: The current settings containing keybind mode and overrides.
+        """
+        # Update app-level keybindings
+        self._keybindings = settings.get_keybindings()
+
+        try:
+            for table in self.query(FilterableDataTable):
+                table.set_keybind_mode(settings.keybind_mode, self._keybindings)
+            logger.debug(f"Applied keybind mode: {settings.keybind_mode}")
+        except Exception as exc:
+            logger.debug(f"Failed to apply keybind mode: {exc}")
+
     def action_show_settings(self) -> None:
         """Open the settings screen."""
         self.push_screen(SettingsScreen(self._settings), self._handle_settings_updated)
@@ -496,6 +531,7 @@ class SlurmMonitor(App[None]):
         self._apply_log_pane_settings()
         self._apply_log_settings()
         self._apply_refresh_interval(old_settings.refresh_interval, settings.refresh_interval)
+        self._apply_keybind_mode(settings)
         self.notify("Settings saved")
 
     def _start_refresh_worker(self) -> None:
@@ -615,37 +651,25 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.debug(f"Failed to toggle loading indicator: {exc}")
 
-    def _update_jobs_table(self, jobs_table: DataTable) -> None:
+    def _update_jobs_table(self, jobs_filterable: FilterableDataTable) -> None:
         """Update the jobs table with cached job data.
 
         Args:
-            jobs_table: The DataTable widget to update.
+            jobs_filterable: The FilterableDataTable widget to update.
         """
-        cursor_row = jobs_table.cursor_row
-        cursor_job_id = self._job_id_from_row_index(jobs_table, cursor_row)
-
         jobs = self._sorted_jobs_for_display(self._job_cache.jobs)
-        desired_job_ids = {job.job_id for job in jobs}
 
-        desired_order = [job.job_id for job in jobs]
-        current_order = self._current_jobs_table_order(jobs_table)
+        # Convert jobs to row tuples
+        rows: list[tuple[str, ...]] = []
+        for job in jobs:
+            row_values = self._job_row_values(job)
+            rows.append(tuple(row_values))
 
-        # If order changed (e.g., new/pending job submitted), rebuild to ensure "top of queue" ordering.
-        if current_order != desired_order:
-            removed_rows = jobs_table.row_count
-            rows_changed = self._rebuild_jobs_table(jobs_table, jobs)
-        else:
-            removed_rows = self._remove_missing_job_rows(jobs_table, desired_job_ids)
-            rows_changed = self._upsert_job_rows(jobs_table, jobs)
+        # Use set_data to update the filterable table
+        jobs_filterable.set_data(rows)
+        jobs_filterable.display = len(rows) > 0
 
-        cursor_restored = self._restore_jobs_table_cursor(jobs_table, cursor_row, cursor_job_id)
-        jobs_table.display = jobs_table.row_count > 0
-        if not cursor_restored and jobs_table.row_count == 0:
-            jobs_table.cursor_type = "row"
-
-        logger.debug(
-            f"Jobs table reconciled: {jobs_table.row_count} rows, {rows_changed} updates, {removed_rows} removals"
-        )
+        logger.debug(f"Jobs table updated: {len(rows)} jobs")
 
     def _sorted_jobs_for_display(self, jobs: list[Job]) -> list[Job]:
         """Sort jobs for stable, user-friendly display.
@@ -673,148 +697,6 @@ class SlurmMonitor(App[None]):
 
         return sorted(jobs, key=_sort_key)
 
-    def _current_jobs_table_order(self, jobs_table: DataTable) -> list[str]:
-        """Return the current job ID order in the table (top to bottom)."""
-        job_ids: list[str] = []
-        for idx in range(jobs_table.row_count):
-            try:
-                row = jobs_table.get_row_at(idx)
-            except Exception as exc:
-                logger.debug(f"Failed to read jobs table row {idx}: {exc}")
-                continue
-            if not row:
-                continue
-            job_ids.append(str(row[0]))
-        return job_ids
-
-    def _rebuild_jobs_table(self, jobs_table: DataTable, jobs: list[Job]) -> int:
-        """Clear and repopulate the jobs table in the provided order."""
-        jobs_table.clear(columns=False)
-        self._job_row_keys.clear()
-        changes = 0
-        for job in jobs:
-            try:
-                new_key = jobs_table.add_row(*self._job_row_values(job))
-            except Exception:
-                logger.exception(f"Failed to add job {job.job_id} to table")
-                continue
-            self._job_row_keys[job.job_id] = new_key
-            changes += 1
-        return changes
-
-    def _remove_missing_job_rows(self, jobs_table: DataTable, desired_job_ids: set[str]) -> int:
-        """Remove rows that are no longer present in the latest data."""
-        removed = 0
-        for job_id in list(self._job_row_keys):
-            if job_id in desired_job_ids:
-                continue
-            row_key = self._job_row_keys.pop(job_id)
-            try:
-                jobs_table.remove_row(row_key)
-                removed += 1
-            except Exception as exc:
-                logger.debug(f"Failed to remove row for {job_id}: {exc}")
-        return removed
-
-    def _upsert_job_rows(self, jobs_table: DataTable, jobs: list[Job]) -> int:
-        """Insert new rows and update existing ones with the latest job data."""
-        changes = 0
-        for job in jobs:
-            row_values = self._job_row_values(job)
-            row_key = self._job_row_keys.get(job.job_id)
-            if row_key is None:
-                try:
-                    new_key = jobs_table.add_row(*row_values)
-                    self._job_row_keys[job.job_id] = new_key
-                    changes += 1
-                except Exception:
-                    logger.exception(f"Failed to add job {job.job_id} to table")
-                continue
-            current_row = self._safe_get_row(jobs_table, row_key)
-            if current_row is None or len(current_row) != len(row_values):
-                if self._replace_job_row(jobs_table, job.job_id, row_key, row_values):
-                    changes += 1
-                continue
-            if self._update_changed_cells(jobs_table, row_key, row_values, current_row, job.job_id):
-                changes += 1
-        return changes
-
-    def _safe_get_row(self, jobs_table: DataTable, row_key: RowKey) -> list[RenderableType] | None:
-        """Return row values for the provided key, handling missing rows gracefully."""
-        try:
-            return jobs_table.get_row(row_key)
-        except Exception:
-            return None
-
-    def _replace_job_row(
-        self,
-        jobs_table: DataTable,
-        job_id: str,
-        old_key: RowKey,
-        row_values: list[str],
-    ) -> bool:
-        """Replace an existing row entirely."""
-        try:
-            jobs_table.remove_row(old_key)
-        except Exception as exc:
-            logger.debug(f"Failed to remove stale row for {job_id}: {exc}")
-        try:
-            new_key = jobs_table.add_row(*row_values)
-        except Exception:
-            logger.exception(f"Failed to re-add row for {job_id}")
-            return False
-        self._job_row_keys[job_id] = new_key
-        return True
-
-    def _update_changed_cells(
-        self,
-        jobs_table: DataTable,
-        row_key: RowKey,
-        new_values: list[str],
-        existing_values: list[RenderableType],
-        job_id: str,
-    ) -> bool:
-        """Update individual cells that have changed."""
-        updated = False
-        for idx, (new_value, existing_value) in enumerate(zip(new_values, existing_values, strict=False)):
-            # existing_value may be a Text/Renderable, so normalize to string for comparison
-            if new_value == str(existing_value):
-                continue
-            try:
-                column_key: ColumnKey | str
-                if idx < len(self._job_table_column_keys):
-                    column_key = self._job_table_column_keys[idx]
-                else:
-                    column_key = self.JOB_TABLE_COLUMNS[idx] if idx < len(self.JOB_TABLE_COLUMNS) else str(idx)
-                jobs_table.update_cell(row_key, column_key, new_value)
-                updated = True
-            except Exception:
-                column_name = self.JOB_TABLE_COLUMNS[idx] if idx < len(self.JOB_TABLE_COLUMNS) else str(idx)
-                logger.exception(f"Failed to update {column_name} for job {job_id}")
-        return updated
-
-    def _restore_jobs_table_cursor(
-        self,
-        jobs_table: DataTable,
-        cursor_row: int | None,
-        cursor_job_id: str | None,
-    ) -> bool:
-        """Restore the cursor position after the table has been updated."""
-        if cursor_job_id and cursor_job_id in self._job_row_keys:
-            try:
-                row_index = jobs_table.get_row_index(self._job_row_keys[cursor_job_id])
-            except Exception as exc:
-                logger.debug(f"Failed to restore cursor to job {cursor_job_id}: {exc}")
-            else:
-                jobs_table.move_cursor(row=row_index)
-                return True
-        if jobs_table.row_count == 0:
-            return False
-        target_row = cursor_row if cursor_row is not None else 0
-        target_row = max(0, min(target_row, jobs_table.row_count - 1))
-        jobs_table.move_cursor(row=target_row)
-        return True
-
     def _job_row_values(self, job: Job) -> list[str]:
         """Build the row values for a job."""
         state_display = self._format_state(job.state, job.state_category)
@@ -835,16 +717,6 @@ class SlurmMonitor(App[None]):
             timeline,
         ]
 
-    def _job_id_from_row_index(self, jobs_table: DataTable, row_index: int | None) -> str | None:
-        """Get job ID from a row index if available."""
-        if row_index is None or row_index < 0:
-            return None
-        try:
-            row_values = jobs_table.get_row_at(row_index)
-        except Exception:
-            return None
-        return row_values[0] if row_values else None
-
     def _update_ui_from_cache(self) -> None:
         """Update UI components from cached data (must run on main thread)."""
         # Check which tab is active
@@ -857,8 +729,8 @@ class SlurmMonitor(App[None]):
         # Only update jobs table if jobs tab is active
         if active_tab == "jobs":
             try:
-                jobs_table = self.query_one("#jobs_table", DataTable)
-                self._update_jobs_table(jobs_table)
+                jobs_filterable = self.query_one("#jobs-filterable-table", FilterableDataTable)
+                self._update_jobs_table(jobs_filterable)
             except Exception:
                 logger.exception("Failed to find jobs table")
 
@@ -1425,6 +1297,8 @@ class SlurmMonitor(App[None]):
     def on_key(self, event: Key) -> None:
         """Handle key events, intercepting Tab for tab navigation.
 
+        Also handles emacs-mode keybindings when in emacs mode.
+
         Args:
             event: The key event.
         """
@@ -1433,11 +1307,27 @@ class SlurmMonitor(App[None]):
         if event.key == "tab" and event.name == "tab":
             event.prevent_default()
             self.action_next_tab()
+            return
+
+        # Handle emacs-mode keybindings
+        if self._settings.keybind_mode == "emacs":
+            key = event.key
+            action_map = {
+                self._keybindings.get_key(Actions.QUIT): self.action_quit,
+                self._keybindings.get_key(Actions.HELP): self.action_show_help,
+                self._keybindings.get_key(Actions.REFRESH): self.action_refresh,
+                self._keybindings.get_key(Actions.SETTINGS): self.action_show_settings,
+                self._keybindings.get_key(Actions.JOB_INFO): self.action_show_job_info,
+                self._keybindings.get_key(Actions.JOB_CANCEL): self.action_cancel_job,
+            }
+            if key in action_map and action_map[key] is not None:
+                event.prevent_default()
+                action_map[key]()
 
     def action_show_help(self) -> None:
         """Show help screen with keybindings."""
         logger.debug("Showing help screen")
-        self.push_screen(HelpScreen())
+        self.push_screen(HelpScreen(keybindings=self._keybindings))
 
     def action_show_job_info(self) -> None:
         """Show job info dialog."""

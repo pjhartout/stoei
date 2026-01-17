@@ -328,7 +328,7 @@ class TestAppClusterIntegration:
 
     def test_bindings_include_tab_shortcuts(self, app: SlurmMonitor) -> None:
         """Test that keyboard bindings include tab switching shortcuts."""
-        binding_keys = [b[0] for b in app.BINDINGS]
+        binding_keys = [b.key for b in app.BINDINGS]
         assert "1" in binding_keys
         assert "2" in binding_keys
         assert "3" in binding_keys
@@ -339,7 +339,7 @@ class TestAppClusterIntegration:
 
     def test_bindings_tab_shortcuts_have_correct_actions(self, app: SlurmMonitor) -> None:
         """Test that tab shortcut bindings have correct action names."""
-        bindings_dict = {b[0]: b[1] for b in app.BINDINGS}
+        bindings_dict = {b.key: b.action for b in app.BINDINGS}
         assert bindings_dict["1"] == "switch_tab_jobs"
         assert bindings_dict["2"] == "switch_tab_nodes"
         assert bindings_dict["3"] == "switch_tab_users"
@@ -350,7 +350,7 @@ class TestAppClusterIntegration:
 
     def test_bindings_include_settings_shortcut(self, app: SlurmMonitor) -> None:
         """Test that settings shortcut binding exists."""
-        bindings_dict = {b[0]: b[1] for b in app.BINDINGS}
+        bindings_dict = {b.key: b.action for b in app.BINDINGS}
         assert bindings_dict["s"] == "show_settings"
 
     async def test_action_next_tab_cycles_forward(self, app: SlurmMonitor) -> None:
