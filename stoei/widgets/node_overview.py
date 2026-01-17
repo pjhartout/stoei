@@ -5,9 +5,11 @@ from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from stoei.colors import get_theme_colors
+from stoei.settings import load_settings
+from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
 
 
 @dataclass
@@ -58,6 +60,19 @@ class NodeOverviewTab(VerticalScroll):
     }
     """
 
+    NODE_TABLE_COLUMN_CONFIGS: ClassVar[list[ColumnConfig]] = [
+        ColumnConfig(name="Node", key="node", sortable=True, filterable=True),
+        ColumnConfig(name="State", key="state", sortable=True, filterable=True),
+        ColumnConfig(name="CPUs", key="cpus", sortable=True, filterable=True),
+        ColumnConfig(name="CPU%", key="cpu_pct", sortable=True, filterable=False),
+        ColumnConfig(name="Memory", key="memory", sortable=True, filterable=True),
+        ColumnConfig(name="Mem%", key="mem_pct", sortable=True, filterable=False),
+        ColumnConfig(name="GPUs", key="gpus", sortable=True, filterable=True),
+        ColumnConfig(name="GPU%", key="gpu_pct", sortable=True, filterable=False),
+        ColumnConfig(name="GPU Types", key="gpu_types", sortable=True, filterable=True),
+        ColumnConfig(name="Partitions", key="partitions", sortable=True, filterable=True),
+    ]
+
     def __init__(
         self,
         *,
@@ -76,28 +91,21 @@ class NodeOverviewTab(VerticalScroll):
         """
         super().__init__(name=name, id=id, classes=classes, disabled=disabled)
         self.nodes: list[NodeInfo] = []
+        self._settings = load_settings()
 
     def compose(self) -> ComposeResult:
         """Create the node overview layout."""
         yield Static("[bold]🖥️  Node Overview[/bold]", id="node-overview-title")
-        yield DataTable(id="nodes_table")
+        yield FilterableDataTable(
+            columns=self.NODE_TABLE_COLUMN_CONFIGS,
+            keybind_mode=self._settings.keybind_mode,
+            table_id="nodes_table",
+            id="nodes-filterable-table",
+        )
 
     def on_mount(self) -> None:
         """Initialize the data table."""
-        nodes_table = self.query_one("#nodes_table", DataTable)
-        nodes_table.cursor_type = "row"
-        nodes_table.add_columns(
-            "Node",
-            "State",
-            "CPUs",
-            "CPU%",
-            "Memory",
-            "Mem%",
-            "GPUs",
-            "GPU%",
-            "GPU Types",
-            "Partitions",
-        )
+        # FilterableDataTable handles column setup
         # If we already have nodes data, update the table
         if self.nodes:
             self.update_nodes(self.nodes)
@@ -110,32 +118,26 @@ class NodeOverviewTab(VerticalScroll):
         """
         self.nodes = nodes
         try:
-            nodes_table = self.query_one("#nodes_table", DataTable)
+            nodes_filterable = self.query_one("#nodes-filterable-table", FilterableDataTable)
         except Exception:
             # Table might not be mounted yet, store nodes for later
             return
 
-        # Save cursor position
-        cursor_row = nodes_table.cursor_row
-
-        nodes_table.clear()
-
+        # Build row data
+        rows: list[tuple[str, ...]] = []
         for node in nodes:
             # Format CPU usage
             cpu_display = f"{node.cpus_alloc}/{node.cpus_total}"
-            cpu_pct = node.cpu_usage_pct
-            cpu_pct_str = self._format_pct(cpu_pct)
+            cpu_pct_str = self._format_pct(node.cpu_usage_pct)
 
             # Format memory usage
             mem_display = f"{node.memory_alloc_gb:.1f}/{node.memory_total_gb:.1f} GB"
-            mem_pct = node.memory_usage_pct
-            mem_pct_str = self._format_pct(mem_pct)
+            mem_pct_str = self._format_pct(node.memory_usage_pct)
 
             # Format GPU usage
             if node.gpus_total > 0:
                 gpu_display = f"{node.gpus_alloc}/{node.gpus_total}"
-                gpu_pct = node.gpu_usage_pct
-                gpu_pct_str = self._format_pct(gpu_pct)
+                gpu_pct_str = self._format_pct(node.gpu_usage_pct)
                 gpu_types_display = node.gpu_types if node.gpu_types else "N/A"
             else:
                 gpu_display = "N/A"
@@ -149,23 +151,23 @@ class NodeOverviewTab(VerticalScroll):
             node_name = node.name if node.name else "N/A"
             partitions_display = node.partitions if node.partitions else "N/A"
 
-            nodes_table.add_row(
-                node_name,
-                state_display,
-                cpu_display,
-                cpu_pct_str,
-                mem_display,
-                mem_pct_str,
-                gpu_display,
-                gpu_pct_str,
-                gpu_types_display,
-                partitions_display,
+            rows.append(
+                (
+                    node_name,
+                    state_display,
+                    cpu_display,
+                    cpu_pct_str,
+                    mem_display,
+                    mem_pct_str,
+                    gpu_display,
+                    gpu_pct_str,
+                    gpu_types_display,
+                    partitions_display,
+                )
             )
 
-        # Restore cursor position
-        if cursor_row is not None and nodes_table.row_count > 0:
-            new_row = min(cursor_row, nodes_table.row_count - 1)
-            nodes_table.move_cursor(row=new_row)
+        # Use set_data to update with filtering/sorting support
+        nodes_filterable.set_data(rows)
 
     def _format_pct(self, pct: float) -> str:
         """Format percentage with color coding.

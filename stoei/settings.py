@@ -5,15 +5,18 @@ from __future__ import annotations
 import json
 import os
 from collections.abc import Mapping
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
+from stoei.keybindings import DEFAULT_PRESET, KeybindingConfig
 from stoei.logger import get_logger
 from stoei.themes import DEFAULT_THEME_NAME, THEME_LABELS
 
 logger = get_logger(__name__)
 
 LOG_LEVELS: tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+KEYBIND_MODES: tuple[str, ...] = ("vim", "emacs")
+DEFAULT_KEYBIND_MODE = DEFAULT_PRESET
 MIN_LOG_LINES = 200
 DEFAULT_MAX_LOG_LINES = 2000
 
@@ -43,6 +46,20 @@ class Settings:
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
     job_history_days: int = DEFAULT_JOB_HISTORY_DAYS
     log_viewer_lines: int = DEFAULT_LOG_VIEWER_LINES
+    keybind_mode: str = DEFAULT_KEYBIND_MODE
+    # Store keybinding overrides as tuple of (action, key) pairs (hashable for frozen dataclass)
+    keybind_overrides: tuple[tuple[str, str], ...] = ()
+
+    def get_keybindings(self) -> KeybindingConfig:
+        """Get the keybinding configuration.
+
+        Returns:
+            KeybindingConfig with the current preset and overrides.
+        """
+        return KeybindingConfig(
+            preset=self.keybind_mode,
+            overrides=dict(self.keybind_overrides),
+        )
 
     @classmethod
     def from_mapping(cls, data: Mapping[str, object]) -> Settings:
@@ -88,6 +105,23 @@ class Settings:
         ):
             log_viewer_lines = DEFAULT_LOG_VIEWER_LINES
 
+        keybind_mode_value = _coerce_str(data.get("keybind_mode"))
+        keybind_mode = (
+            keybind_mode_value
+            if keybind_mode_value is not None and keybind_mode_value in KEYBIND_MODES
+            else DEFAULT_KEYBIND_MODE
+        )
+
+        # Parse keybind overrides
+        keybind_overrides: tuple[tuple[str, str], ...] = ()
+        raw_overrides = data.get("keybind_overrides")
+        if isinstance(raw_overrides, dict):
+            parsed: list[tuple[str, str]] = []
+            for action, key in raw_overrides.items():
+                if isinstance(action, str) and isinstance(key, str):
+                    parsed.append((action, key))
+            keybind_overrides = tuple(parsed)
+
         return cls(
             theme=theme,
             log_level=log_level,
@@ -95,6 +129,8 @@ class Settings:
             refresh_interval=refresh_interval,
             job_history_days=job_history_days,
             log_viewer_lines=log_viewer_lines,
+            keybind_mode=keybind_mode,
+            keybind_overrides=keybind_overrides,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -103,7 +139,16 @@ class Settings:
         Returns:
             Dictionary representation of settings.
         """
-        return asdict(self)
+        return {
+            "theme": self.theme,
+            "log_level": self.log_level,
+            "max_log_lines": self.max_log_lines,
+            "refresh_interval": self.refresh_interval,
+            "job_history_days": self.job_history_days,
+            "log_viewer_lines": self.log_viewer_lines,
+            "keybind_mode": self.keybind_mode,
+            "keybind_overrides": dict(self.keybind_overrides),
+        }
 
 
 def get_config_dir() -> Path:

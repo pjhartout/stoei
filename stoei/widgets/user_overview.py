@@ -10,9 +10,10 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
 from textual.message import Message
-from textual.widgets import DataTable, Static
+from textual.widgets import Static
 
 from stoei.logger import get_logger
+from stoei.settings import load_settings
 from stoei.slurm.array_parser import parse_array_size
 from stoei.slurm.energy import (
     calculate_job_energy_wh,
@@ -28,6 +29,7 @@ from stoei.slurm.gpu_parser import (
     has_specific_gpu_types,
     parse_gpu_entries,
 )
+from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
 
 logger = get_logger(__name__)
 
@@ -159,6 +161,34 @@ class UserOverviewTab(VerticalScroll):
         Binding("e", "switch_subtab_energy", "Energy", show=False),
     ]
 
+    # Column configs for each user table
+    RUNNING_USERS_COLUMNS: ClassVar[list[ColumnConfig]] = [
+        ColumnConfig(name="User", key="user", sortable=True, filterable=True),
+        ColumnConfig(name="Jobs", key="jobs", sortable=True, filterable=True),
+        ColumnConfig(name="CPUs", key="cpus", sortable=True, filterable=True),
+        ColumnConfig(name="Memory (GB)", key="memory", sortable=True, filterable=True),
+        ColumnConfig(name="GPUs", key="gpus", sortable=True, filterable=True),
+        ColumnConfig(name="GPU Types", key="gpu_types", sortable=True, filterable=True),
+        ColumnConfig(name="Nodes", key="nodes", sortable=True, filterable=True),
+    ]
+
+    PENDING_USERS_COLUMNS: ClassVar[list[ColumnConfig]] = [
+        ColumnConfig(name="User", key="user", sortable=True, filterable=True),
+        ColumnConfig(name="Pending Jobs", key="pending_jobs", sortable=True, filterable=True),
+        ColumnConfig(name="CPUs Requested", key="cpus", sortable=True, filterable=True),
+        ColumnConfig(name="Memory (GB)", key="memory", sortable=True, filterable=True),
+        ColumnConfig(name="GPUs Requested", key="gpus", sortable=True, filterable=True),
+        ColumnConfig(name="GPU Types", key="gpu_types", sortable=True, filterable=True),
+    ]
+
+    ENERGY_USERS_COLUMNS: ClassVar[list[ColumnConfig]] = [
+        ColumnConfig(name="User", key="user", sortable=True, filterable=True),
+        ColumnConfig(name="Jobs (6mo)", key="jobs", sortable=True, filterable=True),
+        ColumnConfig(name="Energy", key="energy", sortable=True, filterable=True),
+        ColumnConfig(name="GPU-hours", key="gpu_hours", sortable=True, filterable=True),
+        ColumnConfig(name="CPU-hours", key="cpu_hours", sortable=True, filterable=True),
+    ]
+
     def __init__(
         self,
         *,
@@ -180,6 +210,7 @@ class UserOverviewTab(VerticalScroll):
         self.pending_users: list[UserPendingStats] = []
         self.energy_users: list[UserEnergyStats] = []
         self._active_subtab: SubtabName = "running"
+        self._settings = load_settings()
 
     def compose(self) -> ComposeResult:
         """Create the user overview layout with sub-tabs."""
@@ -195,57 +226,37 @@ class UserOverviewTab(VerticalScroll):
 
         # Running users sub-tab (default visible)
         with Container(id="subtab-running", classes="subtab-content"):
-            yield DataTable(id="users_table")
+            yield FilterableDataTable(
+                columns=self.RUNNING_USERS_COLUMNS,
+                keybind_mode=self._settings.keybind_mode,
+                table_id="users_table",
+                id="users-filterable-table",
+            )
 
         # Pending users sub-tab (hidden by default)
         with Container(id="subtab-pending", classes="subtab-content subtab-hidden"):
-            yield DataTable(id="pending_users_table")
+            yield FilterableDataTable(
+                columns=self.PENDING_USERS_COLUMNS,
+                keybind_mode=self._settings.keybind_mode,
+                table_id="pending_users_table",
+                id="pending-users-filterable-table",
+            )
 
         # Energy usage sub-tab (hidden by default)
         with Container(id="subtab-energy", classes="subtab-content subtab-hidden"):
             yield Static(
                 "[dim]Energy usage over the last 6 months (100% utilization estimate)[/dim]", id="energy-period-info"
             )
-            yield DataTable(id="energy_users_table")
+            yield FilterableDataTable(
+                columns=self.ENERGY_USERS_COLUMNS,
+                keybind_mode=self._settings.keybind_mode,
+                table_id="energy_users_table",
+                id="energy-users-filterable-table",
+            )
 
     def on_mount(self) -> None:
         """Initialize the data tables."""
-        # Initialize running users table
-        users_table = self.query_one("#users_table", DataTable)
-        users_table.cursor_type = "row"
-        users_table.add_columns(
-            "User",
-            "Jobs",
-            "CPUs",
-            "Memory (GB)",
-            "GPUs",
-            "GPU Types",
-            "Nodes",
-        )
-
-        # Initialize pending users table
-        pending_table = self.query_one("#pending_users_table", DataTable)
-        pending_table.cursor_type = "row"
-        pending_table.add_columns(
-            "User",
-            "Pending Jobs",
-            "CPUs Requested",
-            "Memory (GB)",
-            "GPUs Requested",
-            "GPU Types",
-        )
-
-        # Initialize energy users table
-        energy_table = self.query_one("#energy_users_table", DataTable)
-        energy_table.cursor_type = "row"
-        energy_table.add_columns(
-            "User",
-            "Jobs (6mo)",
-            "Energy",
-            "GPU-hours",
-            "CPU-hours",
-        )
-
+        # FilterableDataTable handles column setup
         # If we already have data, update the tables
         if self.users:
             self.update_users(self.users)
@@ -287,16 +298,16 @@ class UserOverviewTab(VerticalScroll):
             active_container = self.query_one(f"#{active_container_id}", Container)
             active_container.remove_class("subtab-hidden")
 
-            # Focus the appropriate table
-            table_ids = {
-                "running": "users_table",
-                "pending": "pending_users_table",
-                "energy": "energy_users_table",
+            # Focus the appropriate filterable table
+            filterable_ids = {
+                "running": "users-filterable-table",
+                "pending": "pending-users-filterable-table",
+                "energy": "energy-users-filterable-table",
             }
-            table_id = table_ids.get(subtab)
-            if table_id:
-                table = self.query_one(f"#{table_id}", DataTable)
-                table.focus()
+            filterable_id = filterable_ids.get(subtab)
+            if filterable_id:
+                filterable_table = self.query_one(f"#{filterable_id}", FilterableDataTable)
+                filterable_table.focus()
         except Exception as exc:
             logger.debug(f"Failed to show container {active_container_id}: {exc}")
 
@@ -340,37 +351,33 @@ class UserOverviewTab(VerticalScroll):
             users: List of user statistics to display.
         """
         try:
-            users_table = self.query_one("#users_table", DataTable)
+            users_filterable = self.query_one("#users-filterable-table", FilterableDataTable)
         except Exception:
             # Table might not be mounted yet, store users for later
             self.users = users
             return
 
-        # Save cursor position
-        cursor_row = users_table.cursor_row
-
-        users_table.clear()
-
         # Sort by total CPUs (descending) to show heaviest users first
         sorted_users = sorted(users, key=lambda u: u.total_cpus, reverse=True)
         self.users = sorted_users
 
+        # Build row data
+        rows: list[tuple[str, ...]] = []
         for user in sorted_users:
             gpu_types_display = user.gpu_types if user.gpu_types else "N/A"
-            users_table.add_row(
-                user.username,
-                str(user.job_count),
-                str(user.total_cpus),
-                f"{user.total_memory_gb:.1f}",
-                str(user.total_gpus) if user.total_gpus > 0 else "0",
-                gpu_types_display,
-                str(user.total_nodes),
+            rows.append(
+                (
+                    user.username,
+                    str(user.job_count),
+                    str(user.total_cpus),
+                    f"{user.total_memory_gb:.1f}",
+                    str(user.total_gpus) if user.total_gpus > 0 else "0",
+                    gpu_types_display,
+                    str(user.total_nodes),
+                )
             )
 
-        # Restore cursor position
-        if cursor_row is not None and users_table.row_count > 0:
-            new_row = min(cursor_row, users_table.row_count - 1)
-            users_table.move_cursor(row=new_row)
+        users_filterable.set_data(rows)
 
     def update_pending_users(self, pending_users: list[UserPendingStats]) -> None:
         """Update the pending users data table.
@@ -379,35 +386,31 @@ class UserOverviewTab(VerticalScroll):
             pending_users: List of pending user statistics to display.
         """
         try:
-            pending_table = self.query_one("#pending_users_table", DataTable)
+            pending_filterable = self.query_one("#pending-users-filterable-table", FilterableDataTable)
         except Exception:
             # Table might not be mounted yet, store pending_users for later
             self.pending_users = pending_users
             return
 
-        # Save cursor position
-        cursor_row = pending_table.cursor_row
-
-        pending_table.clear()
-
         # Already sorted by pending_cpus in aggregate_pending_user_stats
         self.pending_users = pending_users
 
+        # Build row data
+        rows: list[tuple[str, ...]] = []
         for user in pending_users:
             gpu_types_display = user.pending_gpu_types if user.pending_gpu_types else "N/A"
-            pending_table.add_row(
-                user.username,
-                str(user.pending_job_count),
-                str(user.pending_cpus),
-                f"{user.pending_memory_gb:.1f}",
-                str(user.pending_gpus) if user.pending_gpus > 0 else "0",
-                gpu_types_display,
+            rows.append(
+                (
+                    user.username,
+                    str(user.pending_job_count),
+                    str(user.pending_cpus),
+                    f"{user.pending_memory_gb:.1f}",
+                    str(user.pending_gpus) if user.pending_gpus > 0 else "0",
+                    gpu_types_display,
+                )
             )
 
-        # Restore cursor position
-        if cursor_row is not None and pending_table.row_count > 0:
-            new_row = min(cursor_row, pending_table.row_count - 1)
-            pending_table.move_cursor(row=new_row)
+        pending_filterable.set_data(rows)
 
     def update_energy_users(self, energy_users: list[UserEnergyStats]) -> None:
         """Update the energy users data table.
@@ -416,34 +419,30 @@ class UserOverviewTab(VerticalScroll):
             energy_users: List of user energy statistics to display.
         """
         try:
-            energy_table = self.query_one("#energy_users_table", DataTable)
+            energy_filterable = self.query_one("#energy-users-filterable-table", FilterableDataTable)
         except Exception:
             # Table might not be mounted yet, store energy_users for later
             self.energy_users = energy_users
             return
 
-        # Save cursor position
-        cursor_row = energy_table.cursor_row
-
-        energy_table.clear()
-
         # Sort by total energy (descending) to show heaviest users first
         sorted_users = sorted(energy_users, key=lambda u: u.total_energy_wh, reverse=True)
         self.energy_users = sorted_users
 
+        # Build row data
+        rows: list[tuple[str, ...]] = []
         for user in sorted_users:
-            energy_table.add_row(
-                user.username,
-                str(user.job_count),
-                format_energy(user.total_energy_wh),
-                f"{user.gpu_hours:,.0f}",
-                f"{user.cpu_hours:,.0f}",
+            rows.append(
+                (
+                    user.username,
+                    str(user.job_count),
+                    format_energy(user.total_energy_wh),
+                    f"{user.gpu_hours:,.0f}",
+                    f"{user.cpu_hours:,.0f}",
+                )
             )
 
-        # Restore cursor position
-        if cursor_row is not None and energy_table.row_count > 0:
-            new_row = min(cursor_row, energy_table.row_count - 1)
-            energy_table.move_cursor(row=new_row)
+        energy_filterable.set_data(rows)
 
     @staticmethod
     def _parse_tres(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:

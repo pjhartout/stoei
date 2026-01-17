@@ -79,6 +79,7 @@ class TestSettingsScreenFocusOrder:
             "#settings-max-lines",
             "#settings-refresh-interval",
             "#settings-job-history-days",
+            "#settings-keybind-mode",
             "#settings-save",
             "#settings-cancel",
         ]
@@ -536,14 +537,15 @@ class TestSettingsScreenInApp:
         app = TestApp(default_settings)
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
-            # Focus job history days (last input before buttons)
+            # Focus job history days - now keybind mode is between this and save
             history_days_input = app.screen.query_one("#settings-job-history-days", Input)
             history_days_input.focus()
             await pilot.pause()
 
             await pilot.press("enter")
-            save_btn = app.screen.query_one("#settings-save", Button)
-            assert app.screen.focused is save_btn
+            # Enter on input should move to next field (keybind mode)
+            keybind_select = app.screen.query_one("#settings-keybind-mode", Select)
+            assert app.screen.focused is keybind_select
 
     @pytest.mark.asyncio
     async def test_focus_wraps_from_last_to_first(self, default_settings: Settings) -> None:
