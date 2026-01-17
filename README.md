@@ -138,3 +138,11 @@ MIT License - see LICENSE for details.
 ## Contributing
 
 Before opening a PR, run tests, lint, format, and type checks as described in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Related projects
+
+GitHub is full of related projects. Fundamentally I just wanted a way to easily look at my logs, cancel and monitor requeued jobs, which I don't think is supported by existing solutions.
+
+## What's in a name? 
+
+`stoei` is a Dutch verb meaning "wrestle", because that's what it feels like sometimes to manage these jobs... and also it's an alternative spelling for SLURM Terminal User Interface.
