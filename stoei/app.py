@@ -24,9 +24,9 @@ from stoei.slurm.array_parser import parse_array_size
 from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
     cancel_job,
-    get_all_job_history_6months,
     get_all_running_jobs,
     get_cluster_nodes,
+    get_energy_job_history,
     get_job_history,
     get_job_info,
     get_job_log_paths,
@@ -80,7 +80,7 @@ LOADING_STEPS = [
     LoadingStep("user_running", "Fetching your running jobs...", weight=1.0),
     LoadingStep("user_history", "Fetching your job history...", weight=2.0),
     LoadingStep("all_running", "Fetching all running jobs...", weight=2.0),
-    LoadingStep("energy_history", "Fetching 6-month energy history...", weight=3.0),
+    LoadingStep("energy_history", "Loading energy history...", weight=3.0),
     LoadingStep("aggregate_users", "Aggregating user statistics...", weight=1.0),
     LoadingStep("cluster_stats", "Calculating cluster statistics...", weight=1.0),
     LoadingStep("finalize", "Finalizing...", weight=0.5),
@@ -157,7 +157,8 @@ class SlurmMonitor(App[None]):
         self._log_sink_id: int | None = None
         self._cluster_nodes: list[dict[str, str]] = []
         self._all_users_jobs: list[tuple[str, ...]] = []
-        self._energy_history_jobs: list[tuple[str, ...]] = []  # 6-month energy history (loaded once at startup)
+        self._energy_history_jobs: list[tuple[str, ...]] = []  # Energy history (loaded once at startup if enabled)
+        self._energy_data_loaded: bool = False  # Track if energy data was loaded
         self._is_narrow: bool = False
         self._loading_screen: LoadingScreen | None = None
         self._last_history_jobs: list[tuple[str, ...]] = []
@@ -265,6 +266,12 @@ class SlurmMonitor(App[None]):
         screen = self._loading_screen
         if screen:
             self.call_from_thread(lambda: screen.fail_step(idx, error))
+
+    def _loading_skip_step(self, idx: int, reason: str) -> None:
+        """Update loading screen to show step skipped."""
+        screen = self._loading_screen
+        if screen:
+            self.call_from_thread(lambda: screen.skip_step(idx, reason))
 
     def _initial_load_async(self) -> None:
         """Perform initial data load with step-by-step progress (runs in worker thread)."""
@@ -388,15 +395,26 @@ class SlurmMonitor(App[None]):
         self._all_users_jobs = all_running
 
     def _load_step_energy_history(self) -> None:
-        """Execute step 6: Fetch 6-month energy history (only at startup)."""
+        """Execute step 6: Fetch energy history (only at startup, if enabled)."""
         self._loading_update_step(6)
-        energy_jobs, error = get_all_job_history_6months()
+
+        # Check if energy loading is enabled in settings
+        if not self._settings.energy_loading_enabled:
+            self._loading_skip_step(6, "Disabled - enable in Settings (s) > Energy Loading")
+            self._energy_data_loaded = False
+            self._energy_history_jobs = []
+            return
+
+        months = self._settings.energy_history_months
+        energy_jobs, error = get_energy_job_history(months)
         if error:
             self._loading_fail_step(6, error)
-            logger.warning(f"Failed to get 6-month energy history: {error}")
+            logger.warning(f"Failed to get {months}-month energy history: {error}")
             energy_jobs = []
+            self._energy_data_loaded = False
         else:
             self._loading_complete_step(6, f"{len(energy_jobs)} jobs")
+            self._energy_data_loaded = True
         self._energy_history_jobs = energy_jobs
 
     def _load_step_statistics(self) -> None:
@@ -1237,6 +1255,54 @@ class SlurmMonitor(App[None]):
         logger.info("Manual refresh triggered")
         self.notify("Refreshing...")
         self._start_refresh_worker()
+
+    def reload_energy_data(self) -> None:
+        """Reload energy data based on current settings.
+
+        This is called when the user enables energy loading in settings
+        and clicks the reload button.
+        """
+        if not self._settings.energy_loading_enabled:
+            self.notify("Energy loading is disabled", severity="warning")
+            return
+
+        self.notify("Loading energy data...")
+        self.run_worker(self._reload_energy_data_async, exclusive=True, thread=True)
+
+    def _reload_energy_data_async(self) -> None:
+        """Load energy data asynchronously (runs in worker thread)."""
+        months = self._settings.energy_history_months
+        logger.info(f"Reloading energy data for {months} months")
+
+        energy_jobs, error = get_energy_job_history(months)
+        if error:
+            logger.warning(f"Failed to load energy data: {error}")
+            self.call_from_thread(lambda: self.notify(f"Failed to load energy data: {error}", severity="error"))
+            self._energy_data_loaded = False
+            self._energy_history_jobs = []
+            return
+
+        self._energy_history_jobs = energy_jobs
+        self._energy_data_loaded = True
+        logger.info(f"Loaded {len(energy_jobs)} energy history jobs")
+
+        # Update the UI
+        self.call_from_thread(self._update_energy_ui)
+
+    def _update_energy_ui(self) -> None:
+        """Update the energy UI after data reload."""
+        try:
+            user_tab = self.query_one("#user-overview-tab", UserOverviewTab)
+            if self._energy_history_jobs:
+                energy_stats = UserOverviewTab.aggregate_energy_stats(self._energy_history_jobs)
+                user_tab.update_energy_users(energy_stats)
+                # Update the period label
+                user_tab.update_energy_period_label(self._settings.energy_history_months)
+                self.notify(f"Loaded {len(self._energy_history_jobs)} energy history jobs", severity="information")
+            else:
+                self.notify("No energy data loaded", severity="warning")
+        except Exception as exc:
+            logger.error(f"Failed to update energy UI: {exc}", exc_info=True)
 
     def action_switch_tab_jobs(self) -> None:
         """Switch to the Jobs tab."""

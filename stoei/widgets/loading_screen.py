@@ -284,6 +284,41 @@ class LoadingScreen(Screen[None]):
         except Exception as exc:
             logger.debug(f"Failed to update loading UI: {exc}")
 
+    def skip_step(self, step_index: int, reason: str) -> None:
+        """Mark a step as skipped.
+
+        Args:
+            step_index: Index of the skipped step.
+            reason: Reason for skipping (e.g., "Disabled - enable in Settings (s)").
+        """
+        if step_index >= len(self.steps):
+            return
+
+        step = self.steps[step_index]
+
+        # Skipped steps still count toward progress
+        self._completed_weight += step.weight
+        progress_pct = (self._completed_weight / self.total_weight) * 100
+
+        logger.info(f"Skipped step {step_index + 1}: {step.name} - {reason}")
+
+        # Update UI
+        try:
+            colors = get_theme_colors(self.app)
+            progress_bar = self.query_one("#progress-bar", ProgressBar)
+            progress_bar.update(progress=progress_pct)
+
+            progress_label = self.query_one("#progress-label", Label)
+            progress_label.update(f"{progress_pct:.0f}%")
+
+            # Update log with skip indicator
+            self._add_log_entry(
+                f"[{colors.text_muted}]⊘[/{colors.text_muted}] {step.name}: "
+                f"[{colors.text_muted}]{reason}[/{colors.text_muted}]"
+            )
+        except Exception as exc:
+            logger.debug(f"Failed to update loading UI: {exc}")
+
     def _add_log_entry(self, entry: str) -> None:
         """Add an entry to the step log.
 

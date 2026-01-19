@@ -30,6 +30,7 @@ from stoei.slurm.gpu_parser import (
     parse_gpu_entries,
 )
 from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
+from stoei.widgets.screens import EnergyEnableModal
 
 logger = get_logger(__name__)
 
@@ -243,9 +244,11 @@ class UserOverviewTab(VerticalScroll):
             )
 
         # Energy usage sub-tab (hidden by default)
+        months = self._settings.energy_history_months
         with Container(id="subtab-energy", classes="subtab-content subtab-hidden"):
             yield Static(
-                "[dim]Energy usage over the last 6 months (100% utilization estimate)[/dim]", id="energy-period-info"
+                f"[dim]Energy usage over the last {months} months (100% utilization estimate)[/dim]",
+                id="energy-period-info",
             )
             yield FilterableDataTable(
                 columns=self.ENERGY_USERS_COLUMNS,
@@ -278,6 +281,14 @@ class UserOverviewTab(VerticalScroll):
         """
         if subtab == self._active_subtab:
             return
+
+        # Check if trying to switch to energy tab but data is not loaded
+        if subtab == "energy":
+            # Access the app's energy data loaded status
+            energy_data_loaded = getattr(self.app, "_energy_data_loaded", False)
+            if not energy_data_loaded:
+                self.app.push_screen(EnergyEnableModal(), self._on_energy_modal_result)
+                return
 
         logger.debug(f"Switching user overview subtab from {self._active_subtab} to {subtab}")
 
@@ -343,6 +354,16 @@ class UserOverviewTab(VerticalScroll):
     def action_switch_subtab_energy(self) -> None:
         """Switch to the Energy sub-tab."""
         self.switch_subtab("energy")
+
+    def _on_energy_modal_result(self, result: str | None) -> None:
+        """Handle the result from the EnergyEnableModal.
+
+        Args:
+            result: "settings" if user wants to go to settings, "dismiss" otherwise.
+        """
+        if result == "settings":
+            # Navigate to settings screen
+            self.app.action_show_settings()  # type: ignore[attr-defined]
 
     def update_users(self, users: list[UserStats]) -> None:
         """Update the user data table.
@@ -443,6 +464,18 @@ class UserOverviewTab(VerticalScroll):
             )
 
         energy_filterable.set_data(rows)
+
+    def update_energy_period_label(self, months: int) -> None:
+        """Update the energy period label to reflect the configured duration.
+
+        Args:
+            months: Number of months of energy history.
+        """
+        try:
+            period_info = self.query_one("#energy-period-info", Static)
+            period_info.update(f"[dim]Energy usage over the last {months} months (100% utilization estimate)[/dim]")
+        except Exception as exc:
+            logger.debug(f"Failed to update energy period label: {exc}")
 
     @staticmethod
     def _parse_tres(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:

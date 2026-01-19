@@ -35,6 +35,9 @@ MIN_JOB_HISTORY_DAYS = 1
 MAX_JOB_HISTORY_DAYS = 90
 DEFAULT_JOB_HISTORY_DAYS = 7
 
+# Energy loading settings
+DEFAULT_ENERGY_HISTORY_MONTHS = 6
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -49,6 +52,9 @@ class Settings:
     keybind_mode: str = DEFAULT_KEYBIND_MODE
     # Store keybinding overrides as tuple of (action, key) pairs (hashable for frozen dataclass)
     keybind_overrides: tuple[tuple[str, str], ...] = ()
+    # Energy loading settings (disabled by default to speed up startup)
+    energy_loading_enabled: bool = False
+    energy_history_months: int = DEFAULT_ENERGY_HISTORY_MONTHS
 
     def get_keybindings(self) -> KeybindingConfig:
         """Get the keybinding configuration.
@@ -122,6 +128,15 @@ class Settings:
                     parsed.append((action, key))
             keybind_overrides = tuple(parsed)
 
+        # Parse energy loading settings
+        energy_loading_enabled = _coerce_bool(data.get("energy_loading_enabled"))
+        if energy_loading_enabled is None:
+            energy_loading_enabled = False
+
+        energy_history_months = _coerce_int(data.get("energy_history_months"))
+        if energy_history_months is None or energy_history_months < 1:
+            energy_history_months = DEFAULT_ENERGY_HISTORY_MONTHS
+
         return cls(
             theme=theme,
             log_level=log_level,
@@ -131,6 +146,8 @@ class Settings:
             log_viewer_lines=log_viewer_lines,
             keybind_mode=keybind_mode,
             keybind_overrides=keybind_overrides,
+            energy_loading_enabled=energy_loading_enabled,
+            energy_history_months=energy_history_months,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -148,6 +165,8 @@ class Settings:
             "log_viewer_lines": self.log_viewer_lines,
             "keybind_mode": self.keybind_mode,
             "keybind_overrides": dict(self.keybind_overrides),
+            "energy_loading_enabled": self.energy_loading_enabled,
+            "energy_history_months": self.energy_history_months,
         }
 
 
@@ -268,4 +287,23 @@ def _coerce_float(value: object) -> float | None:
             return float(value)
         except ValueError:
             return None
+    return None
+
+
+def _coerce_bool(value: object) -> bool | None:
+    """Coerce a value into a boolean if possible.
+
+    Args:
+        value: Raw value to coerce.
+
+    Returns:
+        Boolean value or None.
+    """
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        if value.lower() in ("true", "1", "yes"):
+            return True
+        if value.lower() in ("false", "0", "no"):
+            return False
     return None

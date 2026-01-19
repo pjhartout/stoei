@@ -865,6 +865,9 @@ class TestUserOverviewSubtabs:
         async with app.run_test(size=(80, 24)):
             user_tab = app.query_one("#user-overview", UserOverviewTab)
 
+            # Mark energy data as loaded to avoid modal popup
+            app._energy_data_loaded = True  # type: ignore[attr-defined]
+
             # Switch to energy
             user_tab.switch_subtab("energy")
             assert user_tab.active_subtab == "energy"
