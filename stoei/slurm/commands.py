@@ -812,15 +812,15 @@ ENERGY_VALID_STATES = frozenset(
     }
 )
 
-# Number of months for energy history
-ENERGY_HISTORY_MONTHS = 6
 
-
-def get_all_job_history_6months() -> tuple[list[tuple[str, ...]], str | None]:
-    """Get 6 months of completed job history for all users.
+def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str | None]:
+    """Get completed job history for all users for energy calculations.
 
     This is used for energy consumption calculations. Only fetches completed
     jobs (not running or pending) to get accurate elapsed times.
+
+    Args:
+        months: Number of months of history to fetch.
 
     Returns:
         Tuple of (jobs list, optional error message).
@@ -831,7 +831,7 @@ def get_all_job_history_6months() -> tuple[list[tuple[str, ...]], str | None]:
         format_str = ",".join(ENERGY_HISTORY_FIELDS)
 
         # Calculate start date (SLURM doesn't universally support "now-Xmonths" syntax)
-        start_date = datetime.now() - timedelta(days=ENERGY_HISTORY_MONTHS * 30)
+        start_date = datetime.now() - timedelta(days=months * 30)
         start_date_str = start_date.strftime("%Y-%m-%d")
 
         # Note: We don't use --state filter because it's unreliable on some SLURM versions
@@ -847,7 +847,7 @@ def get_all_job_history_6months() -> tuple[list[tuple[str, ...]], str | None]:
             "-P",  # Parseable output with | delimiter
             "--noheader",
         ]
-        logger.debug(f"Running sacct command for {ENERGY_HISTORY_MONTHS}-month energy history (since {start_date_str})")
+        logger.debug(f"Running sacct command for {months}-month energy history (since {start_date_str})")
 
         # Use longer timeout for potentially large query
         result = subprocess.run(  # noqa: S603
@@ -861,10 +861,10 @@ def get_all_job_history_6months() -> tuple[list[tuple[str, ...]], str | None]:
         logger.exception("sacct not found")
         return [], "sacct not found"
     except subprocess.TimeoutExpired:
-        logger.exception("Timeout getting 6-month job history")
+        logger.exception(f"Timeout getting {months}-month job history")
         return [], "Timeout getting job history (try shorter period)"
     except subprocess.SubprocessError:
-        logger.exception("Error getting 6-month job history")
+        logger.exception(f"Error getting {months}-month job history")
         return [], "Error getting job history"
 
     if result.returncode != 0:
@@ -892,7 +892,7 @@ def get_all_job_history_6months() -> tuple[list[tuple[str, ...]], str | None]:
             jobs.append(tuple(parts[: len(ENERGY_HISTORY_FIELDS)]))
 
     logger.info(
-        f"Fetched {len(jobs)} jobs from {ENERGY_HISTORY_MONTHS}-month history "
+        f"Fetched {len(jobs)} jobs from {months}-month history "
         f"for energy calculation (skipped {skipped_states} with invalid states)"
     )
     return jobs, None

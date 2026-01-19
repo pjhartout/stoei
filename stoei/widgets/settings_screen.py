@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.containers import Container, Vertical
 from textual.events import Key
 from textual.screen import Screen
-from textual.widgets import Button, Input, Select, Static
+from textual.widgets import Button, Input, Select, Static, Switch
 
 from stoei.logger import get_logger
 from stoei.settings import (
@@ -20,6 +20,7 @@ from stoei.settings import (
     MIN_LOG_LINES,
     MIN_REFRESH_INTERVAL,
     Settings,
+    save_settings,
 )
 from stoei.themes import THEME_LABELS
 
@@ -43,6 +44,7 @@ class SettingsScreen(Screen[Settings | None]):
         ("r", "jump_refresh", "Jump to Refresh Interval"),
         ("h", "jump_history", "Jump to History Days"),
         ("k", "jump_keybind", "Jump to Keybind Mode"),
+        ("e", "jump_energy_enabled", "Jump to Energy Enabled"),
     )
 
     # Order of focusable widgets for navigation
@@ -53,7 +55,10 @@ class SettingsScreen(Screen[Settings | None]):
         "#settings-refresh-interval",
         "#settings-job-history-days",
         "#settings-keybind-mode",
+        "#settings-energy-enabled",
+        "#settings-energy-months",
         "#settings-save",
+        "#settings-reload-energy",
         "#settings-cancel",
     )
 
@@ -106,8 +111,19 @@ class SettingsScreen(Screen[Settings | None]):
                 allow_blank=False,
                 id="settings-keybind-mode",
             )
+            # Energy loading settings
+            yield Static(
+                "[bold]Energy Loading[/bold] [dim](requires restart or reload)[/dim]",
+                classes="settings-label settings-section-header",
+            )
+            with Container(id="settings-energy-row"):
+                yield Static("Enable energy accounting", classes="settings-inline-label")
+                yield Switch(value=self._settings.energy_loading_enabled, id="settings-energy-enabled")
+            yield Static("Energy history (months)", classes="settings-label")
+            yield Input(str(self._settings.energy_history_months), id="settings-energy-months")
             with Container(id="settings-button-row"):
                 yield Button("💾 Save", variant="primary", id="settings-save")
+                yield Button("🔄 Reload Energy", variant="success", id="settings-reload-energy")
                 yield Button("✕ Cancel", variant="default", id="settings-cancel")
 
     def on_mount(self) -> None:
@@ -124,6 +140,8 @@ class SettingsScreen(Screen[Settings | None]):
             self._save_settings()
         elif event.button.id == "settings-cancel":
             self.dismiss(None)
+        elif event.button.id == "settings-reload-energy":
+            self._reload_energy_data()
 
     def on_key(self, event: Key) -> None:
         """Handle key events for enhanced navigation.
@@ -175,6 +193,12 @@ class SettingsScreen(Screen[Settings | None]):
             # Type narrow: we know it's a Select[str] in this screen
             select_widget: Select[str] = focused  # type: ignore[assignment]
             self._cycle_select_option(select_widget, direction=1 if event.key == "right" else -1)
+            return
+
+        # Handle left/right arrows on buttons to navigate horizontally
+        if event.key in ("left", "right") and isinstance(focused, Button):
+            event.stop()
+            self._navigate_buttons(focused, direction=1 if event.key == "right" else -1)
 
     def _cycle_select_option(self, select: Select[str], direction: int) -> None:
         """Cycle through Select options without opening dropdown.
@@ -203,6 +227,25 @@ class SettingsScreen(Screen[Settings | None]):
         # Set new value
         new_value = options[new_index][1]
         select.value = new_value
+
+    def _navigate_buttons(self, current_button: Button, direction: int) -> None:
+        """Navigate between buttons in the button row.
+
+        Args:
+            current_button: The currently focused button.
+            direction: 1 for right, -1 for left.
+        """
+        button_ids = ["#settings-save", "#settings-reload-energy", "#settings-cancel"]
+        current_id = f"#{current_button.id}" if current_button.id else None
+        if current_id not in button_ids:
+            return
+
+        current_index = button_ids.index(current_id)
+        new_index = (current_index + direction) % len(button_ids)
+        try:
+            self.query_one(button_ids[new_index], Button).focus()
+        except Exception as exc:
+            logger.debug(f"Failed to focus button: {exc}")
 
     def _get_focus_index(self) -> int:
         """Get the index of the currently focused widget in FOCUS_ORDER.
@@ -354,6 +397,11 @@ class SettingsScreen(Screen[Settings | None]):
         if keybind_mode is None:
             return None
 
+        energy_loading_enabled = self._validate_energy_enabled()
+        energy_history_months = self._validate_energy_months()
+        if energy_history_months is None:
+            return None
+
         return Settings(
             theme=theme,
             log_level=log_level,
@@ -361,6 +409,8 @@ class SettingsScreen(Screen[Settings | None]):
             refresh_interval=refresh_interval,
             job_history_days=job_history_days,
             keybind_mode=keybind_mode,
+            energy_loading_enabled=energy_loading_enabled,
+            energy_history_months=energy_history_months,
         )
 
     def _validate_theme(self) -> str | None:
@@ -450,3 +500,60 @@ class SettingsScreen(Screen[Settings | None]):
             self.query_one("#settings-keybind-mode", Select).focus()
         except Exception as exc:
             logger.debug(f"Failed to focus keybind mode selector: {exc}")
+
+    def action_jump_energy_enabled(self) -> None:
+        """Jump focus to the energy enabled switch."""
+        # Don't jump if currently typing in the input field
+        if isinstance(self.focused, Input):
+            return
+        try:
+            self.query_one("#settings-energy-enabled", Switch).focus()
+        except Exception as exc:
+            logger.debug(f"Failed to focus energy enabled switch: {exc}")
+
+    def _validate_energy_enabled(self) -> bool:
+        """Validate and return energy enabled value."""
+        energy_switch = self.query_one("#settings-energy-enabled", Switch)
+        return energy_switch.value
+
+    def _validate_energy_months(self) -> int | None:
+        """Validate and return energy history months value."""
+        energy_months_input = self.query_one("#settings-energy-months", Input)
+        energy_months_value = energy_months_input.value.strip()
+        try:
+            energy_months = int(energy_months_value)
+        except ValueError:
+            self.app.notify("Energy history months must be a number", severity="warning")
+            return None
+        if energy_months < 1:
+            self.app.notify("Energy history months must be at least 1", severity="warning")
+            return None
+        return energy_months
+
+    def _reload_energy_data(self) -> None:
+        """Reload energy data using current settings.
+
+        First saves the settings, then triggers energy data reload.
+        """
+        # First validate and get the current settings
+        validated = self._validate_all_settings()
+        if validated is None:
+            return
+
+        # Check if energy loading is enabled
+        if not validated.energy_loading_enabled:
+            self.app.notify("Enable energy loading first", severity="warning")
+            return
+
+        # Save the settings first
+        save_settings(validated)
+
+        # Update the app's settings
+        # Access the app's _settings attribute directly since we need to update it
+        self.app._settings = validated  # type: ignore[attr-defined]
+
+        # Trigger energy data reload
+        self.app.reload_energy_data()  # type: ignore[attr-defined]
+
+        # Dismiss the settings screen
+        self.dismiss(None)

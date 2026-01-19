@@ -736,3 +736,107 @@ UserInfoScreen #close-button:focus {
 UserInfoScreen #user-info-content:focus {
     border: tall $accent;
 }
+
+/* Settings Screen - Energy settings */
+SettingsScreen .settings-section-header {
+    margin-top: 2;
+    padding-top: 1;
+    border-top: solid $border-muted;
+}
+
+SettingsScreen #settings-energy-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    align: left middle;
+    margin: 1 0;
+}
+
+SettingsScreen .settings-inline-label {
+    width: auto;
+    color: $foreground;
+    margin-right: 2;
+}
+
+SettingsScreen #settings-reload-energy {
+    width: 1fr;
+    margin: 0 1;
+    background: $success;
+    color: $text-on-success;
+}
+
+/* Energy Enable Modal */
+EnergyEnableModal {
+    layout: vertical;
+    align: center middle;
+    background: $background 50%;
+}
+
+EnergyEnableModal #energy-enable-container {
+    width: 60;
+    height: auto;
+    padding: 2 3;
+    background: $panel;
+    border: round $warning;
+}
+
+EnergyEnableModal #energy-enable-title {
+    width: 100%;
+    content-align: center middle;
+    padding: 1 0;
+    color: $warning;
+    text-style: bold;
+    border-bottom: solid $border-muted;
+    margin-bottom: 1;
+}
+
+EnergyEnableModal #energy-enable-message {
+    width: 100%;
+    content-align: center middle;
+    padding: 1 1;
+    color: $foreground;
+}
+
+EnergyEnableModal #energy-enable-button-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    align: center middle;
+    margin-top: 2;
+    padding: 0;
+}
+
+EnergyEnableModal Button {
+    width: 1fr;
+    margin: 0 1;
+    height: 3;
+    border: tall $panel;
+    text-style: bold;
+}
+
+EnergyEnableModal #energy-go-settings {
+    background: $accent;
+    color: $text-on-accent;
+}
+
+EnergyEnableModal #energy-go-settings:hover {
+    background: $accent;
+    text-style: bold underline;
+}
+
+EnergyEnableModal #energy-dismiss {
+    background: $surface;
+}
+
+EnergyEnableModal #energy-dismiss:hover {
+    background: $surface;
+    text-style: bold underline;
+}
+
+EnergyEnableModal #energy-go-settings:focus {
+    border: tall $accent;
+}
+
+EnergyEnableModal #energy-dismiss:focus {
+    border: tall $surface;
+}

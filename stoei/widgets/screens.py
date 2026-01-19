@@ -1544,3 +1544,72 @@ class UserInfoScreen(Screen[None]):
     def action_close(self) -> None:
         """Close the modal."""
         self.dismiss(None)
+
+
+class EnergyEnableModal(Screen[str]):
+    """Modal screen asking user to enable energy loading.
+
+    This modal is shown when the user tries to access the Energy tab
+    but energy loading is disabled in settings.
+
+    Returns:
+        "settings" if user wants to go to settings, "dismiss" otherwise.
+    """
+
+    BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
+        ("escape", "dismiss_modal", "Dismiss"),
+        ("enter", "activate_focused", "Activate"),
+        ("left", "focus_previous", "Previous"),
+        ("right", "focus_next", "Next"),
+        ("tab", "focus_next", "Next"),
+        ("shift+tab", "focus_previous", "Previous"),
+    )
+
+    def compose(self) -> ComposeResult:
+        """Create the modal layout."""
+        with Vertical(id="energy-enable-container"):
+            yield Static("⚡ Energy Data Not Loaded", id="energy-enable-title")
+            yield Static(
+                "Energy accounting data is disabled by default to speed up startup.\n\n"
+                "Would you like to enable it in settings?",
+                id="energy-enable-message",
+            )
+            with Container(id="energy-enable-button-row"):
+                yield Button("⚙️ Go to Settings", variant="primary", id="energy-go-settings")
+                yield Button("✕ Not Now", variant="default", id="energy-dismiss")
+
+    def on_mount(self) -> None:
+        """Focus the settings button by default."""
+        try:
+            self.query_one("#energy-go-settings", Button).focus()
+        except Exception as exc:
+            logger.debug(f"Could not focus settings button on mount: {exc}")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button press.
+
+        Args:
+            event: The button press event.
+        """
+        if event.button.id == "energy-go-settings":
+            self.dismiss("settings")
+        elif event.button.id == "energy-dismiss":
+            self.dismiss("dismiss")
+
+    def action_dismiss_modal(self) -> None:
+        """Dismiss the modal (Escape key)."""
+        self.dismiss("dismiss")
+
+    def action_activate_focused(self) -> None:
+        """Activate the currently focused button (Enter key)."""
+        try:
+            focused = self.focused
+            if isinstance(focused, Button):
+                focused.press()
+            else:
+                # Fallback: if nothing is focused, dismiss
+                self.dismiss("dismiss")
+        except Exception as exc:
+            logger.debug(f"Could not activate focused button: {exc}")
+            with contextlib.suppress(Exception):
+                self.dismiss("dismiss")
