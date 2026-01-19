@@ -145,4 +145,4 @@ GitHub is full of related projects. Fundamentally I just wanted a way to easily 
 
 ## What's in a name? 
 
-`stoei` is a Dutch verb meaning "wrestle", because that's what it feels like sometimes to manage these jobs... and also it's an alternative spelling for SLURM Terminal User Interface.
+`stoei` is a Dutch verb meaning "wrestle", because that's what it feels like sometimes to manage these jobs... it's also an alternative spelling for SLURM Terminal User Interface (STUI).
