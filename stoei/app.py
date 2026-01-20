@@ -135,13 +135,12 @@ class SlurmMonitor(App[None]):
         Binding("minus", "column_shrink", "Decrease Column Width", show=False),
         Binding("0", "column_reset", "Reset Column Width", show=False),
     ]
-    JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList", "Timeline")
+    JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "NodeList", "Timeline")
     JOB_TABLE_COLUMN_CONFIGS: ClassVar[list[ColumnConfig]] = [
         ColumnConfig(name="JobID", key="jobid", sortable=True, filterable=True, width=12),
         ColumnConfig(name="Name", key="name", sortable=True, filterable=True, width=30),  # Wider to fix truncation
         ColumnConfig(name="State", key="state", sortable=True, filterable=True, width=12),
         ColumnConfig(name="Time", key="time", sortable=True, filterable=True, width=12),
-        ColumnConfig(name="Nodes", key="nodes", sortable=True, filterable=True, width=8),
         ColumnConfig(name="NodeList", key="nodelist", sortable=True, filterable=True, width=20),
         ColumnConfig(name="Timeline", key="timeline", sortable=False, filterable=True),  # Auto width
     ]
@@ -857,7 +856,6 @@ class SlurmMonitor(App[None]):
             job.name,
             state_display,
             job.time,
-            job.nodes,
             job.node_list,
             timeline,
         ]
