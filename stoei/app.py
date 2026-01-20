@@ -129,8 +129,8 @@ class SlurmMonitor(App[None]):
         Binding("right", "next_tab", "Next Tab", show=False),
         Binding("shift+tab", "previous_tab", "Previous Tab", show=False),
         # Column width controls
-        Binding("bracketright", "column_select_next", "Select Next Column", show=False),
-        Binding("bracketleft", "column_select_prev", "Select Previous Column", show=False),
+        Binding("]", "column_select_next", "Select Next Column", show=False),
+        Binding("[", "column_select_prev", "Select Previous Column", show=False),
         Binding("plus", "column_grow", "Increase Column Width", show=False),
         Binding("minus", "column_shrink", "Decrease Column Width", show=False),
         Binding("0", "column_reset", "Reset Column Width", show=False),
