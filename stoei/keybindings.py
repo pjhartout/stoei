@@ -64,6 +64,13 @@ class Actions:
     OPEN_STDOUT = "open_stdout"
     OPEN_STDERR = "open_stderr"
 
+    # Column width actions
+    COLUMN_SELECT_NEXT = "column_select_next"
+    COLUMN_SELECT_PREV = "column_select_prev"
+    COLUMN_WIDTH_INCREASE = "column_width_increase"
+    COLUMN_WIDTH_DECREASE = "column_width_decrease"
+    COLUMN_WIDTH_RESET = "column_width_reset"
+
 
 @dataclass
 class KeyBinding:
@@ -167,6 +174,12 @@ def _create_vim_preset() -> KeybindingPreset:
             # Job detail
             Actions.OPEN_STDOUT: KeyBinding("o", "Open stdout"),
             Actions.OPEN_STDERR: KeyBinding("e", "Open stderr"),
+            # Column width
+            Actions.COLUMN_SELECT_NEXT: KeyBinding("bracketright", "Select next column"),
+            Actions.COLUMN_SELECT_PREV: KeyBinding("bracketleft", "Select prev column"),
+            Actions.COLUMN_WIDTH_INCREASE: KeyBinding("plus", "Increase column width"),
+            Actions.COLUMN_WIDTH_DECREASE: KeyBinding("minus", "Decrease column width"),
+            Actions.COLUMN_WIDTH_RESET: KeyBinding("0", "Reset column width"),
         },
     )
 
@@ -222,6 +235,12 @@ def _create_emacs_preset() -> KeybindingPreset:
             # Job detail
             Actions.OPEN_STDOUT: KeyBinding("ctrl+o", "Open stdout"),
             Actions.OPEN_STDERR: KeyBinding("ctrl+e", "Open stderr"),
+            # Column width
+            Actions.COLUMN_SELECT_NEXT: KeyBinding("bracketright", "Select next column"),
+            Actions.COLUMN_SELECT_PREV: KeyBinding("bracketleft", "Select prev column"),
+            Actions.COLUMN_WIDTH_INCREASE: KeyBinding("plus", "Increase column width"),
+            Actions.COLUMN_WIDTH_DECREASE: KeyBinding("minus", "Decrease column width"),
+            Actions.COLUMN_WIDTH_RESET: KeyBinding("0", "Reset column width"),
         },
     )
 

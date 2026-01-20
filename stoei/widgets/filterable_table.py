@@ -43,6 +43,10 @@ class ColumnConfig:
     filterable: bool = True
     # Custom sort key function (e.g., for numeric sorting)
     sort_key: Callable[[Any], Any] | None = None
+    # Column width configuration
+    width: int | None = None  # Width in characters, None for auto
+    min_width: int = 5  # Minimum width to prevent unusable columns
+    max_width: int | None = None  # Maximum width, None for unlimited
 
 
 @dataclass
@@ -229,8 +233,8 @@ class FilterableDataTable(Vertical):
         table.cursor_type = "row"
 
         for col in self._columns:
-            # Add sort indicator placeholder
-            table.add_column(col.name, key=col.key)
+            # Add column with width if specified
+            table.add_column(col.name, key=col.key, width=col.width)
 
         # Show filter bar if emacs mode
         if self._keybind_mode == "emacs":
@@ -728,3 +732,147 @@ class FilterableDataTable(Vertical):
             Row data.
         """
         return self.table.get_row_at(index)
+
+    # Column width management
+    _selected_column_index: int = 0
+
+    def get_selected_column_index(self) -> int:
+        """Get the currently selected column index for resizing."""
+        return self._selected_column_index
+
+    def select_next_column(self) -> None:
+        """Select the next column for resizing."""
+        if not self._columns:
+            return
+        self._selected_column_index = (self._selected_column_index + 1) % len(self._columns)
+        logger.debug(f"Selected column: {self._columns[self._selected_column_index].key}")
+
+    def select_previous_column(self) -> None:
+        """Select the previous column for resizing."""
+        if not self._columns:
+            return
+        self._selected_column_index = (self._selected_column_index - 1) % len(self._columns)
+        logger.debug(f"Selected column: {self._columns[self._selected_column_index].key}")
+
+    def get_selected_column_key(self) -> str | None:
+        """Get the key of the currently selected column."""
+        if not self._columns or self._selected_column_index >= len(self._columns):
+            return None
+        return self._columns[self._selected_column_index].key
+
+    def resize_selected_column(self, delta: int) -> bool:
+        """Resize the selected column by delta characters.
+
+        Args:
+            delta: Change in width (positive to grow, negative to shrink).
+
+        Returns:
+            True if the column was resized, False otherwise.
+        """
+        if not self._columns or self._selected_column_index >= len(self._columns):
+            return False
+
+        col_config = self._columns[self._selected_column_index]
+        table = self.table
+
+        # Get the column from the DataTable
+        try:
+            column = table.columns.get(col_config.key)  # type: ignore[arg-type]
+            if column is None:
+                logger.warning(f"Column {col_config.key} not found in DataTable")
+                return False
+
+            # Get current width (use content_width if width is not set)
+            current_width = column.width if column.width else column.content_width
+            if current_width is None:
+                current_width = 10  # Default if we can't determine
+
+            new_width = current_width + delta
+
+            # Enforce min/max constraints from ColumnConfig
+            new_width = max(col_config.min_width, new_width)
+            if col_config.max_width is not None:
+                new_width = min(col_config.max_width, new_width)
+
+            # Apply the new width
+            column.width = new_width
+            table.refresh()
+
+            logger.debug(f"Resized column {col_config.key}: {current_width} -> {new_width}")
+        except Exception as exc:
+            logger.warning(f"Failed to resize column {col_config.key}: {exc}")
+            return False
+        else:
+            return True
+
+    def reset_selected_column_width(self) -> bool:
+        """Reset the selected column to its default width.
+
+        Returns:
+            True if the column was reset, False otherwise.
+        """
+        if not self._columns or self._selected_column_index >= len(self._columns):
+            return False
+
+        col_config = self._columns[self._selected_column_index]
+        table = self.table
+
+        try:
+            column = table.columns.get(col_config.key)  # type: ignore[arg-type]
+            if column is None:
+                return False
+
+            # Reset to the default width from ColumnConfig
+            column.width = col_config.width
+            table.refresh()
+
+            logger.debug(f"Reset column {col_config.key} to width {col_config.width}")
+        except Exception as exc:
+            logger.warning(f"Failed to reset column {col_config.key}: {exc}")
+            return False
+        else:
+            return True
+
+    def get_column_widths(self) -> dict[str, int]:
+        """Get current column widths.
+
+        Returns:
+            Dictionary mapping column keys to their current widths.
+        """
+        widths: dict[str, int] = {}
+        table = self.table
+
+        for col_config in self._columns:
+            try:
+                column = table.columns.get(col_config.key)  # type: ignore[arg-type]
+                if column is not None and column.width is not None:
+                    widths[col_config.key] = column.width
+            except Exception:
+                logger.debug(f"Could not get width for column {col_config.key}")
+
+        return widths
+
+    def set_column_widths(self, widths: dict[str, int]) -> None:
+        """Apply column widths from a saved configuration.
+
+        Args:
+            widths: Dictionary mapping column keys to widths.
+        """
+        table = self.table
+
+        for col_key, col_width in widths.items():
+            try:
+                column = table.columns.get(col_key)  # type: ignore[arg-type]
+                if column is not None:
+                    # Find the column config to get min/max constraints
+                    col_config = next((c for c in self._columns if c.key == col_key), None)
+                    final_width = col_width
+                    if col_config:
+                        final_width = max(col_config.min_width, final_width)
+                        if col_config.max_width is not None:
+                            final_width = min(col_config.max_width, final_width)
+                    column.width = final_width
+            except Exception as exc:
+                logger.warning(f"Failed to set width for column {col_key}: {exc}")
+
+        table.refresh()
