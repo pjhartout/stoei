@@ -112,6 +112,7 @@ class SlurmMonitor(App[None]):
     BINDINGS: ClassVar[list[BindingType]] = [
         # Essential bindings (shown in footer)
         Binding("question_mark", "show_help", "Help", show=True, priority=True),
+        Binding("h", "show_help", "Help", show=False),  # Alternative help key
         Binding("q", "quit", "Quit", show=True),
         Binding("r", "refresh", "Refresh", show=True),
         Binding("s", "show_settings", "Settings", show=True),
@@ -127,16 +128,21 @@ class SlurmMonitor(App[None]):
         Binding("left", "previous_tab", "Previous Tab", show=False),
         Binding("right", "next_tab", "Next Tab", show=False),
         Binding("shift+tab", "previous_tab", "Previous Tab", show=False),
+        # Column width controls
+        Binding("]", "column_select_next", "Select Next Column", show=False),
+        Binding("[", "column_select_prev", "Select Previous Column", show=False),
+        Binding("plus", "column_grow", "Increase Column Width", show=False),
+        Binding("minus", "column_shrink", "Decrease Column Width", show=False),
+        Binding("0", "column_reset", "Reset Column Width", show=False),
     ]
-    JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList", "Timeline")
+    JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "NodeList", "Timeline")
     JOB_TABLE_COLUMN_CONFIGS: ClassVar[list[ColumnConfig]] = [
-        ColumnConfig(name="JobID", key="jobid", sortable=True, filterable=True),
-        ColumnConfig(name="Name", key="name", sortable=True, filterable=True),
-        ColumnConfig(name="State", key="state", sortable=True, filterable=True),
-        ColumnConfig(name="Time", key="time", sortable=True, filterable=True),
-        ColumnConfig(name="Nodes", key="nodes", sortable=True, filterable=True),
-        ColumnConfig(name="NodeList", key="nodelist", sortable=True, filterable=True),
-        ColumnConfig(name="Timeline", key="timeline", sortable=False, filterable=True),
+        ColumnConfig(name="JobID", key="jobid", sortable=True, filterable=True, width=12),
+        ColumnConfig(name="Name", key="name", sortable=True, filterable=True, width=30),  # Wider to fix truncation
+        ColumnConfig(name="State", key="state", sortable=True, filterable=True, width=12),
+        ColumnConfig(name="Time", key="time", sortable=True, filterable=True, width=12),
+        ColumnConfig(name="NodeList", key="nodelist", sortable=True, filterable=True, width=20),
+        ColumnConfig(name="Timeline", key="timeline", sortable=False, filterable=True),  # Auto width
     ]
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
@@ -449,6 +455,13 @@ class SlurmMonitor(App[None]):
         # Update all UI components
         self._update_ui_from_cache()
 
+        # Apply saved column widths to jobs table
+        try:
+            jobs_filterable = self.query_one("#jobs-filterable-table", FilterableDataTable)
+            self._apply_saved_column_widths("jobs", jobs_filterable)
+        except Exception as exc:
+            logger.debug(f"Failed to apply saved column widths to jobs table: {exc}")
+
         # Mark initial load as complete
         self._initial_load_complete = True
 
@@ -551,6 +564,119 @@ class SlurmMonitor(App[None]):
         self._apply_refresh_interval(old_settings.refresh_interval, settings.refresh_interval)
         self._apply_keybind_mode(settings)
         self.notify("Settings saved")
+
+    # Column width action methods
+    def _get_current_filterable_table(self) -> FilterableDataTable | None:
+        """Get the FilterableDataTable for the current tab."""
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            active_tab = tab_container.active_tab
+            if active_tab == "jobs":
+                return self.query_one("#jobs-filterable-table", FilterableDataTable)
+        except Exception as exc:
+            logger.debug(f"Failed to get current filterable table: {exc}")
+        return None
+
+    def action_column_select_next(self) -> None:
+        """Select the next column for resizing."""
+        table = self._get_current_filterable_table()
+        if table:
+            table.select_next_column()
+            col_key = table.get_selected_column_key()
+            if col_key:
+                self.notify(f"Column: {col_key}", timeout=1)
+
+    def action_column_select_prev(self) -> None:
+        """Select the previous column for resizing."""
+        table = self._get_current_filterable_table()
+        if table:
+            table.select_previous_column()
+            col_key = table.get_selected_column_key()
+            if col_key:
+                self.notify(f"Column: {col_key}", timeout=1)
+
+    def action_column_grow(self) -> None:
+        """Increase the selected column width."""
+        table = self._get_current_filterable_table()
+        if table and table.resize_selected_column(2):
+            self._save_column_widths()
+
+    def action_column_shrink(self) -> None:
+        """Decrease the selected column width."""
+        table = self._get_current_filterable_table()
+        if table and table.resize_selected_column(-2):
+            self._save_column_widths()
+
+    def action_column_reset(self) -> None:
+        """Reset the selected column to its default width."""
+        table = self._get_current_filterable_table()
+        if table and table.reset_selected_column_width():
+            self._save_column_widths()
+            self.notify("Column width reset", timeout=1)
+
+    def _save_column_widths(self) -> None:
+        """Persist current column widths to settings."""
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            active_tab = tab_container.active_tab
+
+            table = self._get_current_filterable_table()
+            if not table:
+                return
+
+            widths = table.get_column_widths()
+            if not widths:
+                return
+
+            # Convert existing column_widths to a mutable dict
+            existing_widths = dict(self._settings.column_widths)
+            existing_widths[active_tab] = tuple(widths.items())
+
+            # Create new settings with updated column_widths
+            new_settings = Settings(
+                theme=self._settings.theme,
+                log_level=self._settings.log_level,
+                max_log_lines=self._settings.max_log_lines,
+                refresh_interval=self._settings.refresh_interval,
+                job_history_days=self._settings.job_history_days,
+                log_viewer_lines=self._settings.log_viewer_lines,
+                keybind_mode=self._settings.keybind_mode,
+                keybind_overrides=self._settings.keybind_overrides,
+                energy_loading_enabled=self._settings.energy_loading_enabled,
+                energy_history_months=self._settings.energy_history_months,
+                column_widths=tuple(existing_widths.items()),
+            )
+
+            self._settings = new_settings
+            save_settings(new_settings)
+            logger.debug(f"Saved column widths for {active_tab}: {widths}")
+
+        except Exception as exc:
+            logger.warning(f"Failed to save column widths: {exc}")
+
+    def _apply_saved_column_widths(self, table_name: str, table: FilterableDataTable | None = None) -> None:
+        """Apply saved column widths from settings to a table.
+
+        Args:
+            table_name: The name of the table (e.g., "jobs").
+            table: Optional FilterableDataTable to apply widths to. If None, uses current table.
+        """
+        try:
+            saved_widths = dict(self._settings.column_widths)
+            if table_name not in saved_widths:
+                return
+
+            widths = dict(saved_widths[table_name])
+            if not widths:
+                return
+
+            target_table = table if table is not None else self._get_current_filterable_table()
+            if target_table:
+                target_table.set_column_widths(widths)
+                logger.debug(f"Applied saved column widths for {table_name}: {widths}")
+
+        except Exception as exc:
+            logger.warning(f"Failed to apply saved column widths for {table_name}: {exc}")
 
     def _start_refresh_worker(self) -> None:
         """Start background worker for lightweight data refresh."""
@@ -730,7 +856,6 @@ class SlurmMonitor(App[None]):
             job.name,
             state_display,
             job.time,
-            job.nodes,
             job.node_list,
             timeline,
         ]

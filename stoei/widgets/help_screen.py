@@ -131,6 +131,16 @@ class HelpScreen(Screen[None]):
                 ],
             ),
             self._format_section(
+                "Column Width",
+                [
+                    (_format_key(kb.get_key(Actions.COLUMN_SELECT_NEXT)), "Select next column"),
+                    (_format_key(kb.get_key(Actions.COLUMN_SELECT_PREV)), "Select previous column"),
+                    (_format_key(kb.get_key(Actions.COLUMN_WIDTH_INCREASE)), "Increase column width"),
+                    (_format_key(kb.get_key(Actions.COLUMN_WIDTH_DECREASE)), "Decrease column width"),
+                    (_format_key(kb.get_key(Actions.COLUMN_WIDTH_RESET)), "Reset column to default"),
+                ],
+            ),
+            self._format_section(
                 "Jobs Tab",
                 [
                     ("↑/↓", "Navigate jobs list"),

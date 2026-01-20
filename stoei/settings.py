@@ -55,6 +55,8 @@ class Settings:
     # Energy loading settings (disabled by default to speed up startup)
     energy_loading_enabled: bool = False
     energy_history_months: int = DEFAULT_ENERGY_HISTORY_MONTHS
+    # Column widths per table: (("jobs", (("name", 30), ("state", 12))), ...)
+    column_widths: tuple[tuple[str, tuple[tuple[str, int], ...]], ...] = ()
 
     def get_keybindings(self) -> KeybindingConfig:
         """Get the keybinding configuration.
@@ -137,6 +139,9 @@ class Settings:
         if energy_history_months is None or energy_history_months < 1:
             energy_history_months = DEFAULT_ENERGY_HISTORY_MONTHS
 
+        # Parse column widths
+        column_widths = _parse_column_widths(data.get("column_widths"))
+
         return cls(
             theme=theme,
             log_level=log_level,
@@ -148,6 +153,7 @@ class Settings:
             keybind_overrides=keybind_overrides,
             energy_loading_enabled=energy_loading_enabled,
             energy_history_months=energy_history_months,
+            column_widths=column_widths,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -156,6 +162,11 @@ class Settings:
         Returns:
             Dictionary representation of settings.
         """
+        # Convert column_widths tuple structure to nested dict
+        column_widths_dict: dict[str, dict[str, int]] = {}
+        for table_name, col_widths in self.column_widths:
+            column_widths_dict[table_name] = dict(col_widths)
+
         return {
             "theme": self.theme,
             "log_level": self.log_level,
@@ -167,6 +178,7 @@ class Settings:
             "keybind_overrides": dict(self.keybind_overrides),
             "energy_loading_enabled": self.energy_loading_enabled,
             "energy_history_months": self.energy_history_months,
+            "column_widths": column_widths_dict,
         }
 
 
@@ -307,3 +319,31 @@ def _coerce_bool(value: object) -> bool | None:
         if value.lower() in ("false", "0", "no"):
             return False
     return None
+
+
+def _parse_column_widths(
+    raw_widths: object,
+) -> tuple[tuple[str, tuple[tuple[str, int], ...]], ...]:
+    """Parse column widths from raw settings data.
+
+    Args:
+        raw_widths: Raw column widths data from settings.
+
+    Returns:
+        Tuple of (table_name, column_widths) pairs.
+    """
+    if not isinstance(raw_widths, dict):
+        return ()
+
+    parsed_tables: list[tuple[str, tuple[tuple[str, int], ...]]] = []
+    for table_name, col_widths in raw_widths.items():
+        if isinstance(table_name, str) and isinstance(col_widths, dict):
+            parsed_cols: list[tuple[str, int]] = []
+            for col_key, width in col_widths.items():
+                if isinstance(col_key, str):
+                    width_int = _coerce_int(width)
+                    if width_int is not None and width_int > 0:
+                        parsed_cols.append((col_key, width_int))
+            if parsed_cols:
+                parsed_tables.append((table_name, tuple(parsed_cols)))
+    return tuple(parsed_tables)
