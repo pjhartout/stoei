@@ -896,3 +896,81 @@ def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str 
         f"for energy calculation (skipped {skipped_states} with invalid states)"
     )
     return jobs, None
+
+
+# Fields for wait time query
+WAIT_TIME_FIELDS = ["JobID", "Partition", "State", "Submit", "Start"]
+
+
+def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], str | None]:
+    """Get job history for all users with submit/start times from the last N hours.
+
+    Uses sacct with --allusers to fetch jobs that started within the time window.
+    Only includes jobs with valid start times (not pending).
+
+    Args:
+        hours: Number of hours to look back (default: 1).
+
+    Returns:
+        Tuple of (jobs list, optional error message).
+        Each job tuple: (JobID, Partition, State, Submit, Start).
+    """
+    try:
+        sacct = resolve_executable("sacct")
+        format_str = ",".join(WAIT_TIME_FIELDS)
+
+        command = [
+            sacct,
+            "--allusers",
+            f"--format={format_str}",
+            "-S",
+            f"now-{hours}hours",
+            "-X",  # No job steps, only main job entries
+            "-P",  # Parseable output with | delimiter
+            "--noheader",
+        ]
+        logger.debug(f"Running sacct command for {hours}-hour wait time history")
+
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except FileNotFoundError:
+        logger.exception("sacct not found")
+        return [], "sacct not found"
+    except subprocess.TimeoutExpired:
+        logger.exception(f"Timeout getting {hours}-hour wait time history")
+        return [], "Timeout getting wait time history"
+    except subprocess.SubprocessError:
+        logger.exception(f"Error getting {hours}-hour wait time history")
+        return [], "Error getting wait time history"
+
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() or "Unknown error"
+        logger.warning(f"sacct returned non-zero exit code: {result.returncode}, error: {error_msg}")
+        return [], f"sacct error: {error_msg}"
+
+    # Parse pipe-delimited output
+    jobs: list[tuple[str, ...]] = []
+    lines = result.stdout.strip().split("\n")
+
+    # Field index for Start time in WAIT_TIME_FIELDS
+    start_time_idx = WAIT_TIME_FIELDS.index("Start")
+
+    for line in lines:
+        if not line.strip():
+            continue
+
+        parts = line.split("|")
+        # We expect 5 fields: JobID, Partition, State, Submit, Start
+        if len(parts) >= len(WAIT_TIME_FIELDS):
+            # Filter out jobs with Unknown/empty start times (still pending)
+            start_time = parts[start_time_idx].strip() if len(parts) > start_time_idx else ""
+            if start_time and start_time.lower() not in ("unknown", "none", "n/a", ""):
+                jobs.append(tuple(parts[: len(WAIT_TIME_FIELDS)]))
+
+    logger.info(f"Fetched {len(jobs)} jobs from {hours}-hour history for wait time calculation")
+    return jobs, None
