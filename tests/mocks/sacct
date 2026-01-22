@@ -127,23 +127,57 @@ MOCK_HISTORY = [
     ),
 ]
 
+# Mock wait time data for --allusers queries
+# Format: (JobID, Partition, State, Submit, Start)
+MOCK_WAIT_TIME_DATA = [
+    ("12345", "gpu-a100", "RUNNING", "2024-01-15T10:00:00", "2024-01-15T10:05:00"),
+    ("12346", "gpu-a100", "COMPLETED", "2024-01-15T10:10:00", "2024-01-15T10:15:00"),
+    ("12347", "gpu-a100", "COMPLETED", "2024-01-15T10:20:00", "2024-01-15T10:30:00"),
+    ("12348", "cpu", "COMPLETED", "2024-01-15T10:00:00", "2024-01-15T10:01:00"),
+    ("12349", "cpu", "COMPLETED", "2024-01-15T10:05:00", "2024-01-15T10:06:00"),
+    ("12350", "gpu-h200", "RUNNING", "2024-01-15T10:00:00", "2024-01-15T10:30:00"),
+    ("12351", "gpu-h200", "COMPLETED", "2024-01-15T09:00:00", "2024-01-15T09:45:00"),
+    ("12352", "gpu-a100", "PENDING", "2024-01-15T10:50:00", "Unknown"),
+]
+
+
+def output_wait_time_format(noheader: bool) -> None:
+    """Output wait time format data (JobID,Partition,State,Submit,Start)."""
+    if not noheader:
+        print("JobID|Partition|State|Submit|Start")
+    for job in MOCK_WAIT_TIME_DATA:
+        print("|".join(job))
+
+
+def output_standard_format(noheader: bool) -> None:
+    """Output standard history format."""
+    if not noheader:
+        print("JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList|Submit|Start|End")
+    for job in MOCK_HISTORY:
+        print("|".join(job))
+
 
 def main() -> None:
     """Main entry point for mock sacct command."""
     parser = argparse.ArgumentParser()
     parser.add_argument("-u", "--user", default=None)
+    parser.add_argument("--allusers", action="store_true")
     parser.add_argument("--format", default=None)
     parser.add_argument("-S", "--starttime", default=None)
     parser.add_argument("-X", action="store_true")
     parser.add_argument("-P", action="store_true")
-    parser.parse_args()
+    parser.add_argument("--noheader", action="store_true")
+    parser.add_argument("-j", "--jobs", default=None)
+    args = parser.parse_args()
 
-    # Output header
-    print("JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList|Submit|Start|End")
+    # Check if this is a wait time query (--allusers with specific format)
+    format_str = args.format or ""
+    is_wait_time_query = args.allusers and "Submit" in format_str and "Start" in format_str
 
-    # Output all mock history
-    for job in MOCK_HISTORY:
-        print("|".join(job))
+    if is_wait_time_query:
+        output_wait_time_format(args.noheader)
+    else:
+        output_standard_format(args.noheader)
 
 
 if __name__ == "__main__":
