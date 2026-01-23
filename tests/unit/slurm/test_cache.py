@@ -135,11 +135,11 @@ class TestJob:
 
     def test_as_row(self, running_job: Job) -> None:
         row = running_job.as_row()
-        assert row == ("12345", "test_job", "RUNNING", "01:30:00", "node01")
+        assert row == ("12345", "test_job", "RUNNING", "01:30:00", "1", "node01")
 
     def test_as_row_tuple_length(self, running_job: Job) -> None:
         row = running_job.as_row()
-        assert len(row) == 5
+        assert len(row) == 6
 
 
 class TestJobCache:
