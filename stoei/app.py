@@ -33,6 +33,7 @@ from stoei.slurm.commands import (
     get_node_info,
     get_running_jobs,
     get_user_jobs,
+    get_wait_time_job_history,
 )
 from stoei.slurm.formatters import format_compact_timeline, format_user_info
 from stoei.slurm.gpu_parser import (
@@ -44,6 +45,7 @@ from stoei.slurm.gpu_parser import (
     parse_gpu_from_gres,
 )
 from stoei.slurm.validation import check_slurm_available
+from stoei.slurm.wait_time import calculate_partition_wait_stats
 from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats, PendingPartitionStats
 from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
@@ -81,6 +83,7 @@ LOADING_STEPS = [
     LoadingStep("user_history", "Fetching your job history...", weight=2.0),
     LoadingStep("all_running", "Fetching all running jobs...", weight=2.0),
     LoadingStep("energy_history", "Loading energy history...", weight=3.0),
+    LoadingStep("wait_times", "Calculating wait times...", weight=1.0),
     LoadingStep("aggregate_users", "Aggregating user statistics...", weight=1.0),
     LoadingStep("cluster_stats", "Calculating cluster statistics...", weight=1.0),
     LoadingStep("finalize", "Finalizing...", weight=0.5),
@@ -165,6 +168,7 @@ class SlurmMonitor(App[None]):
         self._all_users_jobs: list[tuple[str, ...]] = []
         self._energy_history_jobs: list[tuple[str, ...]] = []  # Energy history (loaded once at startup if enabled)
         self._energy_data_loaded: bool = False  # Track if energy data was loaded
+        self._wait_time_jobs: list[tuple[str, ...]] = []  # Wait time history for cluster sidebar
         self._is_narrow: bool = False
         self._loading_screen: LoadingScreen | None = None
         self._last_history_jobs: list[tuple[str, ...]] = []
@@ -295,9 +299,9 @@ class SlurmMonitor(App[None]):
         self._last_history_stats = (total_jobs, total_requeues, max_requeues)
 
         # Build job cache from fetched data
-        self._loading_update_step(9)
+        self._loading_update_step(10)
         self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-        self._loading_complete_step(9, "Ready")
+        self._loading_complete_step(10, "Ready")
 
         # Mark loading complete and transition
         if self._loading_screen:
@@ -333,7 +337,10 @@ class SlurmMonitor(App[None]):
         # Step 6: Fetch 6-month energy history (only at startup)
         self._load_step_energy_history()
 
-        # Steps 7-8: Calculate statistics
+        # Step 7: Fetch wait time history
+        self._load_step_wait_times()
+
+        # Steps 8-9: Calculate statistics
         self._load_step_statistics()
 
         return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
@@ -423,15 +430,27 @@ class SlurmMonitor(App[None]):
             self._energy_data_loaded = True
         self._energy_history_jobs = energy_jobs
 
-    def _load_step_statistics(self) -> None:
-        """Execute steps 7-8: Calculate user and cluster statistics."""
+    def _load_step_wait_times(self) -> None:
+        """Execute step 7: Fetch wait time history for cluster sidebar."""
         self._loading_update_step(7)
-        user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
-        self._loading_complete_step(7, f"{len(user_stats)} users")
+        wait_time_jobs, error = get_wait_time_job_history(hours=1)
+        if error:
+            self._loading_fail_step(7, error)
+            logger.warning(f"Failed to get wait time history: {error}")
+            wait_time_jobs = []
+        else:
+            self._loading_complete_step(7, f"{len(wait_time_jobs)} jobs")
+        self._wait_time_jobs = wait_time_jobs
 
+    def _load_step_statistics(self) -> None:
+        """Execute steps 8-9: Calculate user and cluster statistics."""
         self._loading_update_step(8)
+        user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
+        self._loading_complete_step(8, f"{len(user_stats)} users")
+
+        self._loading_update_step(9)
         cluster_stats = self._calculate_cluster_stats()
-        self._loading_complete_step(8, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
+        self._loading_complete_step(9, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
 
     def _show_slurm_error(self) -> None:
         """Show SLURM unavailable error screen."""
@@ -691,6 +710,32 @@ class SlurmMonitor(App[None]):
             thread=True,
         )
 
+    def _refresh_cluster_data(self) -> None:
+        """Refresh cluster-level data (nodes, all jobs, wait times)."""
+        # Refresh cluster nodes (single scontrol command)
+        nodes, error = get_cluster_nodes()
+        if error:
+            logger.warning(f"Failed to get cluster nodes: {error}")
+        else:
+            logger.debug(f"Fetched {len(nodes)} cluster nodes")
+            self._cluster_nodes = nodes
+
+        # Refresh all running jobs (single squeue command with TRES)
+        all_jobs, error = get_all_running_jobs()
+        if error:
+            logger.warning(f"Failed to get all running jobs: {error}")
+        else:
+            logger.debug(f"Fetched {len(all_jobs)} running jobs from all users")
+            self._all_users_jobs = all_jobs
+
+        # Refresh wait time history for cluster sidebar
+        wait_time_jobs, error = get_wait_time_job_history(hours=1)
+        if error:
+            logger.warning(f"Failed to get wait time history: {error}")
+        else:
+            logger.debug(f"Fetched {len(wait_time_jobs)} jobs for wait time calculation")
+            self._wait_time_jobs = wait_time_jobs
+
     def _refresh_data_async(self) -> None:
         """Lightweight refresh of SLURM data (runs in background worker thread).
 
@@ -702,10 +747,6 @@ class SlurmMonitor(App[None]):
 
         try:
             # Refresh user's jobs (running + 7-day history)
-            # Use separate try/except blocks to prevent partial failures from stopping everything
-            # but generally we want to update the cache only if we have data
-
-            # Get running jobs
             running_jobs, r_error = get_running_jobs()
             if r_error:
                 logger.warning(f"Failed to refresh running jobs: {r_error}")
@@ -718,7 +759,6 @@ class SlurmMonitor(App[None]):
                 logger.warning(f"Failed to refresh job history: {h_error}")
                 history_jobs = None
             else:
-                # Update cache of raw history data
                 self._last_history_jobs = history_jobs
                 self._last_history_stats = (total_jobs, total_requeues, max_requeues)
 
@@ -730,23 +770,8 @@ class SlurmMonitor(App[None]):
                     lambda: self.notify("Running jobs refresh failed - keeping old data", severity="warning")
                 )
 
-            # Refresh cluster nodes (single scontrol command)
-            nodes, error = get_cluster_nodes()
-            if error:
-                logger.warning(f"Failed to get cluster nodes: {error}")
-                # Keep existing nodes on error
-            else:
-                logger.debug(f"Fetched {len(nodes)} cluster nodes")
-                self._cluster_nodes = nodes
-
-            # Refresh all running jobs (single squeue command with TRES)
-            all_jobs, error = get_all_running_jobs()
-            if error:
-                logger.warning(f"Failed to get all running jobs: {error}")
-                # Keep existing jobs on error
-            else:
-                logger.debug(f"Fetched {len(all_jobs)} running jobs from all users")
-                self._all_users_jobs = all_jobs
+            # Refresh cluster-level data
+            self._refresh_cluster_data()
 
             # Schedule UI update on main thread
             self.call_from_thread(self._update_ui_from_cache)
@@ -1185,6 +1210,12 @@ class SlurmMonitor(App[None]):
 
         # Calculate pending job resources
         self._calculate_pending_resources(stats)
+
+        # Calculate wait time statistics
+        if self._wait_time_jobs:
+            stats.wait_stats_by_partition = calculate_partition_wait_stats(self._wait_time_jobs)
+            stats.wait_stats_hours = 1  # Currently hardcoded to 1 hour
+            logger.debug(f"Calculated wait stats for {len(stats.wait_stats_by_partition)} partitions")
 
         return stats
 

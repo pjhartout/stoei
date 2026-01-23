@@ -578,6 +578,105 @@ class TestCommandErrorPaths:
             assert error is not None
 
 
+class TestGetWaitTimeJobHistory:
+    """Tests for get_wait_time_job_history function."""
+
+    def test_returns_jobs_list(self, mock_slurm_path: Path) -> None:
+        from stoei.slurm.commands import get_wait_time_job_history
+
+        jobs, error = get_wait_time_job_history(hours=1)
+
+        assert error is None
+        assert isinstance(jobs, list)
+
+    def test_filters_out_unknown_start_times(self) -> None:
+        """Test that jobs with Unknown start times are filtered out."""
+        from stoei.slurm.commands import get_wait_time_job_history
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        # Include a job with Unknown start time that should be filtered
+        mock_result.stdout = """12345|gpu-a100|COMPLETED|2024-01-15T10:00:00|2024-01-15T10:05:00
+12346|cpu|PENDING|2024-01-15T10:00:00|Unknown
+12347|gpu-h200|RUNNING|2024-01-15T10:00:00|2024-01-15T10:10:00"""
+        mock_result.stderr = ""
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/sacct"),
+            patch("subprocess.run", return_value=mock_result),
+        ):
+            jobs, error = get_wait_time_job_history(hours=1)
+
+            assert error is None
+            assert len(jobs) == 2  # Only 2 jobs have valid start times
+            assert all(job[4] != "Unknown" for job in jobs)
+
+    def test_handles_timeout(self) -> None:
+        """Test handling of timeout in get_wait_time_job_history."""
+        import subprocess
+
+        from stoei.slurm.commands import get_wait_time_job_history
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/sacct"),
+            patch("subprocess.run", side_effect=subprocess.TimeoutExpired("cmd", 30)),
+        ):
+            jobs, error = get_wait_time_job_history(hours=1)
+            assert jobs == []
+            assert error is not None
+            assert "timeout" in error.lower()
+
+    def test_handles_subprocess_error(self) -> None:
+        """Test handling of SubprocessError in get_wait_time_job_history."""
+        import subprocess
+
+        from stoei.slurm.commands import get_wait_time_job_history
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/sacct"),
+            patch("subprocess.run", side_effect=subprocess.SubprocessError("Error")),
+        ):
+            jobs, error = get_wait_time_job_history(hours=1)
+            assert jobs == []
+            assert error is not None
+            assert "error" in error.lower()
+
+    def test_handles_nonzero_exit_code(self) -> None:
+        """Test handling of non-zero exit code from sacct."""
+        from stoei.slurm.commands import get_wait_time_job_history
+
+        mock_result = MagicMock()
+        mock_result.returncode = 1
+        mock_result.stderr = "Database error"
+        mock_result.stdout = ""
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/sacct"),
+            patch("subprocess.run", return_value=mock_result),
+        ):
+            jobs, error = get_wait_time_job_history(hours=1)
+            assert jobs == []
+            assert error is not None
+
+    def test_hours_parameter(self) -> None:
+        """Test that hours parameter is passed correctly."""
+        from stoei.slurm.commands import get_wait_time_job_history
+
+        mock_result = MagicMock()
+        mock_result.returncode = 0
+        mock_result.stdout = ""
+        mock_result.stderr = ""
+
+        with (
+            patch("stoei.slurm.commands.resolve_executable", return_value="/usr/bin/sacct"),
+            patch("subprocess.run", return_value=mock_result) as mock_run,
+        ):
+            get_wait_time_job_history(hours=6)
+            # Check that the command includes the correct hours parameter
+            call_args = mock_run.call_args[0][0]
+            assert any("now-6hours" in arg for arg in call_args)
+
+
 class TestRunWithRetry:
     """Tests for _run_with_retry function."""
 

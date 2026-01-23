@@ -2,6 +2,7 @@
 
 import pytest
 from stoei.colors import FALLBACK_COLORS
+from stoei.slurm.wait_time import PartitionWaitStats
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats, PendingPartitionStats
 
 
@@ -450,3 +451,231 @@ class TestClusterSidebarPendingQueue:
         gpu_pos = rendered.find("GPUs:")
         pending_pos = rendered.find("Pending Queue")
         assert gpu_pos < pending_pos, "Pending Queue should appear after GPUs"
+
+
+class TestClusterStatsWaitTime:
+    """Tests for wait time fields in ClusterStats."""
+
+    def test_wait_time_fields_initial_values(self) -> None:
+        """Test initial default values for wait time fields."""
+        stats = ClusterStats()
+        assert stats.wait_stats_by_partition == {}
+        assert stats.wait_stats_hours == 1
+
+    def test_wait_time_fields_with_values(self) -> None:
+        """Test wait time fields with set values."""
+        stats = ClusterStats(
+            wait_stats_by_partition={
+                "gpu-a100": PartitionWaitStats(
+                    partition="gpu-a100",
+                    job_count=10,
+                    mean_seconds=300.0,
+                    median_seconds=250.0,
+                    min_seconds=60.0,
+                    max_seconds=3600.0,
+                ),
+                "cpu": PartitionWaitStats(
+                    partition="cpu",
+                    job_count=5,
+                    mean_seconds=60.0,
+                    median_seconds=45.0,
+                    min_seconds=10.0,
+                    max_seconds=180.0,
+                ),
+            },
+            wait_stats_hours=2,
+        )
+        assert len(stats.wait_stats_by_partition) == 2
+        assert stats.wait_stats_hours == 2
+        assert stats.wait_stats_by_partition["gpu-a100"].job_count == 10
+
+
+class TestClusterSidebarWaitTime:
+    """Tests for wait time display in ClusterSidebar."""
+
+    @pytest.fixture
+    def cluster_sidebar(self) -> ClusterSidebar:
+        """Create a ClusterSidebar widget for testing."""
+        return ClusterSidebar(id="test-sidebar")
+
+    def test_render_stats_no_wait_times(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that wait time section is not displayed when no data."""
+        stats = ClusterStats(total_nodes=10, free_nodes=5, wait_stats_by_partition={})
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "Wait Times" not in rendered
+
+    def test_render_stats_with_wait_times(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that wait time section is displayed when there is data."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            wait_stats_by_partition={
+                "gpu-a100": PartitionWaitStats(
+                    partition="gpu-a100",
+                    job_count=10,
+                    mean_seconds=300.0,
+                    median_seconds=250.0,
+                    min_seconds=60.0,
+                    max_seconds=3600.0,
+                ),
+            },
+            wait_stats_hours=1,
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "Wait Times" in rendered
+        assert "Jobs started in last 1h" in rendered
+        assert "(mean/median/range)" in rendered
+        assert "gpu-a100" in rendered
+
+    def test_render_stats_wait_time_format(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that wait time format is mean/median/min-max."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            wait_stats_by_partition={
+                "cpu": PartitionWaitStats(
+                    partition="cpu",
+                    job_count=5,
+                    mean_seconds=300.0,  # 5m
+                    median_seconds=180.0,  # 3m
+                    min_seconds=60.0,  # 1m
+                    max_seconds=7200.0,  # 2h
+                ),
+            },
+            wait_stats_hours=1,
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        # Should contain format: mean/median/min-max
+        assert "5m" in rendered
+        assert "3m" in rendered
+        assert "1m" in rendered
+        assert "2.0h" in rendered
+
+    def test_render_stats_multiple_partitions(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that multiple partitions are displayed."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            wait_stats_by_partition={
+                "gpu-a100": PartitionWaitStats(
+                    partition="gpu-a100",
+                    job_count=10,
+                    mean_seconds=600.0,
+                    median_seconds=500.0,
+                    min_seconds=120.0,
+                    max_seconds=3600.0,
+                ),
+                "cpu": PartitionWaitStats(
+                    partition="cpu",
+                    job_count=5,
+                    mean_seconds=60.0,
+                    median_seconds=45.0,
+                    min_seconds=10.0,
+                    max_seconds=180.0,
+                ),
+                "gpu-h200": PartitionWaitStats(
+                    partition="gpu-h200",
+                    job_count=3,
+                    mean_seconds=1800.0,
+                    median_seconds=1200.0,
+                    min_seconds=300.0,
+                    max_seconds=7200.0,
+                ),
+            },
+            wait_stats_hours=1,
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "gpu-a100" in rendered
+        assert "cpu" in rendered
+        assert "gpu-h200" in rendered
+
+    def test_render_stats_partitions_sorted(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that partitions are sorted case-insensitively."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            wait_stats_by_partition={
+                "Zephyr": PartitionWaitStats(
+                    partition="Zephyr",
+                    job_count=1,
+                    mean_seconds=60.0,
+                    median_seconds=60.0,
+                    min_seconds=60.0,
+                    max_seconds=60.0,
+                ),
+                "alpha": PartitionWaitStats(
+                    partition="alpha",
+                    job_count=1,
+                    mean_seconds=60.0,
+                    median_seconds=60.0,
+                    min_seconds=60.0,
+                    max_seconds=60.0,
+                ),
+                "Beta": PartitionWaitStats(
+                    partition="Beta",
+                    job_count=1,
+                    mean_seconds=60.0,
+                    median_seconds=60.0,
+                    min_seconds=60.0,
+                    max_seconds=60.0,
+                ),
+            },
+            wait_stats_hours=1,
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        alpha_pos = rendered.find("alpha")
+        beta_pos = rendered.find("Beta")
+        zephyr_pos = rendered.find("Zephyr")
+        # Should be sorted: alpha, Beta, Zephyr
+        assert alpha_pos < beta_pos < zephyr_pos
+
+    def test_render_stats_wait_time_before_pending(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that wait time section appears before pending section."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            pending_jobs_count=10,
+            pending_by_partition={"gpu": PendingPartitionStats(jobs_count=10, cpus=100, memory_gb=0.0, gpus=0)},
+            wait_stats_by_partition={
+                "gpu": PartitionWaitStats(
+                    partition="gpu",
+                    job_count=5,
+                    mean_seconds=300.0,
+                    median_seconds=250.0,
+                    min_seconds=60.0,
+                    max_seconds=600.0,
+                ),
+            },
+            wait_stats_hours=1,
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        pending_pos = rendered.find("Pending Queue")
+        wait_pos = rendered.find("Wait Times")
+        assert wait_pos < pending_pos, "Wait Times should appear before Pending Queue"
+
+    def test_render_stats_custom_hours(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that custom hours value is displayed."""
+        stats = ClusterStats(
+            total_nodes=10,
+            free_nodes=5,
+            wait_stats_by_partition={
+                "cpu": PartitionWaitStats(
+                    partition="cpu",
+                    job_count=5,
+                    mean_seconds=60.0,
+                    median_seconds=45.0,
+                    min_seconds=10.0,
+                    max_seconds=180.0,
+                ),
+            },
+            wait_stats_hours=6,
+        )
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "Jobs started in last 6h" in rendered

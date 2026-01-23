@@ -6,7 +6,7 @@ Caches SLURM job data to reduce subprocess calls and improve TUI responsiveness.
 from dataclasses import dataclass
 from enum import Enum
 from threading import Lock
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from stoei.logger import get_logger
 from stoei.slurm.commands import get_job_history, get_running_jobs
@@ -120,7 +120,7 @@ class JobCache:
                 if cls._instance is None:
                     cls._instance = super().__new__(cls)
                     cls._instance._initialized = False
-        return cls._instance
+        return cast("JobCache", cls._instance)
 
     def __init__(self) -> None:
         """Initialize the job cache."""

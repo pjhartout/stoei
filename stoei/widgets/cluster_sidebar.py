@@ -8,6 +8,7 @@ from textual.containers import VerticalScroll
 from textual.widgets import Static
 
 from stoei.colors import get_theme_colors
+from stoei.slurm.wait_time import PartitionWaitStats, format_wait_time
 
 # Conversion constant: 1 TB = 1024 GB
 GB_PER_TB = 1024
@@ -59,6 +60,9 @@ class ClusterStats:
     pending_gpus: int = 0
     pending_gpus_by_type: dict[str, int] = field(default_factory=dict)
     pending_by_partition: dict[str, PendingPartitionStats] = field(default_factory=dict)
+    # Wait time statistics per partition (from last N hours)
+    wait_stats_by_partition: dict[str, PartitionWaitStats] = field(default_factory=dict)
+    wait_stats_hours: int = 1  # Time window used for stats
 
     @property
     def free_nodes_pct(self) -> float:
@@ -232,6 +236,34 @@ class ClusterSidebar(VerticalScroll):
             elif pstats.gpus > 0:
                 lines.append(f"    GPUs: {pstats.gpus}")
 
+    def _append_wait_time_section(self, lines: list[str], stats: ClusterStats) -> None:
+        """Append the wait time statistics section to the sidebar output.
+
+        Shows wait times for jobs that started in the last N hours.
+        Format per partition: mean/median/range
+        Example output:
+            Wait Times
+            Jobs started in last 1h
+            (mean/median/range)
+              gpu-a100: 5m/3m/1m-2h
+              cpu: 30s/15s/5s-3m
+        """
+        if not stats.wait_stats_by_partition:
+            return
+
+        lines.append("")
+        lines.append("[bold]Wait Times[/bold]")
+        lines.append(f"[bright_black]Jobs started in last {stats.wait_stats_hours}h[/bright_black]")
+        lines.append("[bright_black](mean/median/range)[/bright_black]")
+
+        for partition in sorted(stats.wait_stats_by_partition.keys(), key=lambda p: p.casefold()):
+            wstats = stats.wait_stats_by_partition[partition]
+            mean_str = format_wait_time(wstats.mean_seconds)
+            median_str = format_wait_time(wstats.median_seconds)
+            min_str = format_wait_time(wstats.min_seconds)
+            max_str = format_wait_time(wstats.max_seconds)
+            lines.append(f"  {partition}: {mean_str}/{median_str}/{min_str}-{max_str}")
+
     def _render_stats(self) -> str:
         """Render the statistics as a string.
 
@@ -267,6 +299,7 @@ class ClusterSidebar(VerticalScroll):
         ]
 
         self._append_gpu_section(lines, stats, gpus_pct=gpus_pct)
+        self._append_wait_time_section(lines, stats)
         self._append_pending_queue_section(lines, stats)
 
         return "\n".join(lines)

@@ -777,7 +777,7 @@ class FilterableDataTable(Vertical):
 
         # Get the column from the DataTable
         try:
-            column = table.columns.get(col_config.key)  # type: ignore[arg-type]
+            column = table.columns.get(col_config.key)
             if column is None:
                 logger.warning(f"Column {col_config.key} not found in DataTable")
                 return False
@@ -818,7 +818,7 @@ class FilterableDataTable(Vertical):
         table = self.table
 
         try:
-            column = table.columns.get(col_config.key)  # type: ignore[arg-type]
+            column = table.columns.get(col_config.key)
             if column is None:
                 return False
 
