@@ -88,17 +88,18 @@ class Job:
                 return category
         return JobState.OTHER
 
-    def as_row(self) -> tuple[str, str, str, str, str]:
+    def as_row(self) -> tuple[str, str, str, str, str, str]:
         """Convert to table row format.
 
         Returns:
-            Tuple of (JobID, Name, State, Time, NodeList).
+            Tuple of (JobID, Name, State, Time, Nodes, NodeList).
         """
         return (
             self.job_id,
             self.name,
             self.state,
             self.time,
+            self.nodes,
             self.node_list,
         )
 
