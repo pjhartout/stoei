@@ -189,3 +189,74 @@ def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
         nodes.append(current_node)
 
     return nodes
+
+
+def parse_sshare_output(
+    entries: list[tuple[str, ...]],
+) -> tuple[list[dict[str, str]], list[dict[str, str]]]:
+    """Parse sshare output into user and account priority data.
+
+    Separates entries into user-level and account-level data based on
+    whether the User field is empty (account) or populated (user).
+
+    Args:
+        entries: List of sshare tuples from get_fair_share_priority().
+            Format: (Account, User, RawShares, NormShares, RawUsage,
+            NormUsage, EffectvUsage, FairShare).
+
+    Returns:
+        Tuple of (user_priorities, account_priorities).
+        Each is a list of dicts with keys matching SSHARE_FIELDS.
+    """
+    user_priorities: list[dict[str, str]] = []
+    account_priorities: list[dict[str, str]] = []
+
+    field_names = ["Account", "User", "RawShares", "NormShares", "RawUsage", "NormUsage", "EffectvUsage", "FairShare"]
+
+    for entry in entries:
+        if len(entry) < len(field_names):
+            continue
+
+        data = {field_names[i]: entry[i].strip() for i in range(len(field_names))}
+
+        # User field empty means this is an account-level entry
+        if not data["User"]:
+            account_priorities.append(data)
+        else:
+            user_priorities.append(data)
+
+    return user_priorities, account_priorities
+
+
+def parse_sprio_output(entries: list[tuple[str, ...]]) -> list[dict[str, str]]:
+    """Parse sprio output into job priority data.
+
+    Args:
+        entries: List of sprio tuples from get_pending_job_priority().
+            Format: (JobID, User, Account, Priority, Age, FairShare,
+            JobSize, Partition, QOS).
+
+    Returns:
+        List of dicts with keys matching SPRIO_FIELDS.
+    """
+    job_priorities: list[dict[str, str]] = []
+
+    field_names = ["JobID", "User", "Account", "Priority", "Age", "FairShare", "JobSize", "Partition", "QOS"]
+
+    for entry in entries:
+        if len(entry) < len(field_names):
+            continue
+
+        data = {field_names[i]: entry[i].strip() for i in range(len(field_names))}
+        job_priorities.append(data)
+
+    # Sort by priority descending (highest priority first)
+    def priority_sort_key(job: dict[str, str]) -> float:
+        try:
+            return float(job.get("Priority", "0"))
+        except ValueError:
+            return 0.0
+
+    job_priorities.sort(key=priority_sort_key, reverse=True)
+
+    return job_priorities

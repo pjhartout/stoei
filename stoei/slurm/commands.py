@@ -901,6 +901,12 @@ def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str 
 # Fields for wait time query
 WAIT_TIME_FIELDS = ["JobID", "Partition", "State", "Submit", "Start"]
 
+# Fields for sshare command (user/account fair-share priority)
+SSHARE_FIELDS = ["Account", "User", "RawShares", "NormShares", "RawUsage", "NormUsage", "EffectvUsage", "FairShare"]
+
+# Fields for sprio command (pending job priority factors)
+SPRIO_FIELDS = ["JOBID", "USER", "ACCOUNT", "PRIORITY", "AGE", "FAIRSHARE", "JOBSIZE", "PARTITION", "QOS"]
+
 
 def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], str | None]:
     """Get job history for all users with submit/start times from the last N hours.
@@ -974,3 +980,131 @@ def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], st
 
     logger.info(f"Fetched {len(jobs)} jobs from {hours}-hour history for wait time calculation")
     return jobs, None
+
+
+def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
+    """Get fair-share priority information for all users and accounts.
+
+    Uses sshare to fetch fair-share data including raw shares, normalized shares,
+    usage, and fair-share factor.
+
+    Returns:
+        Tuple of (list of priority tuples, optional error message).
+        Each tuple contains: (Account, User, RawShares, NormShares, RawUsage,
+        NormUsage, EffectvUsage, FairShare).
+    """
+    try:
+        sshare = resolve_executable("sshare")
+        format_str = ",".join(SSHARE_FIELDS)
+        command = [
+            sshare,
+            "-a",  # All users
+            "-P",  # Parseable output with | delimiter
+            "--noheader",
+            f"--format={format_str}",
+        ]
+        logger.debug("Running sshare command for fair-share priority")
+
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except FileNotFoundError:
+        logger.exception("sshare not found")
+        return [], "sshare not found"
+    except subprocess.TimeoutExpired:
+        logger.exception("Timeout getting fair-share priority")
+        return [], "Timeout getting fair-share priority"
+    except subprocess.SubprocessError:
+        logger.exception("Error getting fair-share priority")
+        return [], "Error getting fair-share priority"
+
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() or "Unknown error"
+        logger.warning(f"sshare returned non-zero exit code: {result.returncode}, error: {error_msg}")
+        return [], f"sshare error: {error_msg}"
+
+    # Parse pipe-delimited output
+    entries: list[tuple[str, ...]] = []
+    lines = result.stdout.strip().split("\n")
+
+    for line in lines:
+        if not line.strip():
+            continue
+
+        parts = line.split("|")
+        if len(parts) >= len(SSHARE_FIELDS):
+            entries.append(tuple(parts[: len(SSHARE_FIELDS)]))
+
+    logger.info(f"Fetched {len(entries)} fair-share entries")
+    return entries, None
+
+
+def get_pending_job_priority() -> tuple[list[tuple[str, ...]], str | None]:
+    """Get priority factors for all pending jobs.
+
+    Uses sprio to fetch priority breakdown including age, fair-share,
+    job size, partition, and QOS factors.
+
+    Returns:
+        Tuple of (list of job priority tuples, optional error message).
+        Each tuple contains: (JobID, User, Account, Priority, Age, FairShare,
+        JobSize, Partition, QOS).
+    """
+    try:
+        sprio = resolve_executable("sprio")
+        # Use custom format to get all factors
+        format_str = "%.15i|%.15u|%.15a|%.10Y|%.10A|%.10F|%.10J|%.10P|%.10Q"
+        command = [
+            sprio,
+            "-o",
+            format_str,
+            "--noheader",
+        ]
+        logger.debug("Running sprio command for pending job priority")
+
+        result = subprocess.run(  # noqa: S603
+            command,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            check=False,
+        )
+    except FileNotFoundError:
+        logger.exception("sprio not found")
+        return [], "sprio not found"
+    except subprocess.TimeoutExpired:
+        logger.exception("Timeout getting pending job priority")
+        return [], "Timeout getting pending job priority"
+    except subprocess.SubprocessError:
+        logger.exception("Error getting pending job priority")
+        return [], "Error getting pending job priority"
+
+    if result.returncode != 0:
+        error_msg = result.stderr.strip() or "Unknown error"
+        # sprio returns non-zero if no pending jobs, which is not an error
+        if "no pending jobs" in error_msg.lower() or not error_msg:
+            logger.debug("No pending jobs found for priority calculation")
+            return [], None
+        logger.warning(f"sprio returned non-zero exit code: {result.returncode}, error: {error_msg}")
+        return [], f"sprio error: {error_msg}"
+
+    # Parse pipe-delimited output
+    entries: list[tuple[str, ...]] = []
+    lines = result.stdout.strip().split("\n")
+
+    for line in lines:
+        if not line.strip():
+            continue
+
+        parts = line.split("|")
+        # Clean up whitespace in each field
+        cleaned_parts = [p.strip() for p in parts]
+        if len(cleaned_parts) >= len(SPRIO_FIELDS):
+            entries.append(tuple(cleaned_parts[: len(SPRIO_FIELDS)]))
+
+    logger.info(f"Fetched {len(entries)} pending job priority entries")
+    return entries, None

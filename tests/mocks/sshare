@@ -1,0 +1,68 @@
+#!/usr/bin/env python3
+"""Mock sshare command for testing."""
+
+from __future__ import annotations
+
+import argparse
+
+# Mock fair-share data
+# Format: (Account, User, RawShares, NormShares, RawUsage, NormUsage, EffectvUsage, FairShare)
+MOCK_SSHARE_DATA = [
+    # Account-level entries (no user)
+    ("root", "", "1", "1.000000", "0", "0.000000", "0.000000", "1.000000"),
+    ("physics", "", "100", "0.250000", "1000000", "0.150000", "0.150000", "0.850000"),
+    ("chemistry", "", "100", "0.250000", "2000000", "0.300000", "0.300000", "0.700000"),
+    ("biology", "", "100", "0.250000", "500000", "0.075000", "0.075000", "0.925000"),
+    ("engineering", "", "100", "0.250000", "1500000", "0.225000", "0.225000", "0.775000"),
+    # User-level entries
+    ("physics", "phih", "50", "0.125000", "500000", "0.075000", "0.150000", "0.850000"),
+    ("physics", "alice", "50", "0.125000", "500000", "0.075000", "0.150000", "0.850000"),
+    ("chemistry", "bob", "50", "0.125000", "1000000", "0.150000", "0.300000", "0.700000"),
+    ("chemistry", "charlie", "50", "0.125000", "1000000", "0.150000", "0.300000", "0.700000"),
+    ("biology", "diana", "100", "0.250000", "500000", "0.075000", "0.075000", "0.925000"),
+    ("engineering", "eve", "33", "0.082500", "500000", "0.075000", "0.225000", "0.775000"),
+    ("engineering", "frank", "33", "0.082500", "500000", "0.075000", "0.225000", "0.775000"),
+    ("engineering", "grace", "34", "0.085000", "500000", "0.075000", "0.225000", "0.775000"),
+]
+
+
+def main() -> None:
+    """Main entry point for mock sshare command."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument("-a", "--all", action="store_true", help="All users")
+    parser.add_argument("-A", "--accounts", default=None, help="Specific accounts")
+    parser.add_argument("-u", "--users", default=None, help="Specific users")
+    parser.add_argument("-P", "--parsable", action="store_true", help="Parseable output")
+    parser.add_argument("-p", "--parsable2", action="store_true", help="Parseable output without trailing |")
+    parser.add_argument("--noheader", action="store_true", help="No header")
+    parser.add_argument("--format", "-o", default=None, help="Output format")
+
+    args = parser.parse_args()
+
+    data = list(MOCK_SSHARE_DATA)
+
+    # Filter by account if specified
+    if args.accounts:
+        accounts = args.accounts.split(",")
+        data = [row for row in data if row[0] in accounts]
+
+    # Filter by user if specified
+    if args.users:
+        users = args.users.split(",")
+        data = [row for row in data if row[1] in users]
+
+    # Output
+    delimiter = "|"
+    if not args.noheader:
+        print("Account|User|RawShares|NormShares|RawUsage|NormUsage|EffectvUsage|FairShare|")
+
+    for row in data:
+        line = delimiter.join(row)
+        if args.parsable2:
+            print(line)
+        else:
+            print(line + delimiter)
+
+
+if __name__ == "__main__":
+    main()

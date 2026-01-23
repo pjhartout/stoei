@@ -343,7 +343,8 @@ class TestAppClusterIntegration:
         assert bindings_dict["1"] == "switch_tab_jobs"
         assert bindings_dict["2"] == "switch_tab_nodes"
         assert bindings_dict["3"] == "switch_tab_users"
-        assert bindings_dict["4"] == "switch_tab_logs"
+        assert bindings_dict["4"] == "switch_tab_priority"
+        assert bindings_dict["5"] == "switch_tab_logs"
         assert bindings_dict["left"] == "previous_tab"
         assert bindings_dict["right"] == "next_tab"
         assert bindings_dict["shift+tab"] == "previous_tab"
@@ -371,7 +372,11 @@ class TestAppClusterIntegration:
                 app.action_next_tab()
                 assert tab_container.active_tab == "users"
 
-                # Cycle forward: users -> logs
+                # Cycle forward: users -> priority
+                app.action_next_tab()
+                assert tab_container.active_tab == "priority"
+
+                # Cycle forward: priority -> logs
                 app.action_next_tab()
                 assert tab_container.active_tab == "logs"
 
@@ -393,7 +398,11 @@ class TestAppClusterIntegration:
                 app.action_previous_tab()
                 assert tab_container.active_tab == "logs"
 
-                # Cycle backward: logs -> users
+                # Cycle backward: logs -> priority
+                app.action_previous_tab()
+                assert tab_container.active_tab == "priority"
+
+                # Cycle backward: priority -> users
                 app.action_previous_tab()
                 assert tab_container.active_tab == "users"
 
@@ -423,7 +432,11 @@ class TestAppClusterIntegration:
                 await pilot.press("tab")
                 assert tab_container.active_tab == "users"
 
-                # Press Tab: users -> logs
+                # Press Tab: users -> priority
+                await pilot.press("tab")
+                assert tab_container.active_tab == "priority"
+
+                # Press Tab: priority -> logs
                 await pilot.press("tab")
                 assert tab_container.active_tab == "logs"
 

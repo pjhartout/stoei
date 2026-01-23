@@ -27,10 +27,12 @@ from stoei.slurm.commands import (
     get_all_running_jobs,
     get_cluster_nodes,
     get_energy_job_history,
+    get_fair_share_priority,
     get_job_history,
     get_job_info,
     get_job_log_paths,
     get_node_info,
+    get_pending_job_priority,
     get_running_jobs,
     get_user_jobs,
     get_wait_time_job_history,
@@ -54,6 +56,7 @@ from stoei.widgets.loading_indicator import LoadingIndicator
 from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
+from stoei.widgets.priority_overview import PriorityOverviewTab
 from stoei.widgets.screens import (
     CancelConfirmScreen,
     JobInfoScreen,
@@ -84,6 +87,8 @@ LOADING_STEPS = [
     LoadingStep("all_running", "Fetching all running jobs...", weight=2.0),
     LoadingStep("energy_history", "Loading energy history...", weight=3.0),
     LoadingStep("wait_times", "Calculating wait times...", weight=1.0),
+    LoadingStep("fair_share", "Loading fair-share priority...", weight=1.0),
+    LoadingStep("job_priority", "Loading job priority factors...", weight=1.0),
     LoadingStep("aggregate_users", "Aggregating user statistics...", weight=1.0),
     LoadingStep("cluster_stats", "Calculating cluster statistics...", weight=1.0),
     LoadingStep("finalize", "Finalizing...", weight=0.5),
@@ -127,7 +132,8 @@ class SlurmMonitor(App[None]):
         Binding("1", "switch_tab_jobs", "Jobs Tab", show=False),
         Binding("2", "switch_tab_nodes", "Nodes Tab", show=False),
         Binding("3", "switch_tab_users", "Users Tab", show=False),
-        Binding("4", "switch_tab_logs", "Logs Tab", show=False),
+        Binding("4", "switch_tab_priority", "Priority Tab", show=False),
+        Binding("5", "switch_tab_logs", "Logs Tab", show=False),
         Binding("left", "previous_tab", "Previous Tab", show=False),
         Binding("right", "next_tab", "Next Tab", show=False),
         Binding("shift+tab", "previous_tab", "Previous Tab", show=False),
@@ -170,6 +176,8 @@ class SlurmMonitor(App[None]):
         self._energy_history_jobs: list[tuple[str, ...]] = []  # Energy history (loaded once at startup if enabled)
         self._energy_data_loaded: bool = False  # Track if energy data was loaded
         self._wait_time_jobs: list[tuple[str, ...]] = []  # Wait time history for cluster sidebar
+        self._fair_share_entries: list[tuple[str, ...]] = []  # Fair-share priority data from sshare
+        self._job_priority_entries: list[tuple[str, ...]] = []  # Pending job priority data from sprio
         self._is_narrow: bool = False
         self._loading_screen: LoadingScreen | None = None
         self._last_history_jobs: list[tuple[str, ...]] = []
@@ -215,6 +223,10 @@ class SlurmMonitor(App[None]):
                 with Container(id="tab-users-content", classes="tab-content"):
                     yield UserOverviewTab(id="user-overview")
 
+                # Priority tab
+                with Container(id="tab-priority-content", classes="tab-content"):
+                    yield PriorityOverviewTab(id="priority-overview")
+
                 # Logs tab
                 with Container(id="tab-logs-content", classes="tab-content"):
                     yield LogPane(id="log_pane", max_lines=self._settings.max_log_lines)
@@ -236,6 +248,8 @@ class SlurmMonitor(App[None]):
             nodes_tab.display = False
             users_tab = self.query_one("#tab-users-content", Container)
             users_tab.display = False
+            priority_tab = self.query_one("#tab-priority-content", Container)
+            priority_tab.display = False
             logs_tab = self.query_one("#tab-logs-content", Container)
             logs_tab.display = False
         except Exception as exc:
@@ -300,9 +314,9 @@ class SlurmMonitor(App[None]):
         self._last_history_stats = (total_jobs, total_requeues, max_requeues)
 
         # Build job cache from fetched data
-        self._loading_update_step(10)
+        self._loading_update_step(12)
         self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-        self._loading_complete_step(10, "Ready")
+        self._loading_complete_step(12, "Ready")
 
         # Mark loading complete and transition
         if self._loading_screen:
@@ -341,7 +355,13 @@ class SlurmMonitor(App[None]):
         # Step 7: Fetch wait time history
         self._load_step_wait_times()
 
-        # Steps 8-9: Calculate statistics
+        # Step 8: Fetch fair-share priority data
+        self._load_step_fair_share()
+
+        # Step 9: Fetch pending job priority factors
+        self._load_step_job_priority()
+
+        # Steps 10-11: Calculate statistics
         self._load_step_statistics()
 
         return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
@@ -443,15 +463,39 @@ class SlurmMonitor(App[None]):
             self._loading_complete_step(7, f"{len(wait_time_jobs)} jobs")
         self._wait_time_jobs = wait_time_jobs
 
-    def _load_step_statistics(self) -> None:
-        """Execute steps 8-9: Calculate user and cluster statistics."""
+    def _load_step_fair_share(self) -> None:
+        """Execute step 8: Fetch fair-share priority data."""
         self._loading_update_step(8)
-        user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
-        self._loading_complete_step(8, f"{len(user_stats)} users")
+        fair_share_entries, error = get_fair_share_priority()
+        if error:
+            self._loading_fail_step(8, error)
+            logger.warning(f"Failed to get fair-share priority: {error}")
+            fair_share_entries = []
+        else:
+            self._loading_complete_step(8, f"{len(fair_share_entries)} entries")
+        self._fair_share_entries = fair_share_entries
 
+    def _load_step_job_priority(self) -> None:
+        """Execute step 9: Fetch pending job priority factors."""
         self._loading_update_step(9)
+        job_priority_entries, error = get_pending_job_priority()
+        if error:
+            self._loading_fail_step(9, error)
+            logger.warning(f"Failed to get pending job priority: {error}")
+            job_priority_entries = []
+        else:
+            self._loading_complete_step(9, f"{len(job_priority_entries)} pending jobs")
+        self._job_priority_entries = job_priority_entries
+
+    def _load_step_statistics(self) -> None:
+        """Execute steps 10-11: Calculate user and cluster statistics."""
+        self._loading_update_step(10)
+        user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
+        self._loading_complete_step(10, f"{len(user_stats)} users")
+
+        self._loading_update_step(11)
         cluster_stats = self._calculate_cluster_stats()
-        self._loading_complete_step(9, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
+        self._loading_complete_step(11, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
 
     def _show_slurm_error(self) -> None:
         """Show SLURM unavailable error screen."""
@@ -712,7 +756,7 @@ class SlurmMonitor(App[None]):
         )
 
     def _refresh_cluster_data(self) -> None:
-        """Refresh cluster-level data (nodes, all jobs, wait times)."""
+        """Refresh cluster-level data (nodes, all jobs, wait times, priority)."""
         # Refresh cluster nodes (single scontrol command)
         nodes, error = get_cluster_nodes()
         if error:
@@ -736,6 +780,22 @@ class SlurmMonitor(App[None]):
         else:
             logger.debug(f"Fetched {len(wait_time_jobs)} jobs for wait time calculation")
             self._wait_time_jobs = wait_time_jobs
+
+        # Refresh fair-share priority data
+        fair_share_entries, error = get_fair_share_priority()
+        if error:
+            logger.warning(f"Failed to get fair-share priority: {error}")
+        else:
+            logger.debug(f"Fetched {len(fair_share_entries)} fair-share entries")
+            self._fair_share_entries = fair_share_entries
+
+        # Refresh pending job priority data
+        job_priority_entries, error = get_pending_job_priority()
+        if error:
+            logger.warning(f"Failed to get pending job priority: {error}")
+        else:
+            logger.debug(f"Fetched {len(job_priority_entries)} job priority entries")
+            self._job_priority_entries = job_priority_entries
 
     def _refresh_data_async(self) -> None:
         """Lightweight refresh of SLURM data (runs in background worker thread).
@@ -907,13 +967,15 @@ class SlurmMonitor(App[None]):
         # Update cluster sidebar
         self._update_cluster_sidebar()
 
-        # Update node and user overview if those tabs are active
+        # Update node, user, and priority overview if those tabs are active
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "nodes":
                 self._update_node_overview()
             elif tab_container.active_tab == "users":
                 self._update_user_overview()
+            elif tab_container.active_tab == "priority":
+                self._update_priority_overview()
         except Exception as exc:
             logger.debug(f"Failed to update tab-specific overview: {exc}")
 
@@ -1343,6 +1405,78 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.error(f"Failed to update user overview: {exc}", exc_info=True)
 
+    def _update_priority_overview(self) -> None:
+        """Update the priority overview tab with fair-share and job priority data."""
+        try:
+            priority_tab = self.query_one("#priority-overview", PriorityOverviewTab)
+
+            # Update user and account priorities from sshare data
+            if self._fair_share_entries:
+                priority_tab.update_from_sshare_data(self._fair_share_entries)
+                logger.debug(f"Updated priority overview with {len(self._fair_share_entries)} fair-share entries")
+
+            # Update job priorities from sprio data
+            if self._job_priority_entries:
+                priority_tab.update_from_sprio_data(self._job_priority_entries)
+                logger.debug(f"Updated job priorities with {len(self._job_priority_entries)} entries")
+            else:
+                # Clear job priorities if no pending jobs
+                priority_tab.update_from_sprio_data([])
+        except Exception as exc:
+            logger.error(f"Failed to update priority overview: {exc}", exc_info=True)
+
+    def _handle_tab_jobs_switched(self) -> None:
+        """Handle switching to the jobs tab."""
+        try:
+            jobs_table = self.query_one("#jobs_table", DataTable)
+            jobs_table.focus()
+            logger.debug("Focused jobs table for arrow key navigation")
+        except Exception as exc:
+            logger.debug(f"Failed to focus jobs table: {exc}")
+        self.call_later(self._update_ui_from_cache)
+
+    def _handle_tab_nodes_switched(self) -> None:
+        """Handle switching to the nodes tab."""
+        self.call_later(self._update_node_overview)
+        try:
+            node_tab = self.query_one("#node-overview", NodeOverviewTab)
+            nodes_table = node_tab.query_one("#nodes_table", DataTable)
+            nodes_table.focus()
+            logger.debug("Focused nodes table for arrow key navigation")
+        except Exception as exc:
+            logger.debug(f"Failed to focus nodes table: {exc}")
+
+    def _handle_tab_users_switched(self) -> None:
+        """Handle switching to the users tab."""
+        self.call_later(self._update_user_overview)
+        try:
+            user_tab = self.query_one("#user-overview", UserOverviewTab)
+            users_table = user_tab.query_one("#users_table", DataTable)
+            users_table.focus()
+            logger.debug("Focused users table for arrow key navigation")
+        except Exception as exc:
+            logger.debug(f"Failed to focus users table: {exc}")
+
+    def _handle_tab_priority_switched(self) -> None:
+        """Handle switching to the priority tab."""
+        self.call_later(self._update_priority_overview)
+        try:
+            priority_tab = self.query_one("#priority-overview", PriorityOverviewTab)
+            priority_table = priority_tab.query_one("#user_priority_table", DataTable)
+            priority_table.focus()
+            logger.debug("Focused priority table for arrow key navigation")
+        except Exception as exc:
+            logger.debug(f"Failed to focus priority table: {exc}")
+
+    def _handle_tab_logs_switched(self) -> None:
+        """Handle switching to the logs tab."""
+        try:
+            log_pane = self.query_one("#log_pane", LogPane)
+            log_pane.focus()
+            logger.debug("Focused log pane")
+        except Exception as exc:
+            logger.debug(f"Failed to focus log pane: {exc}")
+
     def on_tab_switched(self, event: TabSwitched) -> None:
         """Handle tab switching events.
 
@@ -1350,7 +1484,14 @@ class SlurmMonitor(App[None]):
             event: The TabSwitched event.
         """
         # Hide all tab contents
-        for tab_id in ["tab-jobs-content", "tab-nodes-content", "tab-users-content", "tab-logs-content"]:
+        tab_content_ids = [
+            "tab-jobs-content",
+            "tab-nodes-content",
+            "tab-users-content",
+            "tab-priority-content",
+            "tab-logs-content",
+        ]
+        for tab_id in tab_content_ids:
             try:
                 tab_content = self.query_one(f"#{tab_id}", Container)
                 tab_content.display = False
@@ -1363,48 +1504,17 @@ class SlurmMonitor(App[None]):
             active_tab = self.query_one(f"#{active_tab_id}", Container)
             active_tab.display = True
 
-            # Update the tab content if needed (always update when switching to ensure data is shown)
-            # Defer heavy operations to avoid blocking the tab switch
-            if event.tab_name == "jobs":
-                # Focus the jobs table to enable arrow key navigation
-                try:
-                    jobs_table = self.query_one("#jobs_table", DataTable)
-                    jobs_table.focus()
-                    logger.debug("Focused jobs table for arrow key navigation")
-                except Exception as exc:
-                    logger.debug(f"Failed to focus jobs table: {exc}")
-                # Ensure the jobs table is refreshed when switching back to it (e.g., after background refreshes)
-                self.call_later(self._update_ui_from_cache)
-            elif event.tab_name == "nodes":
-                # Defer heavy update to avoid blocking tab switch
-                self.call_later(self._update_node_overview)
-                # Focus the nodes table to enable arrow key navigation
-                try:
-                    node_tab = self.query_one("#node-overview", NodeOverviewTab)
-                    nodes_table = node_tab.query_one("#nodes_table", DataTable)
-                    nodes_table.focus()
-                    logger.debug("Focused nodes table for arrow key navigation")
-                except Exception as exc:
-                    logger.debug(f"Failed to focus nodes table: {exc}")
-            elif event.tab_name == "users":
-                # Defer heavy update to avoid blocking tab switch
-                self.call_later(self._update_user_overview)
-                # Focus the users table to enable arrow key navigation
-                try:
-                    user_tab = self.query_one("#user-overview", UserOverviewTab)
-                    users_table = user_tab.query_one("#users_table", DataTable)
-                    users_table.focus()
-                    logger.debug("Focused users table for arrow key navigation")
-                except Exception as exc:
-                    logger.debug(f"Failed to focus users table: {exc}")
-            elif event.tab_name == "logs":
-                # Focus the log pane when switching to logs tab
-                try:
-                    log_pane = self.query_one("#log_pane", LogPane)
-                    log_pane.focus()
-                    logger.debug("Focused log pane")
-                except Exception as exc:
-                    logger.debug(f"Failed to focus log pane: {exc}")
+            # Dispatch to tab-specific handler
+            tab_handlers = {
+                "jobs": self._handle_tab_jobs_switched,
+                "nodes": self._handle_tab_nodes_switched,
+                "users": self._handle_tab_users_switched,
+                "priority": self._handle_tab_priority_switched,
+                "logs": self._handle_tab_logs_switched,
+            }
+            handler = tab_handlers.get(event.tab_name)
+            if handler:
+                handler()
         except Exception as exc:
             logger.warning(f"Failed to switch to tab {event.tab_name}: {exc}")
 
@@ -1486,6 +1596,14 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.debug(f"Failed to switch to users tab: {exc}")
 
+    def action_switch_tab_priority(self) -> None:
+        """Switch to the Priority tab."""
+        try:
+            tab_container = self.query_one("TabContainer", TabContainer)
+            tab_container.switch_tab("priority")
+        except Exception as exc:
+            logger.debug(f"Failed to switch to priority tab: {exc}")
+
     def action_switch_tab_logs(self) -> None:
         """Switch to the Logs tab."""
         try:
@@ -1499,7 +1617,7 @@ class SlurmMonitor(App[None]):
         try:
             tab_container = self.query_one("TabContainer", TabContainer)
             current_tab = tab_container.active_tab
-            tab_order = ["jobs", "nodes", "users", "logs"]
+            tab_order = ["jobs", "nodes", "users", "priority", "logs"]
             current_index = tab_order.index(current_tab)
             next_index = (current_index + 1) % len(tab_order)
             tab_container.switch_tab(tab_order[next_index])
@@ -1511,7 +1629,7 @@ class SlurmMonitor(App[None]):
         try:
             tab_container = self.query_one("TabContainer", TabContainer)
             current_tab = tab_container.active_tab
-            tab_order = ["jobs", "nodes", "users", "logs"]
+            tab_order = ["jobs", "nodes", "users", "priority", "logs"]
             current_index = tab_order.index(current_tab)
             previous_index = (current_index - 1) % len(tab_order)
             tab_container.switch_tab(tab_order[previous_index])
