@@ -86,6 +86,7 @@ class TabContainer(Container):
             "tab-jobs": ("📋 My Jobs", "Jobs"),
             "tab-nodes": ("🖥️  Nodes", "Nodes"),
             "tab-users": ("👥 Users", "Users"),
+            "tab-priority": ("⚖️  Priority", "Prior"),
             "tab-logs": ("📝 Logs", "Logs"),
         }
 
@@ -95,6 +96,7 @@ class TabContainer(Container):
             yield Button("📋 My Jobs", id="tab-jobs", classes="tab-button active")
             yield Button("🖥️  Nodes", id="tab-nodes", classes="tab-button")
             yield Button("👥 Users", id="tab-users", classes="tab-button")
+            yield Button("⚖️  Priority", id="tab-priority", classes="tab-button")
             yield Button("📝 Logs", id="tab-logs", classes="tab-button")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
@@ -109,6 +111,8 @@ class TabContainer(Container):
             self.switch_tab("nodes")
         elif event.button.id == "tab-users":
             self.switch_tab("users")
+        elif event.button.id == "tab-priority":
+            self.switch_tab("priority")
         elif event.button.id == "tab-logs":
             self.switch_tab("logs")
 
@@ -116,13 +120,13 @@ class TabContainer(Container):
         """Switch to a different tab.
 
         Args:
-            tab_name: Name of the tab to switch to ('jobs', 'nodes', 'users', or 'logs').
+            tab_name: Name of the tab to switch to ('jobs', 'nodes', 'users', 'priority', or 'logs').
         """
         if tab_name == self._active_tab:
             return
 
         # Update button states
-        for btn_id in ["tab-jobs", "tab-nodes", "tab-users", "tab-logs"]:
+        for btn_id in ["tab-jobs", "tab-nodes", "tab-users", "tab-priority", "tab-logs"]:
             btn = self.query_one(f"#{btn_id}", Button)
             if btn_id == f"tab-{tab_name}":
                 btn.add_class("active")
@@ -134,7 +138,14 @@ class TabContainer(Container):
         # Hide all tab contents in parent
         try:
             screen = self.screen
-            for tab_id in ["tab-jobs-content", "tab-nodes-content", "tab-users-content", "tab-logs-content"]:
+            tab_content_ids = [
+                "tab-jobs-content",
+                "tab-nodes-content",
+                "tab-users-content",
+                "tab-priority-content",
+                "tab-logs-content",
+            ]
+            for tab_id in tab_content_ids:
                 try:
                     tab_content = screen.query_one(f"#{tab_id}", Container)
                     tab_content.display = False

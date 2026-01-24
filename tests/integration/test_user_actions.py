@@ -96,6 +96,9 @@ async def test_tab_shortcuts_cycle_views(slurm_monitor_factory: Callable[[], Slu
         assert tab_container.active_tab == "users"
 
         await pilot.press("4")
+        assert tab_container.active_tab == "priority"
+
+        await pilot.press("5")
         assert tab_container.active_tab == "logs"
 
         await pilot.press("1")
