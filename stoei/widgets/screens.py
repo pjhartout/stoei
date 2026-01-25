@@ -32,6 +32,7 @@ def _copy_to_clipboard(text: str) -> bool:
     """Copy text to clipboard using system commands.
 
     Tries multiple clipboard commands for cross-platform support.
+    Uses a 2-second timeout to prevent hanging on unresponsive clipboard.
 
     Args:
         text: Text to copy to clipboard.
@@ -57,8 +58,9 @@ def _copy_to_clipboard(text: str) -> bool:
                     text=True,
                     check=True,
                     capture_output=True,
+                    timeout=2,  # 2 second timeout to prevent hanging
                 )
-            except (subprocess.CalledProcessError, OSError):
+            except (subprocess.CalledProcessError, OSError, subprocess.TimeoutExpired):
                 continue
             else:
                 return True
@@ -1515,6 +1517,81 @@ class UserInfoScreen(Screen[None]):
             else:
                 with VerticalScroll(id="user-info-content"):
                     yield Static(self.user_info, id="user-info-text")
+
+            with Container(id="user-info-footer"):
+                yield Static(
+                    "[bold]↑↓[/bold] Scroll | [bold]Esc[/bold] Close",
+                    id="hint-text",
+                )
+                yield Button("✕ Close", variant="default", id="close-button")
+
+    def on_mount(self) -> None:
+        """Focus the content area on mount for scrolling."""
+        try:
+            content = self.query_one("#user-info-content", VerticalScroll)
+            content.focus()
+        except Exception:
+            # If no content (error case), focus the close button
+            self.query_one("#close-button", Button).focus()
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        """Handle button press.
+
+        Args:
+            event: The button press event.
+        """
+        if event.button.id == "close-button":
+            self.dismiss(None)
+
+    def action_close(self) -> None:
+        """Close the modal."""
+        self.dismiss(None)
+
+
+class AccountInfoScreen(Screen[None]):
+    """Modal screen to display account/institute information."""
+
+    BINDINGS: ClassVar[tuple[tuple[str, str, str], ...]] = (
+        ("escape", "close", "Close"),
+        ("q", "close", "Close"),
+    )
+
+    def __init__(
+        self,
+        account_name: str,
+        account_info: str,
+        error: str | None = None,
+    ) -> None:
+        """Initialize the account info screen.
+
+        Args:
+            account_name: The account/institute name being displayed.
+            account_info: Formatted account information string.
+            error: Optional error message if account info couldn't be retrieved.
+        """
+        super().__init__()
+        self.account_name = account_name
+        self.account_info = account_info
+        self.error = error
+
+    def compose(self) -> ComposeResult:
+        """Create the account info display layout.
+
+        Yields:
+            The widgets that make up the account info display.
+        """
+        with Vertical():
+            with Container(id="user-info-header"):
+                yield Static("🏢  [bold]Account Details[/bold]", id="user-info-title")
+                yield Static(f"Account: [bold cyan]{self.account_name}[/bold cyan]", id="user-info-subtitle")
+
+            if self.error:
+                with Container(id="error-container"):
+                    yield Static("⚠️  [bold]Error[/bold]", id="error-icon")
+                    yield Static(self.error, id="error-text")
+            else:
+                with VerticalScroll(id="user-info-content"):
+                    yield Static(self.account_info, id="user-info-text")
 
             with Container(id="user-info-footer"):
                 yield Static(

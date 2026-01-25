@@ -37,7 +37,7 @@ from stoei.slurm.commands import (
     get_user_jobs,
     get_wait_time_job_history,
 )
-from stoei.slurm.formatters import format_compact_timeline, format_user_info
+from stoei.slurm.formatters import format_account_info, format_compact_timeline, format_user_info
 from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
     calculate_total_gpus,
@@ -46,6 +46,7 @@ from stoei.slurm.gpu_parser import (
     parse_gpu_entries,
     parse_gpu_from_gres,
 )
+from stoei.slurm.parser import parse_sprio_output, parse_sshare_output
 from stoei.slurm.validation import check_slurm_available
 from stoei.slurm.wait_time import calculate_partition_wait_stats
 from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
@@ -56,8 +57,14 @@ from stoei.widgets.loading_indicator import LoadingIndicator
 from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
-from stoei.widgets.priority_overview import PriorityOverviewTab
+from stoei.widgets.priority_overview import (
+    AccountPriority,
+    JobPriority,
+    PriorityOverviewTab,
+    UserPriority,
+)
 from stoei.widgets.screens import (
+    AccountInfoScreen,
     CancelConfirmScreen,
     JobInfoScreen,
     JobInputScreen,
@@ -67,7 +74,12 @@ from stoei.widgets.screens import (
 from stoei.widgets.settings_screen import SettingsScreen
 from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
 from stoei.widgets.tabs import TabContainer, TabSwitched
-from stoei.widgets.user_overview import UserOverviewTab, UserStats
+from stoei.widgets.user_overview import (
+    UserEnergyStats,
+    UserOverviewTab,
+    UserPendingStats,
+    UserStats,
+)
 
 logger = get_logger(__name__)
 
@@ -183,6 +195,15 @@ class SlurmMonitor(App[None]):
         self._last_history_jobs: list[tuple[str, ...]] = []
         self._last_history_stats: tuple[int, int, int] = (0, 0, 0)
         self._keybindings: KeybindingConfig = self._settings.get_keybindings()
+        # Pre-computed data (computed in background worker to avoid UI blocking)
+        self._cached_node_infos: list[NodeInfo] = []
+        self._cached_cluster_stats: ClusterStats | None = None
+        self._cached_running_user_stats: list[UserStats] = []
+        self._cached_pending_user_stats: list[UserPendingStats] = []
+        self._cached_energy_user_stats: list[UserEnergyStats] = []
+        self._cached_user_priorities: list[UserPriority] = []
+        self._cached_account_priorities: list[AccountPriority] = []
+        self._cached_job_priorities: list[JobPriority] = []
 
     @property
     def keybindings(self) -> KeybindingConfig:
@@ -490,12 +511,25 @@ class SlurmMonitor(App[None]):
     def _load_step_statistics(self) -> None:
         """Execute steps 10-11: Calculate user and cluster statistics."""
         self._loading_update_step(10)
-        user_stats = UserOverviewTab.aggregate_user_stats(self._all_users_jobs)
-        self._loading_complete_step(10, f"{len(user_stats)} users")
+        self._compute_user_overview_cache()
+        self._loading_complete_step(10, f"{len(self._cached_running_user_stats)} users")
 
         self._loading_update_step(11)
-        cluster_stats = self._calculate_cluster_stats()
-        self._loading_complete_step(11, f"{cluster_stats.total_nodes} nodes, {cluster_stats.total_gpus} GPUs")
+        # Pre-compute and cache node infos and cluster stats (runs in worker thread)
+        self._cached_node_infos = self._parse_node_infos()
+        self._cached_cluster_stats = self._calculate_cluster_stats()
+        self._compute_priority_overview_cache()
+        logger.debug(
+            f"Pre-computed {len(self._cached_node_infos)} node infos, "
+            f"{len(self._cached_running_user_stats)} running user stats, "
+            f"{len(self._cached_pending_user_stats)} pending user stats, "
+            f"{len(self._cached_user_priorities)} user priorities, "
+            f"{len(self._cached_account_priorities)} account priorities, "
+            f"{len(self._cached_job_priorities)} job priorities"
+        )
+        self._loading_complete_step(
+            11, f"{self._cached_cluster_stats.total_nodes} nodes, {self._cached_cluster_stats.total_gpus} GPUs"
+        )
 
     def _show_slurm_error(self) -> None:
         """Show SLURM unavailable error screen."""
@@ -797,6 +831,20 @@ class SlurmMonitor(App[None]):
             logger.debug(f"Fetched {len(job_priority_entries)} job priority entries")
             self._job_priority_entries = job_priority_entries
 
+        # Pre-compute expensive view models in background to avoid UI blocking
+        self._compute_user_overview_cache()
+        self._compute_priority_overview_cache()
+        self._cached_node_infos = self._parse_node_infos()
+        self._cached_cluster_stats = self._calculate_cluster_stats()
+        logger.debug(
+            f"Pre-computed {len(self._cached_node_infos)} node infos, "
+            f"{len(self._cached_running_user_stats)} running user stats, "
+            f"{len(self._cached_pending_user_stats)} pending user stats, "
+            f"{len(self._cached_user_priorities)} user priorities, "
+            f"{len(self._cached_account_priorities)} account priorities, "
+            f"{len(self._cached_job_priorities)} job priorities, and cluster stats"
+        )
+
     def _refresh_data_async(self) -> None:
         """Lightweight refresh of SLURM data (runs in background worker thread).
 
@@ -1004,12 +1052,21 @@ class SlurmMonitor(App[None]):
         return state_formats.get(category, state)
 
     def _update_cluster_sidebar(self) -> None:
-        """Update the cluster sidebar with current statistics."""
+        """Update the cluster sidebar with current statistics.
+
+        Uses pre-computed cluster stats from background worker to avoid blocking UI.
+        Falls back to computing on-demand if cache is empty (initial load).
+        """
         try:
             sidebar = self.query_one("#cluster-sidebar", ClusterSidebar)
-            stats = self._calculate_cluster_stats()
+            # Use cached cluster stats (computed in background worker)
+            # Fall back to computing if cache is empty (shouldn't happen after initial load)
+            stats = self._cached_cluster_stats if self._cached_cluster_stats else self._calculate_cluster_stats()
             sidebar.update_stats(stats)
-            logger.debug(f"Updated cluster sidebar: {stats.total_nodes} nodes, {stats.total_cpus} CPUs")
+            is_cached = self._cached_cluster_stats is not None
+            logger.debug(
+                f"Updated cluster sidebar: {stats.total_nodes} nodes, {stats.total_cpus} CPUs (cached={is_cached})"
+            )
         except Exception as exc:
             logger.error(f"Failed to update cluster sidebar: {exc}", exc_info=True)
 
@@ -1284,11 +1341,19 @@ class SlurmMonitor(App[None]):
         return stats
 
     def _update_node_overview(self) -> None:
-        """Update the node overview tab."""
+        """Update the node overview tab using cached node infos.
+
+        Uses pre-computed node infos from background worker to avoid blocking UI.
+        Falls back to computing on-demand if cache is empty (initial load).
+        """
         try:
             node_tab = self.query_one("#node-overview", NodeOverviewTab)
-            node_infos = self._parse_node_infos()
-            logger.debug(f"Updating node overview with {len(node_infos)} nodes")
+            # Use cached node infos (computed in background worker)
+            # Fall back to computing if cache is empty (shouldn't happen after initial load)
+            node_infos = self._cached_node_infos if self._cached_node_infos else self._parse_node_infos()
+            logger.debug(
+                f"Updating node overview with {len(node_infos)} nodes (cached={bool(self._cached_node_infos)})"
+            )
             node_tab.update_nodes(node_infos)
         except Exception as exc:
             logger.error(f"Failed to update node overview: {exc}", exc_info=True)
@@ -1373,55 +1438,138 @@ class SlurmMonitor(App[None]):
 
         return node_infos
 
-    def _update_user_overview(self) -> None:
-        """Update the user overview tab with running, pending, and energy stats."""
-        try:
-            user_tab = self.query_one("#user-overview", UserOverviewTab)
+    def _compute_user_overview_cache(self) -> None:
+        """Pre-compute user overview data from cached SLURM results.
 
-            # Filter for running jobs only (exclude PENDING/PD for running stats)
-            state_index = 4
-            running_jobs = [
-                j
-                for j in self._all_users_jobs
-                if len(j) > state_index and j[state_index].strip().upper() not in ("PENDING", "PD")
+        This method is safe to run in a background worker thread.
+        """
+        # Filter for running jobs only (exclude PENDING/PD for running stats)
+        state_index = 4
+        running_jobs = [
+            j
+            for j in self._all_users_jobs
+            if len(j) > state_index and j[state_index].strip().upper() not in ("PENDING", "PD")
+        ]
+
+        self._cached_running_user_stats = UserOverviewTab.aggregate_user_stats(running_jobs)
+        self._cached_pending_user_stats = UserOverviewTab.aggregate_pending_user_stats(self._all_users_jobs)
+        self._cached_energy_user_stats = (
+            UserOverviewTab.aggregate_energy_stats(self._energy_history_jobs) if self._energy_history_jobs else []
+        )
+
+    def _compute_priority_overview_cache(self) -> None:
+        """Pre-compute priority overview data from cached SLURM results.
+
+        This method is safe to run in a background worker thread.
+        """
+        if self._fair_share_entries:
+            user_data, account_data = parse_sshare_output(self._fair_share_entries)
+            self._cached_user_priorities = [
+                UserPriority(
+                    username=d["User"],
+                    account=d["Account"],
+                    raw_shares=d["RawShares"],
+                    norm_shares=d["NormShares"],
+                    raw_usage=d["RawUsage"],
+                    norm_usage=d["NormUsage"],
+                    effective_usage=d["EffectvUsage"],
+                    fair_share=d["FairShare"],
+                )
+                for d in user_data
             ]
+            self._cached_account_priorities = [
+                AccountPriority(
+                    account=d["Account"],
+                    raw_shares=d["RawShares"],
+                    norm_shares=d["NormShares"],
+                    raw_usage=d["RawUsage"],
+                    norm_usage=d["NormUsage"],
+                    effective_usage=d["EffectvUsage"],
+                    fair_share=d["FairShare"],
+                )
+                for d in account_data
+            ]
+        else:
+            self._cached_user_priorities = []
+            self._cached_account_priorities = []
 
-            # Running job stats
-            user_stats = UserOverviewTab.aggregate_user_stats(running_jobs)
-            logger.debug(f"Updating user overview with {len(user_stats)} users from {len(running_jobs)} running jobs")
-            user_tab.update_users(user_stats)
+        if self._job_priority_entries:
+            job_data = parse_sprio_output(self._job_priority_entries)
+            self._cached_job_priorities = [
+                JobPriority(
+                    job_id=d["JobID"],
+                    user=d["User"],
+                    account=d["Account"],
+                    priority=d["Priority"],
+                    age=d["Age"],
+                    fair_share=d["FairShare"],
+                    job_size=d["JobSize"],
+                    partition=d["Partition"],
+                    qos=d["QOS"],
+                )
+                for d in job_data
+            ]
+        else:
+            self._cached_job_priorities = []
 
-            # Pending job stats (includes array expansion)
-            pending_stats = UserOverviewTab.aggregate_pending_user_stats(self._all_users_jobs)
-            logger.debug(f"Updating pending user stats with {len(pending_stats)} users")
-            user_tab.update_pending_users(pending_stats)
+    def _apply_user_overview_from_cache(self) -> None:
+        """Apply cached user overview data to the UI (main thread only)."""
+        user_tab = self.query_one("#user-overview", UserOverviewTab)
+        user_tab.update_users(self._cached_running_user_stats)
+        user_tab.update_pending_users(self._cached_pending_user_stats)
+        if self._cached_energy_user_stats:
+            user_tab.update_energy_users(self._cached_energy_user_stats)
 
-            # Energy stats (from 6-month history, loaded once at startup)
-            if self._energy_history_jobs:
-                energy_stats = UserOverviewTab.aggregate_energy_stats(self._energy_history_jobs)
-                job_count = len(self._energy_history_jobs)
-                logger.debug(f"Updating energy stats with {len(energy_stats)} users from {job_count} historical jobs")
-                user_tab.update_energy_users(energy_stats)
+    def _apply_priority_overview_from_cache(self) -> None:
+        """Apply cached priority overview data to the UI (main thread only)."""
+        priority_tab = self.query_one("#priority-overview", PriorityOverviewTab)
+        priority_tab.update_user_priorities(self._cached_user_priorities)
+        priority_tab.update_account_priorities(self._cached_account_priorities)
+        priority_tab.update_job_priorities(self._cached_job_priorities)
+
+    def _update_user_overview(self) -> None:
+        """Update the user overview tab without blocking the UI."""
+        try:
+            has_data = bool(self._all_users_jobs) or bool(self._energy_history_jobs)
+            has_cache = (
+                bool(self._cached_running_user_stats)
+                or bool(self._cached_pending_user_stats)
+                or bool(self._cached_energy_user_stats)
+            )
+
+            if has_data and not has_cache:
+                # Compute in background (never block the UI on tab switch)
+                def compute_and_apply() -> None:
+                    self._compute_user_overview_cache()
+                    self.call_from_thread(self._apply_user_overview_from_cache)
+
+                self.run_worker(compute_and_apply, name="compute_user_overview", exclusive=True, thread=True)
+                return
+
+            self._apply_user_overview_from_cache()
         except Exception as exc:
             logger.error(f"Failed to update user overview: {exc}", exc_info=True)
 
     def _update_priority_overview(self) -> None:
-        """Update the priority overview tab with fair-share and job priority data."""
+        """Update the priority overview tab without blocking the UI."""
         try:
-            priority_tab = self.query_one("#priority-overview", PriorityOverviewTab)
+            has_data = bool(self._fair_share_entries) or bool(self._job_priority_entries)
+            has_cache = (
+                bool(self._cached_user_priorities)
+                or bool(self._cached_account_priorities)
+                or bool(self._cached_job_priorities)
+            )
 
-            # Update user and account priorities from sshare data
-            if self._fair_share_entries:
-                priority_tab.update_from_sshare_data(self._fair_share_entries)
-                logger.debug(f"Updated priority overview with {len(self._fair_share_entries)} fair-share entries")
+            if has_data and not has_cache:
+                # Compute in background (never block the UI on tab switch)
+                def compute_and_apply() -> None:
+                    self._compute_priority_overview_cache()
+                    self.call_from_thread(self._apply_priority_overview_from_cache)
 
-            # Update job priorities from sprio data
-            if self._job_priority_entries:
-                priority_tab.update_from_sprio_data(self._job_priority_entries)
-                logger.debug(f"Updated job priorities with {len(self._job_priority_entries)} entries")
-            else:
-                # Clear job priorities if no pending jobs
-                priority_tab.update_from_sprio_data([])
+                self.run_worker(compute_and_apply, name="compute_priority_overview", exclusive=True, thread=True)
+                return
+
+            self._apply_priority_overview_from_cache()
         except Exception as exc:
             logger.error(f"Failed to update priority overview: {exc}", exc_info=True)
 
@@ -1548,10 +1696,12 @@ class SlurmMonitor(App[None]):
             self.call_from_thread(lambda: self.notify(f"Failed to load energy data: {error}", severity="error"))
             self._energy_data_loaded = False
             self._energy_history_jobs = []
+            self._cached_energy_user_stats = []
             return
 
         self._energy_history_jobs = energy_jobs
         self._energy_data_loaded = True
+        self._cached_energy_user_stats = UserOverviewTab.aggregate_energy_stats(energy_jobs)
         logger.info(f"Loaded {len(energy_jobs)} energy history jobs")
 
         # Update the UI
@@ -1560,10 +1710,9 @@ class SlurmMonitor(App[None]):
     def _update_energy_ui(self) -> None:
         """Update the energy UI after data reload."""
         try:
-            user_tab = self.query_one("#user-overview-tab", UserOverviewTab)
-            if self._energy_history_jobs:
-                energy_stats = UserOverviewTab.aggregate_energy_stats(self._energy_history_jobs)
-                user_tab.update_energy_users(energy_stats)
+            user_tab = self.query_one("#user-overview", UserOverviewTab)
+            if self._cached_energy_user_stats:
+                user_tab.update_energy_users(self._cached_energy_user_stats)
                 # Update the period label
                 user_tab.update_energy_period_label(self._settings.energy_history_months)
                 self.notify(f"Loaded {len(self._energy_history_jobs)} energy history jobs", severity="information")
@@ -1677,11 +1826,28 @@ class SlurmMonitor(App[None]):
         def handle_job_id(job_id: str | None) -> None:
             if job_id:
                 logger.info(f"Looking up job info for {job_id}")
-                job_info, error = get_job_info(job_id)
-                stdout_path, stderr_path, _ = get_job_log_paths(job_id)
-                self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
+                self.notify("Loading job information...", timeout=2)
+                # Run SLURM queries in background worker to avoid blocking UI
+                self.run_worker(
+                    lambda: self._fetch_and_display_job_info(job_id),
+                    name="fetch_job_info",
+                    thread=True,
+                )
 
         self.push_screen(JobInputScreen(), handle_job_id)
+
+    def _fetch_and_display_job_info(self, job_id: str) -> None:
+        """Fetch job info in background and display on main thread.
+
+        Args:
+            job_id: The SLURM job ID to fetch.
+        """
+        job_info, error = get_job_info(job_id)
+        stdout_path, stderr_path, _ = get_job_log_paths(job_id)
+        # Schedule UI update on main thread
+        self.call_from_thread(
+            lambda: self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
+        )
 
     def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
         """Handle row selection in data tables.
@@ -1692,8 +1858,15 @@ class SlurmMonitor(App[None]):
         # Check which table is selected
         if event.data_table.id == "nodes_table":
             self._show_node_info_for_row(event.data_table, event.row_key)
-        elif event.data_table.id == "users_table":
+        elif event.data_table.id in (
+            "users_table",
+            "pending_users_table",
+            "energy_users_table",
+            "user_priority_table",
+        ):
             self._show_user_info_for_row(event.data_table, event.row_key)
+        elif event.data_table.id == "account_priority_table":
+            self._show_account_info_for_row(event.data_table, event.row_key)
         else:
             # Default to job info for jobs table
             self._show_job_info_for_row(event.data_table, event.row_key)
@@ -1784,8 +1957,14 @@ class SlurmMonitor(App[None]):
         logger.info(f"Fetching user info for {username}")
         self.notify("Loading user information...", timeout=2)
 
+        # Capture cached data references for use in worker thread
+        all_users_jobs = self._all_users_jobs
+        energy_history_jobs = self._energy_history_jobs
+        fair_share_entries = self._fair_share_entries
+        job_priority_entries = self._job_priority_entries
+
         # Get user info in a worker to avoid blocking
-        def fetch_user_info() -> None:
+        def fetch_user_info() -> None:  # noqa: PLR0912
             jobs, error = get_user_jobs(username)
             if error:
                 self.call_from_thread(lambda: self._display_user_info(username, "", error))
@@ -1824,7 +2003,70 @@ class SlurmMonitor(App[None]):
                     gpu_types="",
                 )
 
-            formatted_info = format_user_info(username, user_stats, jobs)
+            # Gather pending stats from cached all users jobs
+            pending_stats: UserPendingStats | None = None
+            if all_users_jobs:
+                pending_stats_list = UserOverviewTab.aggregate_pending_user_stats(all_users_jobs)
+                for stats in pending_stats_list:
+                    if stats.username == username:
+                        pending_stats = stats
+                        break
+
+            # Gather energy stats from cached energy history
+            energy_stats: UserEnergyStats | None = None
+            if energy_history_jobs:
+                energy_stats_list = UserOverviewTab.aggregate_energy_stats(energy_history_jobs)
+                for stats in energy_stats_list:
+                    if stats.username == username:
+                        energy_stats = stats
+                        break
+
+            # Gather fair-share priority info from cached data
+            # sshare format: (Account, User, RawShares, NormShares, RawUsage, NormUsage, EffectvUsage, FairShare)
+            priority_info: dict[str, str] | None = None
+            if fair_share_entries:
+                min_sshare_fields = 8
+                for entry in fair_share_entries:
+                    if len(entry) >= min_sshare_fields and entry[1] == username:
+                        priority_info = {
+                            "account": entry[0],
+                            "raw_shares": entry[2],
+                            "norm_shares": entry[3],
+                            "raw_usage": entry[4],
+                            "norm_usage": entry[5],
+                            "effective_usage": entry[6],
+                            "fair_share": entry[7],
+                        }
+                        break
+
+            # Gather pending job priorities for this user
+            # sprio format: (JOBID, USER, ACCOUNT, PRIORITY, AGE, FAIRSHARE, JOBSIZE, PARTITION, QOS)
+            job_priorities: list[dict[str, str]] = []
+            if job_priority_entries:
+                min_sprio_fields = 9
+                for entry in job_priority_entries:
+                    if len(entry) >= min_sprio_fields and entry[1] == username:
+                        job_priorities.append(
+                            {
+                                "job_id": entry[0],
+                                "priority": entry[3],
+                                "age": entry[4],
+                                "fair_share": entry[5],
+                                "job_size": entry[6],
+                                "partition": entry[7],
+                                "qos": entry[8],
+                            }
+                        )
+
+            formatted_info = format_user_info(
+                username,
+                user_stats,
+                jobs,
+                pending_stats=pending_stats,
+                energy_stats=energy_stats,
+                priority_info=priority_info,
+                job_priorities=job_priorities if job_priorities else None,
+            )
             self.call_from_thread(lambda: self._display_user_info(username, formatted_info, None))
 
         self.run_worker(fetch_user_info, name="fetch_user_info", thread=True)
@@ -1840,6 +2082,148 @@ class SlurmMonitor(App[None]):
         self.push_screen(UserInfoScreen(username, user_info, error))
         logger.debug(f"Displayed user info screen for {username}")
 
+    def _show_account_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
+        """Show account info for a specific row in the accounts table.
+
+        Args:
+            table: The DataTable containing the row.
+            row_key: The key of the row to show info for.
+        """
+        try:
+            row_data = table.get_row(row_key)
+            account_name = str(row_data[0]).strip()
+            # Remove Rich markup tags if present
+            account_name = re.sub(r"\[.*?\]", "", account_name).strip()
+
+            if not account_name:
+                logger.warning(f"Could not extract account name from row {row_key}")
+                self.notify("Could not get account name from selected row", severity="error")
+                return
+
+            logger.info(f"Showing info for selected account {account_name}")
+            self._show_account_info(account_name)
+
+        except (IndexError, KeyError):
+            logger.exception(f"Could not get account name from row {row_key}")
+            self.notify("Could not get account name from selected row", severity="error")
+
+    def _show_account_info(self, account_name: str) -> None:
+        """Show detailed information for an account/institute.
+
+        Args:
+            account_name: The account/institute name to display.
+        """
+        logger.info(f"Fetching account info for {account_name}")
+        self.notify("Loading account information...", timeout=2)
+
+        # Capture cached data references for use in worker thread
+        fair_share_entries = self._fair_share_entries
+        all_users_jobs = self._all_users_jobs
+        job_priority_entries = self._job_priority_entries
+
+        # Get account info in a worker to avoid blocking
+        def fetch_account_info() -> None:  # noqa: PLR0912
+            # Get account-level priority info from cached sshare data
+            # sshare format: (Account, User, RawShares, NormShares, RawUsage, NormUsage, EffectvUsage, FairShare)
+            account_priority: dict[str, str] = {}
+            users_in_account: list[dict[str, str]] = []
+
+            if fair_share_entries:
+                min_sshare_fields = 8
+                for entry in fair_share_entries:
+                    if len(entry) >= min_sshare_fields and entry[0] == account_name:
+                        if entry[1]:  # Has username - this is a user entry
+                            users_in_account.append(
+                                {
+                                    "username": entry[1],
+                                    "raw_shares": entry[2],
+                                    "norm_shares": entry[3],
+                                    "raw_usage": entry[4],
+                                    "norm_usage": entry[5],
+                                    "effective_usage": entry[6],
+                                    "fair_share": entry[7],
+                                }
+                            )
+                        else:  # No username - this is the account-level entry
+                            account_priority = {
+                                "raw_shares": entry[2],
+                                "norm_shares": entry[3],
+                                "raw_usage": entry[4],
+                                "norm_usage": entry[5],
+                                "effective_usage": entry[6],
+                                "fair_share": entry[7],
+                            }
+
+            # Get usernames in this account for filtering jobs
+            usernames_in_account = {u["username"] for u in users_in_account}
+
+            # Filter running jobs for users in this account
+            # Job format: (JobID, Name, User, Partition, State, Time, Nodes, NodeList, TRES)
+            running_jobs: list[tuple[str, ...]] = []
+            pending_jobs: list[tuple[str, ...]] = []
+
+            if all_users_jobs:
+                min_job_fields = 5
+                username_index = 2
+                state_index = 4
+                for job in all_users_jobs:
+                    if len(job) >= min_job_fields:
+                        username = job[username_index].strip()
+                        state = job[state_index].strip().upper()
+                        if username in usernames_in_account:
+                            if state in ("RUNNING", "R"):
+                                running_jobs.append(job)
+                            elif state in ("PENDING", "PD"):
+                                pending_jobs.append(job)
+
+            # Get pending job priorities for users in this account
+            # sprio format: (JOBID, USER, ACCOUNT, PRIORITY, AGE, FAIRSHARE, JOBSIZE, PARTITION, QOS)
+            job_priorities: list[dict[str, str]] = []
+            if job_priority_entries:
+                min_sprio_fields = 9
+                for entry in job_priority_entries:
+                    if len(entry) >= min_sprio_fields:
+                        # Check if account matches or user is in account
+                        entry_account = entry[2]
+                        entry_user = entry[1]
+                        if entry_account == account_name or entry_user in usernames_in_account:
+                            job_priorities.append(
+                                {
+                                    "job_id": entry[0],
+                                    "user": entry[1],
+                                    "account": entry[2],
+                                    "priority": entry[3],
+                                    "age": entry[4],
+                                    "fair_share": entry[5],
+                                    "job_size": entry[6],
+                                    "partition": entry[7],
+                                    "qos": entry[8],
+                                }
+                            )
+
+            formatted_info = format_account_info(
+                account_name,
+                account_priority,
+                users_in_account,
+                running_jobs,
+                pending_jobs,
+                job_priorities=job_priorities if job_priorities else None,
+            )
+            self.call_from_thread(lambda: self._display_account_info(account_name, formatted_info, None))
+
+        self.run_worker(fetch_account_info, name="fetch_account_info", thread=True)
+
+    def _display_account_info(self, account_name: str, account_info: str, error: str | None) -> None:
+        """Display account information in a modal screen.
+
+        Args:
+            account_name: The account/institute name.
+            account_info: Formatted account information.
+            error: Optional error message.
+        """
+        self.push_screen(AccountInfoScreen(account_name, account_info, error))
+        logger.debug(f"Displayed account info screen for {account_name}")
+
     def _show_job_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
         """Show job info for a specific row in a table.
 
@@ -1851,9 +2235,13 @@ class SlurmMonitor(App[None]):
             row_data = table.get_row(row_key)
             job_id = str(row_data[0]).strip()
             logger.info(f"Showing info for selected job {job_id}")
-            job_info, error = get_job_info(job_id)
-            stdout_path, stderr_path, _ = get_job_log_paths(job_id)
-            self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
+            self.notify("Loading job information...", timeout=2)
+            # Run SLURM queries in background worker to avoid blocking UI
+            self.run_worker(
+                lambda: self._fetch_and_display_job_info(job_id),
+                name="fetch_job_info",
+                thread=True,
+            )
         except (IndexError, KeyError):
             logger.exception(f"Could not get job ID from row {row_key}")
             self.notify("Could not get job ID from selected row", severity="error")
@@ -1875,9 +2263,13 @@ class SlurmMonitor(App[None]):
             row_data = jobs_table.get_row_at(cursor_row)
             job_id = str(row_data[0]).strip()
             logger.info(f"Showing info for selected job {job_id}")
-            job_info, error = get_job_info(job_id)
-            stdout_path, stderr_path, _ = get_job_log_paths(job_id)
-            self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
+            self.notify("Loading job information...", timeout=2)
+            # Run SLURM queries in background worker to avoid blocking UI
+            self.run_worker(
+                lambda: self._fetch_and_display_job_info(job_id),
+                name="fetch_job_info",
+                thread=True,
+            )
         except (IndexError, KeyError):
             logger.exception(f"Could not get job ID from row {cursor_row}")
             self.notify("Could not get job ID from selected row", severity="error")

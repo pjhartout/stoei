@@ -359,37 +359,30 @@ def get_job_log_paths(job_id: str) -> tuple[str | None, str | None, str | None]:
 def get_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
     """Return running/pending jobs from squeue.
 
+    Uses retry logic with exponential backoff for transient failures.
+
     Returns:
         Tuple of (List of tuples containing job information, optional error message).
     """
     try:
         username = get_current_username()
         squeue = resolve_executable("squeue")
-        command = [
-            squeue,
-            "-u",
-            username,
-            "-o",
-            "%.10i|%.15j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S",
-        ]
-        logger.debug(f"Running squeue command for user {username}")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=5,
-            check=False,
-        )
     except (FileNotFoundError, ValidationError):
         logger.exception("Error setting up squeue command")
         return [], "Error setting up squeue"
-    except subprocess.TimeoutExpired:
-        logger.exception("Timeout getting running jobs")
-        return [], "Timeout getting running jobs"
-    except subprocess.SubprocessError:
-        logger.exception("Error getting running jobs")
-        return [], "Error getting running jobs"
+
+    command = [
+        squeue,
+        "-u",
+        username,
+        "-o",
+        "%.10i|%.15j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S",
+    ]
+    logger.debug(f"Running squeue command for user {username}")
+
+    result, error = _run_with_retry(command, timeout=5, command_name="squeue")
+    if error or result is None:
+        return [], error or "Unknown error"
 
     if result.returncode != 0:
         logger.warning(f"squeue returned non-zero exit code: {result.returncode}")
@@ -403,6 +396,8 @@ def get_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
 def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int, str | None]:
     """Return job history for the last N days (sacct).
 
+    Uses retry logic with exponential backoff for transient failures.
+
     Args:
         days: Number of days to look back for job history (default: 7).
 
@@ -412,34 +407,25 @@ def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int
     try:
         username = get_current_username()
         sacct = resolve_executable("sacct")
-        command = [
-            sacct,
-            "-u",
-            username,
-            "--format=JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList,Submit,Start,End",
-            "-S",
-            f"now-{days}days",
-            "-X",
-            "-P",
-        ]
-        logger.debug(f"Running sacct command for user {username} (last {days} days)")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
     except (FileNotFoundError, ValidationError):
         logger.exception("Error setting up sacct command")
         return [], 0, 0, 0, "Error setting up sacct"
-    except subprocess.TimeoutExpired:
-        logger.exception("Timeout getting job history")
-        return [], 0, 0, 0, "Timeout getting job history"
-    except subprocess.SubprocessError:
-        logger.exception("Error getting job history")
-        return [], 0, 0, 0, "Error getting job history"
+
+    command = [
+        sacct,
+        "-u",
+        username,
+        "--format=JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList,Submit,Start,End",
+        "-S",
+        f"now-{days}days",
+        "-X",
+        "-P",
+    ]
+    logger.debug(f"Running sacct command for user {username} (last {days} days)")
+
+    result, error = _run_with_retry(command, timeout=10, command_name="sacct")
+    if error or result is None:
+        return [], 0, 0, 0, error or "Unknown error"
 
     if result.returncode != 0:
         logger.warning(f"sacct returned non-zero exit code: {result.returncode}")
@@ -614,41 +600,33 @@ def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
 
     Uses squeue's -O format with Tres field to get all data in one call.
     Fetches both RUNNING and PENDING jobs so queued jobs are included.
+    Uses retry logic with exponential backoff for transient failures.
 
     Returns:
         Tuple of (List of tuples containing job information, optional error message).
     """
     try:
         squeue = resolve_executable("squeue")
-        # Use -O format which supports Tres field directly
-        # This eliminates the need for per-job scontrol calls
-        command = [
-            squeue,
-            "-O",
-            "JobID:20,Name:20,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
-            "-a",  # Show all partitions
-            "-t",
-            "RUNNING,PENDING",
-            "--noheader",
-        ]
-        logger.debug("Running squeue command for all active jobs (running+pending) (single command)")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=15,
-            check=False,
-        )
     except FileNotFoundError:
         logger.exception("Error setting up squeue command")
         return [], "squeue not found"
-    except subprocess.TimeoutExpired:
-        logger.exception("Timeout getting all running jobs")
-        return [], "Timeout getting all running jobs"
-    except subprocess.SubprocessError:
-        logger.exception("Error getting all running jobs")
-        return [], "Error getting all running jobs"
+
+    # Use -O format which supports Tres field directly
+    # This eliminates the need for per-job scontrol calls
+    command = [
+        squeue,
+        "-O",
+        "JobID:20,Name:20,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
+        "-a",  # Show all partitions
+        "-t",
+        "RUNNING,PENDING",
+        "--noheader",
+    ]
+    logger.debug("Running squeue command for all active jobs (running+pending) (single command)")
+
+    result, error = _run_with_retry(command, timeout=15, command_name="squeue")
+    if error or result is None:
+        return [], error or "Unknown error"
 
     if result.returncode != 0:
         logger.warning(f"squeue returned non-zero exit code: {result.returncode}")
@@ -704,6 +682,8 @@ def _validate_username(username: str) -> str | None:
 def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
     """Get running/pending jobs for a specific user.
 
+    Uses retry logic with exponential backoff for transient failures.
+
     Args:
         username: The username to query jobs for.
 
@@ -719,32 +699,26 @@ def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
 
     try:
         squeue = resolve_executable("squeue")
-        # Use -O format which supports Tres field directly
-        command = [
-            squeue,
-            "-u",
-            username,
-            "-O",
-            "JobID:20,Name:20,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
-            "-t",
-            "RUNNING,PENDING",
-            "--noheader",
-        ]
-        logger.debug(f"Running squeue command for user {username}")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=10,
-            check=False,
-        )
     except FileNotFoundError:
         logger.exception("squeue not found")
         return [], "squeue not found"
-    except (subprocess.TimeoutExpired, subprocess.SubprocessError):
-        logger.exception(f"Error getting jobs for user {username}")
-        return [], "Error getting user jobs"
+
+    # Use -O format which supports Tres field directly
+    command = [
+        squeue,
+        "-u",
+        username,
+        "-O",
+        "JobID:20,Name:20,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
+        "-t",
+        "RUNNING,PENDING",
+        "--noheader",
+    ]
+    logger.debug(f"Running squeue command for user {username}")
+
+    result, error = _run_with_retry(command, timeout=10, command_name="squeue user")
+    if error or result is None:
+        return [], error or "Unknown error"
 
     if result.returncode != 0:
         logger.warning(f"squeue returned non-zero exit code: {result.returncode}")
@@ -818,6 +792,7 @@ def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str 
 
     This is used for energy consumption calculations. Only fetches completed
     jobs (not running or pending) to get accurate elapsed times.
+    Uses retry logic with exponential backoff for transient failures.
 
     Args:
         months: Number of months of history to fetch.
@@ -828,44 +803,35 @@ def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str 
     """
     try:
         sacct = resolve_executable("sacct")
-        format_str = ",".join(ENERGY_HISTORY_FIELDS)
-
-        # Calculate start date (SLURM doesn't universally support "now-Xmonths" syntax)
-        start_date = datetime.now() - timedelta(days=months * 30)
-        start_date_str = start_date.strftime("%Y-%m-%d")
-
-        # Note: We don't use --state filter because it's unreliable on some SLURM versions
-        # (e.g., "CANCELLED by <uid>" doesn't match --state=CANCELLED)
-        # Instead, we filter by state in Python after fetching
-        command = [
-            sacct,
-            "--allusers",
-            f"--format={format_str}",
-            "-S",
-            start_date_str,
-            "-X",  # No job steps, only main job entries
-            "-P",  # Parseable output with | delimiter
-            "--noheader",
-        ]
-        logger.debug(f"Running sacct command for {months}-month energy history (since {start_date_str})")
-
-        # Use longer timeout for potentially large query
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=60,  # 60 second timeout for large history
-            check=False,
-        )
     except FileNotFoundError:
         logger.exception("sacct not found")
         return [], "sacct not found"
-    except subprocess.TimeoutExpired:
-        logger.exception(f"Timeout getting {months}-month job history")
-        return [], "Timeout getting job history (try shorter period)"
-    except subprocess.SubprocessError:
-        logger.exception(f"Error getting {months}-month job history")
-        return [], "Error getting job history"
+
+    format_str = ",".join(ENERGY_HISTORY_FIELDS)
+
+    # Calculate start date (SLURM doesn't universally support "now-Xmonths" syntax)
+    start_date = datetime.now() - timedelta(days=months * 30)
+    start_date_str = start_date.strftime("%Y-%m-%d")
+
+    # Note: We don't use --state filter because it's unreliable on some SLURM versions
+    # (e.g., "CANCELLED by <uid>" doesn't match --state=CANCELLED)
+    # Instead, we filter by state in Python after fetching
+    command = [
+        sacct,
+        "--allusers",
+        f"--format={format_str}",
+        "-S",
+        start_date_str,
+        "-X",  # No job steps, only main job entries
+        "-P",  # Parseable output with | delimiter
+        "--noheader",
+    ]
+    logger.debug(f"Running sacct command for {months}-month energy history (since {start_date_str})")
+
+    # Use longer timeout for potentially large query, with retry
+    result, error = _run_with_retry(command, timeout=60, command_name="sacct energy")
+    if error or result is None:
+        return [], error or "Unknown error"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Unknown error"
@@ -913,6 +879,7 @@ def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], st
 
     Uses sacct with --allusers to fetch jobs that started within the time window.
     Only includes jobs with valid start times (not pending).
+    Uses retry logic with exponential backoff for transient failures.
 
     Args:
         hours: Number of hours to look back (default: 1).
@@ -923,36 +890,27 @@ def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], st
     """
     try:
         sacct = resolve_executable("sacct")
-        format_str = ",".join(WAIT_TIME_FIELDS)
-
-        command = [
-            sacct,
-            "--allusers",
-            f"--format={format_str}",
-            "-S",
-            f"now-{hours}hours",
-            "-X",  # No job steps, only main job entries
-            "-P",  # Parseable output with | delimiter
-            "--noheader",
-        ]
-        logger.debug(f"Running sacct command for {hours}-hour wait time history")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
     except FileNotFoundError:
         logger.exception("sacct not found")
         return [], "sacct not found"
-    except subprocess.TimeoutExpired:
-        logger.exception(f"Timeout getting {hours}-hour wait time history")
-        return [], "Timeout getting wait time history"
-    except subprocess.SubprocessError:
-        logger.exception(f"Error getting {hours}-hour wait time history")
-        return [], "Error getting wait time history"
+
+    format_str = ",".join(WAIT_TIME_FIELDS)
+
+    command = [
+        sacct,
+        "--allusers",
+        f"--format={format_str}",
+        "-S",
+        f"now-{hours}hours",
+        "-X",  # No job steps, only main job entries
+        "-P",  # Parseable output with | delimiter
+        "--noheader",
+    ]
+    logger.debug(f"Running sacct command for {hours}-hour wait time history")
+
+    result, error = _run_with_retry(command, timeout=30, command_name="sacct wait-time")
+    if error or result is None:
+        return [], error or "Unknown error"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Unknown error"
@@ -987,6 +945,7 @@ def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
 
     Uses sshare to fetch fair-share data including raw shares, normalized shares,
     usage, and fair-share factor.
+    Uses retry logic with exponential backoff for transient failures.
 
     Returns:
         Tuple of (list of priority tuples, optional error message).
@@ -995,32 +954,23 @@ def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
     """
     try:
         sshare = resolve_executable("sshare")
-        format_str = ",".join(SSHARE_FIELDS)
-        command = [
-            sshare,
-            "-a",  # All users
-            "-P",  # Parseable output with | delimiter
-            "--noheader",
-            f"--format={format_str}",
-        ]
-        logger.debug("Running sshare command for fair-share priority")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
     except FileNotFoundError:
         logger.exception("sshare not found")
         return [], "sshare not found"
-    except subprocess.TimeoutExpired:
-        logger.exception("Timeout getting fair-share priority")
-        return [], "Timeout getting fair-share priority"
-    except subprocess.SubprocessError:
-        logger.exception("Error getting fair-share priority")
-        return [], "Error getting fair-share priority"
+
+    format_str = ",".join(SSHARE_FIELDS)
+    command = [
+        sshare,
+        "-a",  # All users
+        "-P",  # Parseable output with | delimiter
+        "--noheader",
+        f"--format={format_str}",
+    ]
+    logger.debug("Running sshare command for fair-share priority")
+
+    result, error = _run_with_retry(command, timeout=30, command_name="sshare")
+    if error or result is None:
+        return [], error or "Unknown error"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Unknown error"
@@ -1048,6 +998,7 @@ def get_pending_job_priority() -> tuple[list[tuple[str, ...]], str | None]:
 
     Uses sprio to fetch priority breakdown including age, fair-share,
     job size, partition, and QOS factors.
+    Uses retry logic with exponential backoff for transient failures.
 
     Returns:
         Tuple of (list of job priority tuples, optional error message).
@@ -1056,32 +1007,23 @@ def get_pending_job_priority() -> tuple[list[tuple[str, ...]], str | None]:
     """
     try:
         sprio = resolve_executable("sprio")
-        # Use custom format to get all factors
-        format_str = "%.15i|%.15u|%.15a|%.10Y|%.10A|%.10F|%.10J|%.10P|%.10Q"
-        command = [
-            sprio,
-            "-o",
-            format_str,
-            "--noheader",
-        ]
-        logger.debug("Running sprio command for pending job priority")
-
-        result = subprocess.run(  # noqa: S603
-            command,
-            capture_output=True,
-            text=True,
-            timeout=30,
-            check=False,
-        )
     except FileNotFoundError:
         logger.exception("sprio not found")
         return [], "sprio not found"
-    except subprocess.TimeoutExpired:
-        logger.exception("Timeout getting pending job priority")
-        return [], "Timeout getting pending job priority"
-    except subprocess.SubprocessError:
-        logger.exception("Error getting pending job priority")
-        return [], "Error getting pending job priority"
+
+    # Use custom format to get all factors
+    format_str = "%.15i|%.15u|%.15a|%.10Y|%.10A|%.10F|%.10J|%.10P|%.10Q"
+    command = [
+        sprio,
+        "-o",
+        format_str,
+        "--noheader",
+    ]
+    logger.debug("Running sprio command for pending job priority")
+
+    result, error = _run_with_retry(command, timeout=30, command_name="sprio")
+    if error or result is None:
+        return [], error or "Unknown error"
 
     if result.returncode != 0:
         error_msg = result.stderr.strip() or "Unknown error"

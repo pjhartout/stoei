@@ -2,14 +2,19 @@
 
 from __future__ import annotations
 
+import math
+import re
+from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from stoei.colors import FALLBACK_COLORS, ThemeColors
+from stoei.slurm.energy import ENERGY_KWH_THRESHOLD, ENERGY_MWH_THRESHOLD
+from stoei.slurm.gpu_parser import calculate_total_gpus, parse_gpu_entries
 from stoei.slurm.parser import parse_scontrol_output
 
 if TYPE_CHECKING:
-    from stoei.widgets.user_overview import UserStats
+    from stoei.widgets.user_overview import UserEnergyStats, UserPendingStats, UserStats
 
 
 def _get_default_colors() -> ThemeColors:
@@ -453,13 +458,199 @@ _USER_INFO_PARTITION_WIDTH = 12
 _USER_INFO_TIME_WIDTH = 10
 _USER_INFO_MIN_JOB_FIELDS = 6
 _USER_INFO_STATE_INDEX = 3
+_USER_INFO_STATE_WIDTH = 8
+_USER_INFO_NODES_WIDTH = 6
+
+# Display widths for user priority table
+_USER_INFO_PRIORITY_WIDTH = 10
+_USER_INFO_AGE_WIDTH = 8
+_USER_INFO_FAIR_SHARE_WIDTH = 10
+_USER_INFO_JOB_SIZE_WIDTH = 10
+
+# Fair-share thresholds for color coding
+_FAIR_SHARE_SUCCESS_THRESHOLD = 0.5
+_FAIR_SHARE_WARNING_THRESHOLD = 0.2
+
+# Display limits for list sections
+_USER_INFO_MAX_PRIORITY_JOBS = 10
+_ACCOUNT_INFO_MAX_USERS = 15
+_ACCOUNT_INFO_MAX_PRIORITY_JOBS = 15
+_ACCOUNT_INFO_MAX_RUNNING_JOBS = 20
+
+# Display widths for account info tables
+_ACCOUNT_INFO_USER_WIDTH = 12
+_ACCOUNT_INFO_JOBID_WIDTH = 12
+_ACCOUNT_INFO_PRIORITY_WIDTH = 10
+_ACCOUNT_INFO_AGE_WIDTH = 8
+_ACCOUNT_INFO_PARTITION_WIDTH = 12
+_ACCOUNT_INFO_NAME_WIDTH = 15
+_ACCOUNT_INFO_TIME_WIDTH = 10
+_ACCOUNT_INFO_NODES_WIDTH = 6
+_ACCOUNT_INFO_TIME_FIELD_INDEX = 5
+_ACCOUNT_INFO_NODES_FIELD_INDEX = 6
 
 
-def format_user_info(
+def _truncate(value: str, width: int) -> str:
+    """Truncate a string to a maximum width.
+
+    Args:
+        value: The string to truncate.
+        width: Maximum width.
+
+    Returns:
+        The truncated string (or original if already short enough).
+    """
+    return value[:width] if len(value) > width else value
+
+
+def _safe_float(value: str, default: float = 0.0) -> float:
+    """Parse a float from a string safely.
+
+    Args:
+        value: String value to parse.
+        default: Default value if parsing fails.
+
+    Returns:
+        Parsed float or default.
+    """
+    try:
+        return float(value)
+    except ValueError:
+        return default
+
+
+def _format_fair_share_value(
+    fair_share: str,
+    colors: ThemeColors,
+    *,
+    width: int | None = None,
+    bold: bool = True,
+) -> str:
+    """Format a fair-share factor with color coding when numeric.
+
+    Args:
+        fair_share: Fair-share factor as string.
+        colors: Theme colors.
+        width: Optional display width (pads with spaces for alignment).
+        bold: Whether to render the value in bold.
+
+    Returns:
+        A formatted string (possibly with Rich markup color).
+    """
+    raw = fair_share.strip()
+    fair_share_val = _safe_float(raw, default=float("nan"))
+    display = _truncate(raw, width) if width is not None else raw
+    if width is not None:
+        display = f"{display:<{width}}"
+    if math.isnan(fair_share_val):
+        return display
+
+    if fair_share_val >= _FAIR_SHARE_SUCCESS_THRESHOLD:
+        color = colors.success
+    elif fair_share_val >= _FAIR_SHARE_WARNING_THRESHOLD:
+        color = colors.warning
+    else:
+        color = colors.error
+
+    if bold:
+        return f"[bold {color}]{display}[/bold {color}]"
+    return f"[{color}]{display}[/{color}]"
+
+
+def _format_energy_wh(wh: float) -> str:
+    """Format an energy value in Wh as Wh/kWh/MWh.
+
+    Args:
+        wh: Energy in watt-hours.
+
+    Returns:
+        Human-friendly energy string.
+    """
+    if wh >= ENERGY_MWH_THRESHOLD:
+        return f"{wh / ENERGY_MWH_THRESHOLD:.2f} MWh"
+    if wh >= ENERGY_KWH_THRESHOLD:
+        return f"{wh / ENERGY_KWH_THRESHOLD:.2f} kWh"
+    return f"{wh:.1f} Wh"
+
+
+def _parse_tres_resources(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
+    """Parse CPU, memory (GB), and GPU entries from a TRES string.
+
+    Args:
+        tres_str: TRES string (e.g. "cpu=32,mem=256G,gres/gpu:h200=8").
+
+    Returns:
+        Tuple of (cpus, memory_gb, gpu_entries).
+    """
+    cpus = 0
+    memory_gb = 0.0
+    if not tres_str or tres_str.strip() == "":
+        return cpus, memory_gb, []
+
+    cpu_match = re.search(r"cpu=(\d+)", tres_str, re.IGNORECASE)
+    if cpu_match:
+        try:
+            cpus = int(cpu_match.group(1))
+        except ValueError:
+            cpus = 0
+
+    mem_match = re.search(r"mem=(\d+)([GM])", tres_str, re.IGNORECASE)
+    if mem_match:
+        try:
+            mem_value = int(mem_match.group(1))
+            unit = mem_match.group(2).upper()
+            if unit == "G":
+                memory_gb = float(mem_value)
+            elif unit == "M":
+                memory_gb = mem_value / 1024.0
+        except ValueError:
+            memory_gb = 0.0
+
+    gpu_entries = parse_gpu_entries(tres_str)
+    return cpus, memory_gb, gpu_entries
+
+
+def _parse_node_count(nodes_str: str) -> int:
+    """Parse node count from a node count string.
+
+    Args:
+        nodes_str: Node string in format "4" or "4-8".
+
+    Returns:
+        Parsed number of nodes, or 0 if parsing fails.
+    """
+    try:
+        if "-" in nodes_str:
+            parts = nodes_str.split("-")
+            range_parts_count = 2
+            if len(parts) == range_parts_count:
+                start = int(parts[0])
+                end = int(parts[1])
+                return end - start + 1
+        return int(nodes_str)
+    except ValueError:
+        return 0
+
+
+@dataclass(frozen=True, slots=True)
+class AccountResourceUsage:
+    """Aggregate resource usage across a set of running jobs."""
+
+    total_cpus: int
+    total_memory_gb: float
+    total_gpus: int
+    total_nodes: int
+
+
+def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
     username: str,
     user_stats: UserStats,
     jobs: list[tuple[str, ...]],
     colors: ThemeColors | None = None,
+    pending_stats: UserPendingStats | None = None,
+    energy_stats: UserEnergyStats | None = None,
+    priority_info: dict[str, str] | None = None,
+    job_priorities: list[dict[str, str]] | None = None,
 ) -> str:
     """Format user information with their jobs for display.
 
@@ -469,6 +660,10 @@ def format_user_info(
         jobs: List of job tuples for this user.
             Each tuple: (JobID, Name, Partition, State, Time, Nodes, NodeList, TRES).
         colors: Optional theme colors. Uses fallback colors if not provided.
+        pending_stats: Optional pending job statistics.
+        energy_stats: Optional energy usage statistics.
+        priority_info: Optional fair-share priority information.
+        job_priorities: Optional list of pending job priority factors.
 
     Returns:
         Formatted string with Rich markup for display.
@@ -482,7 +677,7 @@ def format_user_info(
     # Summary section
     lines.append("\n[bold reverse] 👤 User Summary [/bold reverse]")
     lines.append(f"  [bold {c.primary}]{'Username':.<24}[/bold {c.primary}] [bold]{username}[/bold]")
-    lines.append(f"  [bold {c.primary}]{'Total Jobs':.<24}[/bold {c.primary}] [bold]{user_stats.job_count}[/bold]")
+    lines.append(f"  [bold {c.primary}]{'Running Jobs':.<24}[/bold {c.primary}] [bold]{user_stats.job_count}[/bold]")
     lines.append(f"  [bold {c.primary}]{'Total CPUs':.<24}[/bold {c.primary}] {user_stats.total_cpus}")
     lines.append(f"  [bold {c.primary}]{'Total Memory (GB)':.<24}[/bold {c.primary}] {user_stats.total_memory_gb:.1f}")
     lines.append(f"  [bold {c.primary}]{'Total GPUs':.<24}[/bold {c.primary}] {user_stats.total_gpus}")
@@ -512,13 +707,102 @@ def format_user_info(
         f"  [bold {c.primary}]{'Pending':.<24}[/bold {c.primary}] [bold {c.warning}]{pending_count}[/bold {c.warning}]"
     )
 
+    # Pending resources section
+    if pending_stats:
+        lines.append("\n[bold reverse] ⏳ Pending Resources [/bold reverse]")
+        lines.append(
+            f"  [bold {c.primary}]{'Pending Jobs':.<24}[/bold {c.primary}] "
+            f"[bold {c.warning}]{pending_stats.pending_job_count}[/bold {c.warning}]"
+        )
+        lines.append(f"  [bold {c.primary}]{'Requested CPUs':.<24}[/bold {c.primary}] {pending_stats.pending_cpus}")
+        lines.append(
+            f"  [bold {c.primary}]{'Requested Memory (GB)':.<24}[/bold {c.primary}] "
+            f"{pending_stats.pending_memory_gb:.1f}"
+        )
+        lines.append(f"  [bold {c.primary}]{'Requested GPUs':.<24}[/bold {c.primary}] {pending_stats.pending_gpus}")
+        if pending_stats.pending_gpu_types:
+            lines.append(
+                f"  [bold {c.primary}]{'GPU Types':.<24}[/bold {c.primary}] "
+                f"[{c.accent}]{pending_stats.pending_gpu_types}[/{c.accent}]"
+            )
+
+    # Fair-share priority section
+    if priority_info:
+        lines.append("\n[bold reverse] ⚖️ Fair-Share Priority [/bold reverse]")
+        lines.append(f"  [bold {c.primary}]{'Account':.<24}[/bold {c.primary}] {priority_info['account']}")
+        lines.append(f"  [bold {c.primary}]{'Raw Shares':.<24}[/bold {c.primary}] {priority_info['raw_shares']}")
+        lines.append(f"  [bold {c.primary}]{'Norm Shares':.<24}[/bold {c.primary}] {priority_info['norm_shares']}")
+        lines.append(f"  [bold {c.primary}]{'Raw Usage':.<24}[/bold {c.primary}] {priority_info['raw_usage']}")
+        lines.append(
+            f"  [bold {c.primary}]{'Effective Usage':.<24}[/bold {c.primary}] {priority_info['effective_usage']}"
+        )
+        fair_share = priority_info["fair_share"]
+        fair_share_label = f"  [bold {c.primary}]{'Fair-Share Factor':.<24}[/bold {c.primary}] "
+        lines.append(f"{fair_share_label}{_format_fair_share_value(fair_share, c)}")
+
+    # Energy consumption section
+    if energy_stats:
+        lines.append("\n[bold reverse] ⚡ Energy (6 months) [/bold reverse]")
+        energy_display = _format_energy_wh(energy_stats.total_energy_wh)
+        lines.append(
+            f"  [bold {c.primary}]{'Total Energy':.<24}[/bold {c.primary}] [{c.accent}]{energy_display}[/{c.accent}]"
+        )
+        lines.append(f"  [bold {c.primary}]{'Completed Jobs':.<24}[/bold {c.primary}] {energy_stats.job_count}")
+        lines.append(f"  [bold {c.primary}]{'GPU-Hours':.<24}[/bold {c.primary}] {energy_stats.gpu_hours:.1f}")
+        lines.append(f"  [bold {c.primary}]{'CPU-Hours':.<24}[/bold {c.primary}] {energy_stats.cpu_hours:.1f}")
+
+    # Pending job priorities section
+    if job_priorities:
+        lines.append("\n[bold reverse] 🎯 Pending Job Priorities [/bold reverse]")
+        lines.append("")
+        # Header
+        lines.append(
+            "  [dim]"
+            f"{'JobID':<{_USER_INFO_JOBID_WIDTH}} "
+            f"{'Priority':<{_USER_INFO_PRIORITY_WIDTH}} "
+            f"{'Age':<{_USER_INFO_AGE_WIDTH}} "
+            f"{'FairShare':<{_USER_INFO_FAIR_SHARE_WIDTH}} "
+            f"{'JobSize':<{_USER_INFO_JOB_SIZE_WIDTH}} "
+            f"{'Partition':<{_USER_INFO_PARTITION_WIDTH}}"
+            "[/dim]"
+        )
+        lines.append(f"  [dim]{'─' * 70}[/dim]")
+
+        # Sort by priority descending
+        sorted_priorities = sorted(
+            job_priorities,
+            key=lambda p: _safe_float(p.get("priority", "0")),
+            reverse=True,
+        )
+
+        # Show top jobs
+        for prio in sorted_priorities[:_USER_INFO_MAX_PRIORITY_JOBS]:
+            job_id = _truncate(prio["job_id"], _USER_INFO_JOBID_WIDTH)
+            priority = _truncate(prio["priority"], _USER_INFO_PRIORITY_WIDTH)
+            age = _truncate(prio["age"], _USER_INFO_AGE_WIDTH)
+            fair_share = _truncate(prio["fair_share"], _USER_INFO_FAIR_SHARE_WIDTH)
+            job_size = _truncate(prio["job_size"], _USER_INFO_JOB_SIZE_WIDTH)
+            partition = _truncate(prio["partition"], _USER_INFO_PARTITION_WIDTH)
+
+            lines.append(f"  {job_id:<12} {priority:<10} {age:<8} {fair_share:<10} {job_size:<10} {partition:<12}")
+
+        if len(job_priorities) > _USER_INFO_MAX_PRIORITY_JOBS:
+            lines.append(f"  [dim]... and {len(job_priorities) - _USER_INFO_MAX_PRIORITY_JOBS} more pending jobs[/dim]")
+
     # Jobs list
     if jobs:
         lines.append("\n[bold reverse] 📋 Job List [/bold reverse]")
         lines.append("")
         # Header
         lines.append(
-            f"  [dim]{'JobID':<12} {'Name':<15} {'State':<8} {'Partition':<12} {'Time':<10} {'Nodes':<6}[/dim]"
+            "  [dim]"
+            f"{'JobID':<{_USER_INFO_JOBID_WIDTH}} "
+            f"{'Name':<{_USER_INFO_NAME_WIDTH}} "
+            f"{'State':<{_USER_INFO_STATE_WIDTH}} "
+            f"{'Partition':<{_USER_INFO_PARTITION_WIDTH}} "
+            f"{'Time':<{_USER_INFO_TIME_WIDTH}} "
+            f"{'Nodes':<{_USER_INFO_NODES_WIDTH}}"
+            "[/dim]"
         )
         lines.append(f"  [dim]{'─' * 70}[/dim]")
 
@@ -537,12 +821,212 @@ def format_user_info(
             state_upper = state.strip().upper()
             state_color = colors.state_color(state_upper)
             if state_upper in ("RUNNING", "R", "PENDING", "PD"):
-                state_display = f"[bold {state_color}]{state:<8}[/bold {state_color}]"
+                state_display = f"[bold {state_color}]{state:<{_USER_INFO_STATE_WIDTH}}[/bold {state_color}]"
             else:
-                state_display = f"{state:<8}"
+                state_display = f"{state:<{_USER_INFO_STATE_WIDTH}}"
 
             lines.append(f"  {job_id:<12} {name:<15} {state_display} {partition:<12} {time_used:<10} {nodes:<6}")
     else:
         lines.append("\n[italic]No active jobs found for this user.[/italic]")
+
+    return "\n".join(lines)
+
+
+def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
+    account_name: str,
+    account_priority: dict[str, str],
+    users_in_account: list[dict[str, str]],
+    running_jobs: list[tuple[str, ...]],
+    pending_jobs: list[tuple[str, ...]],
+    job_priorities: list[dict[str, str]] | None = None,
+    colors: ThemeColors | None = None,
+) -> str:
+    """Format account/institute information for display.
+
+    Args:
+        account_name: The account/institute name.
+        account_priority: Account-level fair-share priority info from sshare.
+        users_in_account: List of users in this account with their priority info.
+        running_jobs: List of running jobs for users in this account.
+        pending_jobs: List of pending jobs for users in this account.
+        job_priorities: Optional list of pending job priority factors.
+        colors: Optional theme colors. Uses fallback colors if not provided.
+
+    Returns:
+        Formatted string with Rich markup for display.
+    """
+    if colors is None:
+        colors = _get_default_colors()
+
+    lines: list[str] = []
+    c = colors  # Short alias for cleaner formatting
+
+    # Account Summary section
+    lines.append("\n[bold reverse] 🏢 Account Summary [/bold reverse]")
+    lines.append(f"  [bold {c.primary}]{'Account Name':.<24}[/bold {c.primary}] [bold]{account_name}[/bold]")
+    lines.append(
+        f"  [bold {c.primary}]{'Users in Account':.<24}[/bold {c.primary}] [bold]{len(users_in_account)}[/bold]"
+    )
+    lines.append(
+        f"  [bold {c.primary}]{'Running Jobs':.<24}[/bold {c.primary}] "
+        f"[bold {c.success}]{len(running_jobs)}[/bold {c.success}]"
+    )
+    lines.append(
+        f"  [bold {c.primary}]{'Pending Jobs':.<24}[/bold {c.primary}] "
+        f"[bold {c.warning}]{len(pending_jobs)}[/bold {c.warning}]"
+    )
+
+    # Account Fair-Share Priority section
+    if account_priority:
+        lines.append("\n[bold reverse] ⚖️ Account Fair-Share Priority [/bold reverse]")
+        lines.append(
+            f"  [bold {c.primary}]{'Raw Shares':.<24}[/bold {c.primary}] {account_priority.get('raw_shares', 'N/A')}"
+        )
+        lines.append(
+            f"  [bold {c.primary}]{'Norm Shares':.<24}[/bold {c.primary}] {account_priority.get('norm_shares', 'N/A')}"
+        )
+        lines.append(
+            f"  [bold {c.primary}]{'Raw Usage':.<24}[/bold {c.primary}] {account_priority.get('raw_usage', 'N/A')}"
+        )
+        lines.append(
+            f"  [bold {c.primary}]{'Effective Usage':.<24}[/bold {c.primary}] "
+            f"{account_priority.get('effective_usage', 'N/A')}"
+        )
+        fair_share = account_priority.get("fair_share", "N/A")
+        fair_share_label = f"  [bold {c.primary}]{'Fair-Share Factor':.<24}[/bold {c.primary}] "
+        lines.append(f"{fair_share_label}{_format_fair_share_value(fair_share, c)}")
+
+    # Calculate aggregate resource usage from running jobs
+    min_running_job_fields = 9
+    nodes_index = 6
+    tres_index = 8
+
+    total_cpus = 0
+    total_memory_gb = 0.0
+    total_gpus = 0
+    total_nodes = 0
+
+    for job in running_jobs:
+        if len(job) < min_running_job_fields:
+            continue
+
+        tres_str = job[tres_index].strip()
+        cpus, memory_gb, gpu_entries = _parse_tres_resources(tres_str)
+        total_cpus += cpus
+        total_memory_gb += memory_gb
+        total_gpus += calculate_total_gpus(gpu_entries)
+
+        nodes_str = job[nodes_index].strip()
+        total_nodes += _parse_node_count(nodes_str)
+
+    # Resource Usage section
+    lines.append("\n[bold reverse] 💻 Current Resource Usage [/bold reverse]")
+    lines.append(f"  [bold {c.primary}]{'Total CPUs':.<24}[/bold {c.primary}] {total_cpus}")
+    lines.append(f"  [bold {c.primary}]{'Total Memory (GB)':.<24}[/bold {c.primary}] {total_memory_gb:.1f}")
+    lines.append(f"  [bold {c.primary}]{'Total GPUs':.<24}[/bold {c.primary}] {total_gpus}")
+    lines.append(f"  [bold {c.primary}]{'Total Nodes':.<24}[/bold {c.primary}] {total_nodes}")
+
+    # Users in Account section
+    if users_in_account:
+        lines.append("\n[bold reverse] 👥 Users in Account [/bold reverse]")
+        lines.append("")
+        # Header
+        lines.append(
+            f"  [dim]{'User':<15} {'RawShares':<12} {'NormShares':<12} {'EffectvUsage':<12} {'FairShare':<10}[/dim]"
+        )
+        lines.append(f"  [dim]{'─' * 65}[/dim]")
+
+        # Sort by fair share descending
+        sorted_users = sorted(
+            users_in_account,
+            key=lambda u: _safe_float(u.get("fair_share", "0")),
+            reverse=True,
+        )
+
+        for user in sorted_users[:_ACCOUNT_INFO_MAX_USERS]:
+            username = user.get("username", "")[:_USER_INFO_NAME_WIDTH]
+            raw_shares = user.get("raw_shares", "")[:12]
+            norm_shares = user.get("norm_shares", "")[:12]
+            effective_usage = user.get("effective_usage", "")[:12]
+            fair_share = user.get("fair_share", "")
+            fs_display = _format_fair_share_value(
+                fair_share,
+                c,
+                width=_USER_INFO_FAIR_SHARE_WIDTH,
+                bold=False,
+            )
+
+            lines.append(f"  {username:<15} {raw_shares:<12} {norm_shares:<12} {effective_usage:<12} {fs_display}")
+
+        if len(users_in_account) > _ACCOUNT_INFO_MAX_USERS:
+            lines.append(f"  [dim]... and {len(users_in_account) - _ACCOUNT_INFO_MAX_USERS} more users[/dim]")
+
+    # Pending Job Priorities section
+    if job_priorities:
+        lines.append("\n[bold reverse] 🎯 Pending Job Priorities [/bold reverse]")
+        lines.append("")
+        # Header
+        lines.append(
+            f"  [dim]{'JobID':<12} {'User':<12} {'Priority':<10} {'Age':<8} {'FairShare':<10} {'Partition':<12}[/dim]"
+        )
+        lines.append(f"  [dim]{'─' * 70}[/dim]")
+
+        # Sort by priority descending
+        sorted_priorities = sorted(
+            job_priorities,
+            key=lambda p: _safe_float(p.get("priority", "0")),
+            reverse=True,
+        )
+
+        for prio in sorted_priorities[:_ACCOUNT_INFO_MAX_PRIORITY_JOBS]:
+            job_id = _truncate(prio["job_id"], _ACCOUNT_INFO_JOBID_WIDTH)
+            user = _truncate(prio.get("user", ""), _ACCOUNT_INFO_USER_WIDTH)
+            priority = _truncate(prio["priority"], _ACCOUNT_INFO_PRIORITY_WIDTH)
+            age = _truncate(prio["age"], _ACCOUNT_INFO_AGE_WIDTH)
+            fair_share = _truncate(prio["fair_share"], _USER_INFO_FAIR_SHARE_WIDTH)
+            partition = _truncate(prio["partition"], _ACCOUNT_INFO_PARTITION_WIDTH)
+
+            lines.append(f"  {job_id:<12} {user:<12} {priority:<10} {age:<8} {fair_share:<10} {partition:<12}")
+
+        if len(job_priorities) > _ACCOUNT_INFO_MAX_PRIORITY_JOBS:
+            lines.append(
+                f"  [dim]... and {len(job_priorities) - _ACCOUNT_INFO_MAX_PRIORITY_JOBS} more pending jobs[/dim]"
+            )
+
+    # Running Jobs section
+    if running_jobs:
+        lines.append("\n[bold reverse] 📋 Running Jobs [/bold reverse]")
+        lines.append("")
+        # Header
+        lines.append(
+            f"  [dim]{'JobID':<12} {'User':<12} {'Name':<15} {'Partition':<12} {'Time':<10} {'Nodes':<6}[/dim]"
+        )
+        lines.append(f"  [dim]{'─' * 75}[/dim]")
+
+        for job in running_jobs[:_ACCOUNT_INFO_MAX_RUNNING_JOBS]:
+            if len(job) < _USER_INFO_MIN_JOB_FIELDS:
+                continue
+
+            job_id = _truncate(job[0], _ACCOUNT_INFO_JOBID_WIDTH)
+            name = _truncate(job[1], _ACCOUNT_INFO_NAME_WIDTH)
+            user = _truncate(job[2], _ACCOUNT_INFO_USER_WIDTH)
+            partition = _truncate(job[3], _ACCOUNT_INFO_PARTITION_WIDTH)
+            time_used = (
+                _truncate(job[_ACCOUNT_INFO_TIME_FIELD_INDEX], _ACCOUNT_INFO_TIME_WIDTH)
+                if len(job) > _ACCOUNT_INFO_TIME_FIELD_INDEX
+                else ""
+            )
+            nodes = (
+                _truncate(job[_ACCOUNT_INFO_NODES_FIELD_INDEX], _ACCOUNT_INFO_NODES_WIDTH)
+                if len(job) > _ACCOUNT_INFO_NODES_FIELD_INDEX
+                else ""
+            )
+
+            lines.append(f"  {job_id:<12} {user:<12} {name:<15} {partition:<12} {time_used:<10} {nodes:<6}")
+
+        if len(running_jobs) > _ACCOUNT_INFO_MAX_RUNNING_JOBS:
+            lines.append(f"  [dim]... and {len(running_jobs) - _ACCOUNT_INFO_MAX_RUNNING_JOBS} more running jobs[/dim]")
+    else:
+        lines.append("\n[italic]No running jobs found for this account.[/italic]")
 
     return "\n".join(lines)
