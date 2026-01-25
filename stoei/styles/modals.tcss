@@ -1,12 +1,65 @@
 /*
- * Full-screen styles for stoei TUI.
+ * Full-screen and modal styles for stoei TUI.
+ *
+ * Overlay Types:
+ * 1. Confirmation modals (semi-transparent, round border) - CancelConfirmScreen, EnergyEnableModal
+ * 2. Input dialogs (semi-transparent, double border) - JobInputScreen
+ * 3. Full-screen info viewers (solid bg, header/content/footer) - JobInfoScreen, LogViewerScreen, etc.
+ * 4. Centered info screens (solid bg, double border) - HelpScreen, SettingsScreen
  */
 
-/* Job Input Screen */
+/* =============================================================================
+ * COMMON MODAL STYLES
+ * ============================================================================= */
+
+/* Base styles for centered modals with semi-transparent overlay */
+.modal-overlay {
+    layout: vertical;
+    align: center middle;
+    background: $background 50%;
+}
+
+/* Base container for centered modals */
+.modal-container {
+    height: auto;
+    padding: 2 3;
+    background: $panel;
+}
+
+/* Base title for modals */
+.modal-title {
+    width: 100%;
+    content-align: center middle;
+    padding: 1 0;
+    text-style: bold;
+    border-bottom: solid $border-muted;
+    margin-bottom: 1;
+}
+
+/* Base button row for modals */
+.modal-button-row {
+    width: 100%;
+    height: auto;
+    layout: horizontal;
+    align: center middle;
+    margin-top: 1;
+}
+
+/* Base button styling for modals */
+.modal-button {
+    width: 1fr;
+    margin: 0 1;
+    height: 3;
+    text-style: bold;
+}
+
+/* =============================================================================
+ * JOB INPUT SCREEN - Input dialog modal
+ * ============================================================================= */
 JobInputScreen {
     layout: vertical;
     align: center middle;
-    background: $background;
+    background: $background 50%;
 }
 
 JobInputScreen > Vertical {
@@ -20,7 +73,7 @@ JobInputScreen > Vertical {
 JobInputScreen #input-title {
     width: 100%;
     content-align: center middle;
-    padding: 1;
+    padding: 1 0;
     margin-bottom: 1;
     color: $accent;
     text-style: bold;
@@ -49,12 +102,15 @@ JobInputScreen #button-row {
     width: 100%;
     height: auto;
     layout: horizontal;
+    align: center middle;
     margin-top: 1;
 }
 
 JobInputScreen Button {
     width: 1fr;
     margin: 0 1;
+    height: 3;
+    text-style: bold;
 }
 
 JobInputScreen #submit-btn {
@@ -62,11 +118,82 @@ JobInputScreen #submit-btn {
     color: $text-on-accent;
 }
 
+JobInputScreen #submit-btn:focus {
+    border: tall $accent;
+}
+
 JobInputScreen #cancel-btn {
     background: $surface;
 }
 
-/* Job Info Screen */
+JobInputScreen #cancel-btn:focus {
+    border: tall $surface;
+}
+
+/* =============================================================================
+ * FULL-SCREEN INFO VIEWERS - Common base styles
+ * These screens share: header with heavy border, scrollable content, footer
+ * ============================================================================= */
+
+/* Common header styles for full-screen info viewers */
+.info-screen-header {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-bottom: heavy $accent;
+}
+
+.info-screen-title {
+    width: 100%;
+    content-align: center middle;
+    color: $accent;
+    text-style: bold;
+}
+
+.info-screen-subtitle {
+    width: 100%;
+    content-align: center middle;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+/* Common content area for full-screen info viewers */
+.info-screen-content {
+    height: 1fr;
+    padding: 1 2;
+    background: $background;
+}
+
+/* Common footer styles for full-screen info viewers */
+.info-screen-footer {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-top: solid $border-muted;
+    layout: horizontal;
+    align: center middle;
+}
+
+.info-screen-hint {
+    width: 1fr;
+    content-align: left middle;
+    color: $text-muted;
+    margin-right: 2;
+}
+
+/* Common error container for full-screen info viewers */
+.info-screen-error {
+    height: 1fr;
+    padding: 2;
+    content-align: center middle;
+    background: $background;
+}
+
+/* =============================================================================
+ * JOB INFO SCREEN - Full-screen info viewer
+ * ============================================================================= */
 JobInfoScreen {
     layout: vertical;
     background: $background;
@@ -143,12 +270,6 @@ JobInfoScreen #job-info-footer {
     align: center middle;
 }
 
-JobInfoScreen #close-button {
-    width: auto;
-    min-width: 16;
-    background: $surface;
-}
-
 JobInfoScreen #hint-text {
     width: 1fr;
     content-align: left middle;
@@ -179,19 +300,19 @@ JobInfoScreen #stderr-button {
     margin-right: 1;
 }
 
+JobInfoScreen #close-button {
+    width: auto;
+    min-width: 16;
+    background: $surface;
+}
+
 JobInfoScreen #stdout-button:disabled,
 JobInfoScreen #stderr-button:disabled {
     opacity: 0.5;
 }
 
-JobInfoScreen #stdout-button:focus {
-    border: tall $accent;
-}
-
-JobInfoScreen #stderr-button:focus {
-    border: tall $accent;
-}
-
+JobInfoScreen #stdout-button:focus,
+JobInfoScreen #stderr-button:focus,
 JobInfoScreen #close-button:focus {
     border: tall $accent;
 }
@@ -200,7 +321,9 @@ JobInfoScreen #job-info-content:focus {
     border: tall $accent;
 }
 
-/* Log Viewer Screen */
+/* =============================================================================
+ * LOG VIEWER SCREEN - Full-screen info viewer (uses $success accent)
+ * ============================================================================= */
 LogViewerScreen {
     layout: vertical;
     background: $background;
@@ -299,6 +422,7 @@ LogViewerScreen #log-hint-text {
     width: 1fr;
     content-align: left middle;
     color: $text-muted;
+    margin-right: 2;
 }
 
 LogViewerScreen #editor-button {
@@ -311,11 +435,14 @@ LogViewerScreen #editor-button {
 
 LogViewerScreen #log-close-button {
     width: auto;
-    min-width: 12;
+    min-width: 16;
     background: $surface;
 }
 
-LogViewerScreen #editor-button:focus,
+LogViewerScreen #editor-button:focus {
+    border: tall $success;
+}
+
 LogViewerScreen #log-close-button:focus {
     border: tall $accent;
 }
@@ -357,7 +484,9 @@ LogViewerScreen #log-search-status {
     color: $text-muted;
 }
 
-/* Cancel Confirmation Screen */
+/* =============================================================================
+ * CANCEL CONFIRMATION SCREEN - Confirmation modal
+ * ============================================================================= */
 CancelConfirmScreen {
     layout: vertical;
     align: center middle;
@@ -365,9 +494,9 @@ CancelConfirmScreen {
 }
 
 CancelConfirmScreen #cancel-confirm-container {
-    width: 50;
+    width: 55;
     height: auto;
-    padding: 1 2;
+    padding: 2 3;
     background: $panel;
     border: round $error;
 }
@@ -401,14 +530,12 @@ CancelConfirmScreen #cancel-button-row {
     layout: horizontal;
     align: center middle;
     margin-top: 1;
-    padding: 0;
 }
 
 CancelConfirmScreen Button {
-    width: 21;
+    width: 1fr;
     margin: 0 1;
     height: 3;
-    border: tall $panel;
     text-style: bold;
 }
 
@@ -418,7 +545,6 @@ CancelConfirmScreen #confirm-cancel-btn {
 }
 
 CancelConfirmScreen #confirm-cancel-btn:hover {
-    background: $error;
     text-style: bold underline;
 }
 
@@ -428,7 +554,6 @@ CancelConfirmScreen #abort-cancel-btn {
 }
 
 CancelConfirmScreen #abort-cancel-btn:hover {
-    background: $success;
     text-style: bold underline;
 }
 
@@ -440,7 +565,9 @@ CancelConfirmScreen #abort-cancel-btn:focus {
     border: tall $success;
 }
 
-/* SLURM Unavailable Error Screen */
+/* =============================================================================
+ * SLURM UNAVAILABLE ERROR SCREEN - Centered error dialog
+ * ============================================================================= */
 SlurmUnavailableScreen {
     layout: vertical;
     align: center middle;
@@ -458,8 +585,8 @@ SlurmUnavailableScreen #slurm-error-container {
 SlurmUnavailableScreen #slurm-error-header {
     width: 100%;
     height: auto;
-    padding: 1;
-    margin-bottom: 2;
+    padding: 1 0;
+    margin-bottom: 1;
     border-bottom: solid $border-muted;
 }
 
@@ -486,7 +613,7 @@ SlurmUnavailableScreen #error-message {
 SlurmUnavailableScreen #slurm-error-footer {
     width: 100%;
     height: auto;
-    padding: 1;
+    padding: 1 2;
     layout: horizontal;
     align: center middle;
 }
@@ -494,6 +621,8 @@ SlurmUnavailableScreen #slurm-error-footer {
 SlurmUnavailableScreen #quit-button {
     width: auto;
     min-width: 16;
+    height: 3;
+    text-style: bold;
     background: $surface;
 }
 
@@ -501,7 +630,9 @@ SlurmUnavailableScreen #quit-button:focus {
     border: tall $accent;
 }
 
-/* Help Screen */
+/* =============================================================================
+ * HELP SCREEN - Centered scrollable info dialog
+ * ============================================================================= */
 HelpScreen {
     layout: vertical;
     align: center middle;
@@ -557,11 +688,12 @@ HelpScreen #help-hint {
     width: 1fr;
     content-align: left middle;
     color: $text-muted;
+    margin-right: 2;
 }
 
 HelpScreen #help-close-button {
     width: auto;
-    min-width: 12;
+    min-width: 16;
     background: $surface;
 }
 
@@ -573,7 +705,9 @@ HelpScreen #help-content:focus {
     border: tall $accent;
 }
 
-/* Settings Screen */
+/* =============================================================================
+ * SETTINGS SCREEN - Centered form dialog
+ * ============================================================================= */
 SettingsScreen {
     layout: vertical;
     align: center middle;
@@ -591,7 +725,7 @@ SettingsScreen #settings-container {
 SettingsScreen #settings-title {
     width: 100%;
     content-align: center middle;
-    padding: 1;
+    padding: 1 0;
     margin-bottom: 1;
     color: $accent;
     text-style: bold;
@@ -623,23 +757,38 @@ SettingsScreen #settings-button-row {
     width: 100%;
     height: auto;
     layout: horizontal;
+    align: center middle;
     margin-top: 1;
 }
 
 SettingsScreen #settings-save {
     width: 1fr;
     margin: 0 1;
+    height: 3;
+    text-style: bold;
     background: $accent;
     color: $text-on-accent;
+}
+
+SettingsScreen #settings-save:focus {
+    border: tall $accent;
 }
 
 SettingsScreen #settings-cancel {
     width: 1fr;
     margin: 0 1;
+    height: 3;
+    text-style: bold;
     background: $surface;
 }
 
-/* User Info Screen */
+SettingsScreen #settings-cancel:focus {
+    border: tall $surface;
+}
+
+/* =============================================================================
+ * USER INFO SCREEN - Full-screen info viewer
+ * ============================================================================= */
 UserInfoScreen {
     layout: vertical;
     background: $background;
@@ -737,7 +886,210 @@ UserInfoScreen #user-info-content:focus {
     border: tall $accent;
 }
 
-/* Settings Screen - Energy settings */
+/* =============================================================================
+ * NODE INFO SCREEN - Full-screen info viewer
+ * ============================================================================= */
+NodeInfoScreen {
+    layout: vertical;
+    background: $background;
+}
+
+NodeInfoScreen > Vertical {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    background: $panel;
+}
+
+NodeInfoScreen #node-info-header {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-bottom: heavy $accent;
+}
+
+NodeInfoScreen #node-info-title {
+    width: 100%;
+    content-align: center middle;
+    color: $accent;
+    text-style: bold;
+}
+
+NodeInfoScreen #node-info-subtitle {
+    width: 100%;
+    content-align: center middle;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+NodeInfoScreen #node-info-content {
+    height: 1fr;
+    padding: 1 2;
+    background: $background;
+}
+
+NodeInfoScreen #node-info-text {
+    width: 100%;
+    color: $foreground;
+}
+
+NodeInfoScreen #error-container {
+    height: 1fr;
+    padding: 2;
+    content-align: center middle;
+    background: $background;
+}
+
+NodeInfoScreen #error-icon {
+    width: 100%;
+    content-align: center middle;
+    color: $error;
+    text-style: bold;
+}
+
+NodeInfoScreen #error-text {
+    width: 100%;
+    content-align: center middle;
+    color: $error;
+    margin-top: 1;
+}
+
+NodeInfoScreen #node-info-footer {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-top: solid $border-muted;
+    layout: horizontal;
+    align: center middle;
+}
+
+NodeInfoScreen #hint-text {
+    width: 1fr;
+    content-align: left middle;
+    color: $text-muted;
+    margin-right: 2;
+}
+
+NodeInfoScreen #close-button {
+    width: auto;
+    min-width: 16;
+    background: $surface;
+}
+
+NodeInfoScreen #close-button:focus {
+    border: tall $accent;
+}
+
+NodeInfoScreen #node-info-content:focus {
+    border: tall $accent;
+}
+
+/* =============================================================================
+ * ACCOUNT INFO SCREEN - Modal overlay (semi-transparent)
+ * ============================================================================= */
+AccountInfoScreen {
+    layout: vertical;
+    align: center middle;
+    background: $background 50%;
+}
+
+AccountInfoScreen > Vertical {
+    width: 90%;
+    max-width: 120;
+    height: 85%;
+    padding: 0;
+    background: $panel;
+    border: double $accent;
+}
+
+AccountInfoScreen #user-info-header {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-bottom: heavy $accent;
+}
+
+AccountInfoScreen #user-info-title {
+    width: 100%;
+    content-align: center middle;
+    color: $accent;
+    text-style: bold;
+}
+
+AccountInfoScreen #user-info-subtitle {
+    width: 100%;
+    content-align: center middle;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+AccountInfoScreen #user-info-content {
+    height: 1fr;
+    padding: 1 2;
+    background: $background;
+}
+
+AccountInfoScreen #user-info-text {
+    width: 100%;
+    color: $foreground;
+}
+
+AccountInfoScreen #error-container {
+    height: 1fr;
+    padding: 2;
+    content-align: center middle;
+    background: $background;
+}
+
+AccountInfoScreen #error-icon {
+    width: 100%;
+    content-align: center middle;
+    color: $error;
+    text-style: bold;
+}
+
+AccountInfoScreen #error-text {
+    width: 100%;
+    content-align: center middle;
+    color: $error;
+    margin-top: 1;
+}
+
+AccountInfoScreen #user-info-footer {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-top: solid $border-muted;
+    layout: horizontal;
+    align: center middle;
+}
+
+AccountInfoScreen #hint-text {
+    width: 1fr;
+    content-align: left middle;
+    color: $text-muted;
+    margin-right: 2;
+}
+
+AccountInfoScreen #close-button {
+    width: auto;
+    min-width: 16;
+    background: $surface;
+}
+
+AccountInfoScreen #close-button:focus {
+    border: tall $accent;
+}
+
+AccountInfoScreen #user-info-content:focus {
+    border: tall $accent;
+}
+
+/* Settings Screen - Energy settings section */
 SettingsScreen .settings-section-header {
     margin-top: 2;
     padding-top: 1;
@@ -765,7 +1117,9 @@ SettingsScreen #settings-reload-energy {
     color: $text-on-success;
 }
 
-/* Energy Enable Modal */
+/* =============================================================================
+ * ENERGY ENABLE MODAL - Confirmation modal
+ * ============================================================================= */
 EnergyEnableModal {
     layout: vertical;
     align: center middle;
@@ -773,7 +1127,7 @@ EnergyEnableModal {
 }
 
 EnergyEnableModal #energy-enable-container {
-    width: 60;
+    width: 55;
     height: auto;
     padding: 2 3;
     background: $panel;
@@ -793,7 +1147,7 @@ EnergyEnableModal #energy-enable-title {
 EnergyEnableModal #energy-enable-message {
     width: 100%;
     content-align: center middle;
-    padding: 1 1;
+    padding: 0 1;
     color: $foreground;
 }
 
@@ -802,15 +1156,13 @@ EnergyEnableModal #energy-enable-button-row {
     height: auto;
     layout: horizontal;
     align: center middle;
-    margin-top: 2;
-    padding: 0;
+    margin-top: 1;
 }
 
 EnergyEnableModal Button {
     width: 1fr;
     margin: 0 1;
     height: 3;
-    border: tall $panel;
     text-style: bold;
 }
 
@@ -820,7 +1172,6 @@ EnergyEnableModal #energy-go-settings {
 }
 
 EnergyEnableModal #energy-go-settings:hover {
-    background: $accent;
     text-style: bold underline;
 }
 
@@ -829,7 +1180,6 @@ EnergyEnableModal #energy-dismiss {
 }
 
 EnergyEnableModal #energy-dismiss:hover {
-    background: $surface;
     text-style: bold underline;
 }
 

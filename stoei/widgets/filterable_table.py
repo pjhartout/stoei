@@ -541,21 +541,60 @@ class FilterableDataTable(Vertical):
         col_config = next((c for c in self._columns if c.key == self._sort_state.column_key), None)
         sort_key_func = col_config.sort_key if col_config else None
 
-        def get_sort_key(row: tuple[Any, ...]) -> Any:
-            if col_idx >= len(row):
-                return ""
-            value = row[col_idx]
-            # Remove Rich markup for sorting
-            str_value = re.sub(r"\[.*?\]", "", str(value))
-            if sort_key_func:
-                return sort_key_func(str_value)
-            # Try numeric sort
-            try:
-                return float(str_value.replace(",", ""))
-            except ValueError:
-                return str_value.lower()
-
         reverse = self._sort_state.direction == SortDirection.DESCENDING
+
+        def normalize(value: Any) -> str:
+            """Normalize a cell value for sorting.
+
+            Args:
+                value: The raw cell value.
+
+            Returns:
+                Cell value as string, with Rich markup removed and whitespace stripped.
+            """
+            return re.sub(r"\[.*?\]", "", str(value)).strip()
+
+        def try_parse_float(value: str) -> float | None:
+            """Try parsing a float from a string.
+
+            Args:
+                value: String to parse.
+
+            Returns:
+                The float value if parseable, otherwise None.
+            """
+            try:
+                return float(value.replace(",", ""))
+            except ValueError:
+                return None
+
+        missing_rank_for_missing = -1 if reverse else 1
+
+        def get_sort_key(row: tuple[Any, ...]) -> tuple[int, int, float | str]:
+            """Return a consistently comparable sort key for a row.
+
+            This avoids crashes when some cells are numeric (e.g. "1") and others are
+            empty or non-numeric (e.g. "").
+            """
+            raw = "" if col_idx >= len(row) else normalize(row[col_idx])
+            candidate: Any = sort_key_func(raw) if sort_key_func else raw
+
+            if candidate is None:
+                return (missing_rank_for_missing, 2, "")
+
+            if isinstance(candidate, int | float):
+                return (0, 0, float(candidate))
+
+            text = normalize(candidate)
+            if text == "":
+                return (missing_rank_for_missing, 2, "")
+
+            maybe_number = try_parse_float(text)
+            if maybe_number is not None:
+                return (0, 0, maybe_number)
+
+            return (0, 1, text.lower())
+
         return sorted(rows, key=get_sort_key, reverse=reverse)
 
     def _refresh_table_data(self) -> None:

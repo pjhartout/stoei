@@ -525,7 +525,7 @@ class TestCommandErrorPaths:
             jobs, error = get_running_jobs()
             assert jobs == []
             assert error is not None
-            assert "timeout" in error.lower()
+            assert "timed out" in error.lower()
 
     def test_get_job_history_handles_timeout(self) -> None:
         """Test handling of timeout in get_job_history."""
@@ -541,7 +541,7 @@ class TestCommandErrorPaths:
             jobs, _total, _requeues, _max_req, error = get_job_history()
             assert jobs == []
             assert error is not None
-            assert "timeout" in error.lower()
+            assert "timed out" in error.lower()
 
     def test_scontrol_handles_nonzero_exit_code(self) -> None:
         """Test handling of non-zero exit code from scontrol."""
@@ -624,7 +624,7 @@ class TestGetWaitTimeJobHistory:
             jobs, error = get_wait_time_job_history(hours=1)
             assert jobs == []
             assert error is not None
-            assert "timeout" in error.lower()
+            assert "timed out" in error.lower()
 
     def test_handles_subprocess_error(self) -> None:
         """Test handling of SubprocessError in get_wait_time_job_history."""

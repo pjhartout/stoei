@@ -369,6 +369,46 @@ class TestFilterableDataTableInApp:
             first_row = filterable.get_row_at(0)
             assert "Alice" in str(first_row[0])
 
+    @pytest.mark.asyncio
+    async def test_sort_numeric_with_empty_cells_does_not_crash(self) -> None:
+        """Test that sorting a numeric column with empty cells doesn't crash."""
+        columns = [
+            ColumnConfig(name="Name", key="name", sortable=True, filterable=True),
+            ColumnConfig(name="Nodes", key="nodes", sortable=True, filterable=True),
+        ]
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("a", "1"),
+                ("b", ""),
+                ("c", "10"),
+            ]
+            filterable.set_data(rows)
+
+            filterable._set_sort("nodes", SortDirection.ASCENDING)
+            await pilot.pause()
+            assert str(filterable.get_row_at(0)[0]) == "a"
+            assert str(filterable.get_row_at(1)[0]) == "c"
+            assert str(filterable.get_row_at(2)[0]) == "b"
+
+            filterable._set_sort("nodes", SortDirection.DESCENDING)
+            await pilot.pause()
+            assert str(filterable.get_row_at(0)[0]) == "c"
+            assert str(filterable.get_row_at(1)[0]) == "a"
+            assert str(filterable.get_row_at(2)[0]) == "b"
+
 
 class TestFilterableDataTableVimMode:
     """Tests for vim keybind mode."""
