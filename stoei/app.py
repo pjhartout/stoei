@@ -1417,7 +1417,11 @@ class SlurmMonitor(App[None]):
                 gpus_alloc = calculate_total_gpus(alloc_entries)
             elif gpus_total > 0:
                 # Fallback to state-based allocation if no AllocTRES
-                if "ALLOCATED" in state.upper():
+                # ALLOCATED = all resources in use, MIXED = some resources in use
+                # For MIXED, we assume all GPUs allocated (same as sidebar logic)
+                # since we can't determine exact allocation without AllocTRES
+                state_upper = state.upper()
+                if "ALLOCATED" in state_upper or "MIXED" in state_upper:
                     gpus_alloc = gpus_total
 
             node_infos.append(
