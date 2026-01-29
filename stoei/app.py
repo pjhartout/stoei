@@ -227,7 +227,7 @@ class SlurmMonitor(App[None]):
                 # Jobs tab (default)
                 with Container(id="tab-jobs-content", classes="tab-content"):
                     with Horizontal(id="jobs-header"):
-                        yield Static("[bold]📋 My Jobs[/bold]", id="jobs-title")
+                        yield Static("[bold]My Jobs[/bold]", id="jobs-title")
                     yield FilterableDataTable(
                         columns=self.JOB_TABLE_COLUMN_CONFIGS,
                         keybind_mode=self._settings.keybind_mode,

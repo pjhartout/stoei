@@ -494,15 +494,16 @@ CancelConfirmScreen {
 }
 
 CancelConfirmScreen #cancel-confirm-container {
-    width: 55;
+    width: 54;
     height: auto;
-    padding: 2 3;
+    padding: 2;
     background: $panel;
-    border: round $error;
+    border: tall $error;
 }
 
 CancelConfirmScreen #cancel-title {
     width: 100%;
+    height: auto;
     content-align: center middle;
     padding: 1 0;
     color: $error;
@@ -513,12 +514,13 @@ CancelConfirmScreen #cancel-title {
 
 CancelConfirmScreen #cancel-job-info {
     width: 100%;
+    height: auto;
     content-align: center middle;
-    padding: 0 1;
 }
 
 CancelConfirmScreen #cancel-warning {
     width: 100%;
+    height: auto;
     content-align: center middle;
     color: $text-muted;
     margin: 1 0;
@@ -528,7 +530,6 @@ CancelConfirmScreen #cancel-button-row {
     width: 100%;
     height: auto;
     layout: horizontal;
-    align: center middle;
     margin-top: 1;
 }
 

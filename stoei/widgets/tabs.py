@@ -83,21 +83,21 @@ class TabContainer(Container):
         self._tabs: dict[str, Container] = {}
         self._is_compact: bool = False
         self._tab_labels: dict[str, tuple[str, str]] = {
-            "tab-jobs": ("📋 My Jobs", "Jobs"),
-            "tab-nodes": ("🖥️  Nodes", "Nodes"),
-            "tab-users": ("👥 Users", "Users"),
-            "tab-priority": ("⚖️  Priority", "Prior"),
-            "tab-logs": ("📝 Logs", "Logs"),
+            "tab-jobs": ("My Jobs", "Jobs"),
+            "tab-nodes": ("Nodes", "Nodes"),
+            "tab-users": ("Users", "Users"),
+            "tab-priority": ("Priority", "Prior"),
+            "tab-logs": ("Logs", "Logs"),
         }
 
     def compose(self) -> ComposeResult:
         """Create the tab container layout."""
         with Container(id="tab-header"), Horizontal(id="tab-buttons"):
-            yield Button("📋 My Jobs", id="tab-jobs", classes="tab-button active")
-            yield Button("🖥️  Nodes", id="tab-nodes", classes="tab-button")
-            yield Button("👥 Users", id="tab-users", classes="tab-button")
-            yield Button("⚖️  Priority", id="tab-priority", classes="tab-button")
-            yield Button("📝 Logs", id="tab-logs", classes="tab-button")
+            yield Button("My Jobs", id="tab-jobs", classes="tab-button active")
+            yield Button("Nodes", id="tab-nodes", classes="tab-button")
+            yield Button("Users", id="tab-users", classes="tab-button")
+            yield Button("Priority", id="tab-priority", classes="tab-button")
+            yield Button("Logs", id="tab-logs", classes="tab-button")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         """Handle tab button presses.

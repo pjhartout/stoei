@@ -161,7 +161,7 @@ class TestTabContainer:
 
             # Initially not compact
             jobs_btn = app.query_one("#tab-jobs", Button)
-            assert jobs_btn.label == "📋 My Jobs"
+            assert jobs_btn.label == "My Jobs"
             assert "compact" not in jobs_btn.classes
 
             # Set to compact
@@ -179,7 +179,7 @@ class TestTabContainer:
 
             # Set back to normal
             tab_container.set_compact(False)
-            assert jobs_btn.label == "📋 My Jobs"
+            assert jobs_btn.label == "My Jobs"
             assert "compact" not in jobs_btn.classes
 
     async def test_set_compact_mode_idempotent(self) -> None:

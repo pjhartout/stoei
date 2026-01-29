@@ -28,7 +28,7 @@ class SlurmUnavailableScreen(Screen[None]):
         """
         with Vertical(id="slurm-error-container"):
             with Container(id="slurm-error-header"):
-                yield Static("⚠️  [bold red]SLURM Controller Not Available[/bold red]", id="error-title")
+                yield Static("[bold red]SLURM Controller Not Available[/bold red]", id="error-title")
 
             with Container(id="slurm-error-content"):
                 yield Static(
@@ -43,7 +43,7 @@ class SlurmUnavailableScreen(Screen[None]):
                 )
 
             with Container(id="slurm-error-footer"):
-                yield Button("✕ Quit", variant="default", id="quit-button")
+                yield Button("Quit", variant="default", id="quit-button")
 
     def on_mount(self) -> None:
         """Focus the quit button on mount."""

@@ -95,7 +95,7 @@ class NodeOverviewTab(VerticalScroll):
 
     def compose(self) -> ComposeResult:
         """Create the node overview layout."""
-        yield Static("[bold]🖥️  Node Overview[/bold]", id="node-overview-title")
+        yield Static("[bold]Node Overview[/bold]", id="node-overview-title")
         yield FilterableDataTable(
             columns=self.NODE_TABLE_COLUMN_CONFIGS,
             keybind_mode=self._settings.keybind_mode,

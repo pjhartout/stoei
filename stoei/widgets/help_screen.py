@@ -85,7 +85,7 @@ class HelpScreen(Screen[None]):
         with Vertical(id="help-container"):
             with Container(id="help-header"):
                 yield Static(
-                    f"❓  [bold]Keyboard Shortcuts[/bold] [dim]({mode_display} mode)[/dim]",
+                    f"[bold]Keyboard Shortcuts[/bold] [dim]({mode_display} mode)[/dim]",
                     id="help-title",
                 )
 
@@ -97,7 +97,7 @@ class HelpScreen(Screen[None]):
                     "[bold]?[/bold] or [bold]Esc[/bold] to close",
                     id="help-hint",
                 )
-                yield Button("✕ Close", variant="default", id="help-close-button")
+                yield Button("Close", variant="default", id="help-close-button")
 
     def _get_help_content(self) -> str:
         """Generate the help content with keybindings.

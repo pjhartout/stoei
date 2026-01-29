@@ -134,7 +134,7 @@ class LogViewerScreen(Screen[None]):
         with Vertical(id="log-viewer-container"):
             with Container(id="log-viewer-header"):
                 yield Static(
-                    f"📄  [bold]{self.log_type.upper()} Log[/bold]",
+                    f"[bold]{self.log_type.upper()} Log[/bold]",
                     id="log-viewer-title",
                 )
                 yield Static(
@@ -165,8 +165,8 @@ class LogViewerScreen(Screen[None]):
             with Container(id="log-viewer-footer"):
                 hint = "[b]c[/b] Copy path [b]g/G[/b] ↕ [b]/[/b] Search [b]n/N[/b] Next/Prev [b]l[/b] Line#"
                 yield Static(hint, id="log-hint-text")
-                yield Button("📝 Open in $EDITOR", variant="primary", id="editor-button")
-                yield Button("✕ Close", variant="default", id="log-close-button")
+                yield Button("Open in $EDITOR", variant="primary", id="editor-button")
+                yield Button("Close", variant="default", id="log-close-button")
 
     def _escape_markup(self, text: str) -> str:
         """Escape Rich markup in text to prevent interpretation.
@@ -290,7 +290,7 @@ class LogViewerScreen(Screen[None]):
         if self.truncated:
             displayed_lines = self._raw_contents.count("\n") + 1
             truncate_header = (
-                f"[bold yellow]⚠ File truncated: showing last {displayed_lines:,} of "
+                f"[bold yellow]File truncated: showing last {displayed_lines:,} of "
                 f"{self._total_lines:,} lines[/bold yellow]\n"
                 f"[dim]Path: {self.filepath}[/dim]\n"
                 f"[dim]Press 'c' to copy filepath for detailed investigation[/dim]\n"
@@ -320,7 +320,7 @@ class LogViewerScreen(Screen[None]):
         if self.truncated:
             displayed_lines = self._raw_contents.count("\n") + 1
             truncate_header = (
-                f"⚠ File truncated: showing last {displayed_lines:,} of "
+                f"File truncated: showing last {displayed_lines:,} of "
                 f"{self._total_lines:,} lines\n"
                 f"Path: {self.filepath}\n"
                 f"Press 'c' to copy filepath for detailed investigation\n"
@@ -519,7 +519,7 @@ class LogViewerScreen(Screen[None]):
                     error_container = self.query_one("#log-error-container", Container)
                     error_container.remove_class("hidden")
                     error_text = self.query_one("#log-error-text", Static)
-                    error_text.update(f"⚠️  {self.load_error}")
+                    error_text.update(f"Error: {self.load_error}")
                     # Focus close button
                     self.query_one("#log-close-button", Button).focus()
                 except NoMatches:
@@ -707,7 +707,7 @@ class LogViewerScreen(Screen[None]):
                 error_container = self.query_one("#log-error-container", Container)
                 error_container.remove_class("hidden")
                 error_text = self.query_one("#log-error-text", Static)
-                error_text.update(f"⚠️  {self.load_error}")
+                error_text.update(f"Error: {self.load_error}")
                 # Hide content
                 content_scroll = self.query_one("#log-content-scroll", VerticalScroll)
                 content_scroll.add_class("hidden")
@@ -906,7 +906,7 @@ class LogViewerScreen(Screen[None]):
             if self.truncated:
                 displayed_lines = self._raw_contents.count("\n") + 1
                 truncate_header = (
-                    f"[bold yellow]⚠ File truncated: showing last {displayed_lines:,} of "
+                    f"[bold yellow]File truncated: showing last {displayed_lines:,} of "
                     f"{self._total_lines:,} lines[/bold yellow]\n"
                     f"[dim]Path: {self.filepath}[/dim]\n"
                     f"[dim]Press 'c' to copy filepath for detailed investigation[/dim]\n"
@@ -1002,12 +1002,12 @@ class JobInputScreen(Screen[str | None]):
             The widgets that make up the input dialog.
         """
         with Vertical():
-            yield Static("🔍  [bold]Job Information Lookup[/bold]", id="input-title")
+            yield Static("[bold]Job Information Lookup[/bold]", id="input-title")
             yield Static("Enter a SLURM job ID to view detailed information", id="input-hint")
             yield Input(placeholder="Job ID (e.g., 12345 or 12345_0)", id="job-id-input")
             with Container(id="button-row"):
-                yield Button("🔎 Show Info", variant="primary", id="submit-btn")
-                yield Button("✕ Cancel", variant="default", id="cancel-btn")
+                yield Button("Show Info", variant="primary", id="submit-btn")
+                yield Button("Cancel", variant="default", id="cancel-btn")
 
     def on_mount(self) -> None:
         """Focus the input field on mount."""
@@ -1087,12 +1087,12 @@ class JobInfoScreen(Screen[None]):
         """
         with Vertical():
             with Container(id="job-info-header"):
-                yield Static("📋  [bold]Job Details[/bold]", id="job-info-title")
+                yield Static("[bold]Job Details[/bold]", id="job-info-title")
                 yield Static(f"Job ID: [bold cyan]{self.job_id}[/bold cyan]", id="job-info-subtitle")
 
             if self.error:
                 with Container(id="error-container"):
-                    yield Static("⚠️  [bold]Error[/bold]", id="error-icon")
+                    yield Static("[bold]Error[/bold]", id="error-icon")
                     yield Static(self.error, id="error-text")
             else:
                 with VerticalScroll(id="job-info-content"):
@@ -1105,18 +1105,18 @@ class JobInfoScreen(Screen[None]):
                 )
                 with Container(id="log-buttons"):
                     yield Button(
-                        "📄 Open StdOut",
+                        "Open StdOut",
                         variant="primary",
                         id="stdout-button",
                         disabled=not self.stdout_path,
                     )
                     yield Button(
-                        "📄 Open StdErr",
+                        "Open StdErr",
                         variant="warning",
                         id="stderr-button",
                         disabled=not self.stderr_path,
                     )
-                yield Button("✕ Close", variant="default", id="close-button")
+                yield Button("Close", variant="default", id="close-button")
 
     def on_mount(self) -> None:
         """Focus the content area on mount for scrolling."""
@@ -1295,7 +1295,7 @@ class CancelConfirmScreen(Screen[bool]):
     def compose(self) -> ComposeResult:
         """Create the confirmation dialog layout."""
         with Vertical(id="cancel-confirm-container"):
-            yield Static("⚠️  [bold]Cancel Job?[/bold]", id="cancel-title")
+            yield Static("[bold]Cancel Job?[/bold]", id="cancel-title")
             job_display = f"Job ID: [bold cyan]{self.job_id}[/bold cyan]"
             if self.job_name:
                 job_display += f"\nJob Name: [bold]{self.job_name}[/bold]"
@@ -1305,8 +1305,8 @@ class CancelConfirmScreen(Screen[bool]):
                 id="cancel-warning",
             )
             with Container(id="cancel-button-row"):
-                yield Button("🗑️ Yes, Cancel", variant="error", id="confirm-cancel-btn")
-                yield Button("✓ No, Keep It", variant="default", id="abort-cancel-btn")
+                yield Button("Yes, Cancel", variant="error", id="confirm-cancel-btn")
+                yield Button("No, Keep It", variant="default", id="abort-cancel-btn")
 
     def on_mount(self) -> None:
         """Focus the abort button by default (safer option)."""
@@ -1432,12 +1432,12 @@ class NodeInfoScreen(Screen[None]):
         """
         with Vertical():
             with Container(id="node-info-header"):
-                yield Static("🖥️  [bold]Node Details[/bold]", id="node-info-title")
+                yield Static("[bold]Node Details[/bold]", id="node-info-title")
                 yield Static(f"Node: [bold cyan]{self.node_name}[/bold cyan]", id="node-info-subtitle")
 
             if self.error:
                 with Container(id="error-container"):
-                    yield Static("⚠️  [bold]Error[/bold]", id="error-icon")
+                    yield Static("[bold]Error[/bold]", id="error-icon")
                     yield Static(self.error, id="error-text")
             else:
                 with VerticalScroll(id="node-info-content"):
@@ -1448,7 +1448,7 @@ class NodeInfoScreen(Screen[None]):
                     "[bold]↑↓[/bold] Scroll | [bold]Esc[/bold] Close",
                     id="hint-text",
                 )
-                yield Button("✕ Close", variant="default", id="close-button")
+                yield Button("Close", variant="default", id="close-button")
 
     def on_mount(self) -> None:
         """Focus the content area on mount for scrolling."""
@@ -1507,12 +1507,12 @@ class UserInfoScreen(Screen[None]):
         """
         with Vertical():
             with Container(id="user-info-header"):
-                yield Static("👤  [bold]User Details[/bold]", id="user-info-title")
+                yield Static("[bold]User Details[/bold]", id="user-info-title")
                 yield Static(f"User: [bold cyan]{self.username}[/bold cyan]", id="user-info-subtitle")
 
             if self.error:
                 with Container(id="error-container"):
-                    yield Static("⚠️  [bold]Error[/bold]", id="error-icon")
+                    yield Static("[bold]Error[/bold]", id="error-icon")
                     yield Static(self.error, id="error-text")
             else:
                 with VerticalScroll(id="user-info-content"):
@@ -1523,7 +1523,7 @@ class UserInfoScreen(Screen[None]):
                     "[bold]↑↓[/bold] Scroll | [bold]Esc[/bold] Close",
                     id="hint-text",
                 )
-                yield Button("✕ Close", variant="default", id="close-button")
+                yield Button("Close", variant="default", id="close-button")
 
     def on_mount(self) -> None:
         """Focus the content area on mount for scrolling."""
@@ -1582,12 +1582,12 @@ class AccountInfoScreen(Screen[None]):
         """
         with Vertical():
             with Container(id="user-info-header"):
-                yield Static("🏢  [bold]Account Details[/bold]", id="user-info-title")
+                yield Static("[bold]Account Details[/bold]", id="user-info-title")
                 yield Static(f"Account: [bold cyan]{self.account_name}[/bold cyan]", id="user-info-subtitle")
 
             if self.error:
                 with Container(id="error-container"):
-                    yield Static("⚠️  [bold]Error[/bold]", id="error-icon")
+                    yield Static("[bold]Error[/bold]", id="error-icon")
                     yield Static(self.error, id="error-text")
             else:
                 with VerticalScroll(id="user-info-content"):
@@ -1598,7 +1598,7 @@ class AccountInfoScreen(Screen[None]):
                     "[bold]↑↓[/bold] Scroll | [bold]Esc[/bold] Close",
                     id="hint-text",
                 )
-                yield Button("✕ Close", variant="default", id="close-button")
+                yield Button("Close", variant="default", id="close-button")
 
     def on_mount(self) -> None:
         """Focus the content area on mount for scrolling."""
@@ -1645,15 +1645,15 @@ class EnergyEnableModal(Screen[str]):
     def compose(self) -> ComposeResult:
         """Create the modal layout."""
         with Vertical(id="energy-enable-container"):
-            yield Static("⚡ Energy Data Not Loaded", id="energy-enable-title")
+            yield Static("Energy Data Not Loaded", id="energy-enable-title")
             yield Static(
                 "Energy accounting data is disabled by default to speed up startup.\n\n"
                 "Would you like to enable it in settings?",
                 id="energy-enable-message",
             )
             with Container(id="energy-enable-button-row"):
-                yield Button("⚙️ Go to Settings", variant="primary", id="energy-go-settings")
-                yield Button("✕ Not Now", variant="default", id="energy-dismiss")
+                yield Button("Go to Settings", variant="primary", id="energy-go-settings")
+                yield Button("Not Now", variant="default", id="energy-dismiss")
 
     def on_mount(self) -> None:
         """Focus the settings button by default."""

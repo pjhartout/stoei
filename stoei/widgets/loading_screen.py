@@ -168,7 +168,7 @@ class LoadingScreen(Screen[None]):
         """Create the loading screen layout."""
         # Use plain text in compose - CSS will style it
         with Container(id="loading-container"):
-            yield Label("[bold]🚀 STOEI Loading[/bold]", id="loading-title")
+            yield Label("[bold]STOEI Loading[/bold]", id="loading-title")
 
             with Container(id="spinner-container"):
                 yield Static(self.SPINNER_FRAMES[0], id="spinner")
