@@ -41,13 +41,13 @@ def _get_default_colors() -> ThemeColors:
 
 # Fields categorized for better display
 JOB_CATEGORIES: dict[str, tuple[str, list[str]]] = {
-    "identity": ("🏷️  Identity", ["JobId", "JobName", "UserId", "GroupId", "Account", "QOS"]),
+    "identity": ("Identity", ["JobId", "JobName", "UserId", "GroupId", "Account", "QOS"]),
     "status": (
-        "📊 Status",
+        "Status",
         ["JobState", "Reason", "ExitCode", "DerivedExitCode", "RunTime", "TimeLimit", "Restarts", "Requeue"],
     ),
     "resources": (
-        "💻 Resources",
+        "Resources",
         [
             "Partition",
             "NumNodes",
@@ -64,9 +64,9 @@ JOB_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "TresPerNode",
         ],
     ),
-    "nodes": ("🖥️  Nodes", ["NodeList", "BatchHost", "ReqNodeList", "ExcNodeList", "Features", "Reservation"]),
+    "nodes": ("Nodes", ["NodeList", "BatchHost", "ReqNodeList", "ExcNodeList", "Features", "Reservation"]),
     "timing": (
-        "⏱️  Timing",
+        "Timing",
         [
             "SubmitTime",
             "EligibleTime",
@@ -80,9 +80,9 @@ JOB_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "LastSchedEval",
         ],
     ),
-    "paths": ("📁 Paths", ["WorkDir", "StdErr", "StdOut", "StdIn", "Command", "BatchFlag"]),
+    "paths": ("Paths", ["WorkDir", "StdErr", "StdOut", "StdIn", "Command", "BatchFlag"]),
     "scheduling": (
-        "⚙️  Scheduling",
+        "Scheduling",
         [
             "Priority",
             "Nice",
@@ -194,7 +194,7 @@ def format_job_info(raw_output: str) -> str:
     # Display any remaining fields not in categories
     remaining = {k: v for k, v in parsed.items() if k not in seen_keys}
     if remaining:
-        lines.append("\n[bold reverse] 📋 Other [/bold reverse]")
+        lines.append("\n[bold reverse] Other [/bold reverse]")
         for key, value in sorted(remaining.items()):
             formatted = format_value(key, value)
             lines.append(f"  [bold cyan]{key:.<24}[/bold cyan] {formatted}")
@@ -232,12 +232,12 @@ SACCT_FIELD_DISPLAY: dict[str, str] = {
 
 # Categories for sacct fields
 SACCT_CATEGORIES: dict[str, tuple[str, list[str]]] = {
-    "identity": ("🏷️  Identity", ["JobID", "JobName", "User", "Account", "QOS"]),
-    "status": ("📊 Status", ["State", "ExitCode", "Priority"]),
-    "resources": ("💻 Resources", ["Partition", "NNodes", "NCPUS", "NTasks", "ReqMem", "MaxRSS", "MaxVMSize"]),
-    "nodes": ("🖥️  Nodes", ["NodeList"]),
-    "timing": ("⏱️  Timing", ["Submit", "Start", "End", "Elapsed", "TimelimitRaw"]),
-    "paths": ("📁 Paths", ["WorkDir", "StdOut", "StdErr"]),
+    "identity": ("Identity", ["JobID", "JobName", "User", "Account", "QOS"]),
+    "status": ("Status", ["State", "ExitCode", "Priority"]),
+    "resources": ("Resources", ["Partition", "NNodes", "NCPUS", "NTasks", "ReqMem", "MaxRSS", "MaxVMSize"]),
+    "nodes": ("Nodes", ["NodeList"]),
+    "timing": ("Timing", ["Submit", "Start", "End", "Elapsed", "TimelimitRaw"]),
+    "paths": ("Paths", ["WorkDir", "StdOut", "StdErr"]),
 }
 
 
@@ -276,7 +276,7 @@ def format_sacct_job_info(parsed: dict[str, str]) -> str:
     # Display any remaining fields not in categories
     remaining = {k: v for k, v in parsed.items() if k not in seen_keys}
     if remaining:
-        lines.append("\n[bold reverse] 📋 Other [/bold reverse]")
+        lines.append("\n[bold reverse] Other [/bold reverse]")
         for key, value in sorted(remaining.items()):
             display_name = SACCT_FIELD_DISPLAY.get(key, key)
             formatted = format_value(key, value)
@@ -287,10 +287,10 @@ def format_sacct_job_info(parsed: dict[str, str]) -> str:
 
 # Categories for node fields
 NODE_CATEGORIES: dict[str, tuple[str, list[str]]] = {
-    "identity": ("🏷️  Identity", ["NodeName", "NodeAddr", "NodeHostName", "Arch", "OS", "Version"]),
-    "status": ("📊 Status", ["State", "Reason", "Owner", "MCS_label"]),
+    "identity": ("Identity", ["NodeName", "NodeAddr", "NodeHostName", "Arch", "OS", "Version"]),
+    "status": ("Status", ["State", "Reason", "Owner", "MCS_label"]),
     "resources": (
-        "💻 Resources",
+        "Resources",
         [
             "CPUTot",
             "CPUAlloc",
@@ -306,7 +306,7 @@ NODE_CATEGORIES: dict[str, tuple[str, list[str]]] = {
         ],
     ),
     "hardware": (
-        "🔧 Hardware",
+        "Hardware",
         [
             "CoresPerSocket",
             "Sockets",
@@ -317,9 +317,9 @@ NODE_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "ActiveFeatures",
         ],
     ),
-    "partitions": ("📦 Partitions", ["Partitions"]),
+    "partitions": ("Partitions", ["Partitions"]),
     "timing": (
-        "⏱️  Timing",
+        "Timing",
         [
             "BootTime",
             "SlurmdStartTime",
@@ -327,7 +327,7 @@ NODE_CATEGORIES: dict[str, tuple[str, list[str]]] = {
             "ResumeAfterTime",
         ],
     ),
-    "power": ("⚡ Power", ["CurrentWatts", "AveWatts"]),
+    "power": ("Power", ["CurrentWatts", "AveWatts"]),
 }
 
 
@@ -364,7 +364,7 @@ def format_node_info(raw_output: str) -> str:
     # Display any remaining fields not in categories
     remaining = {k: v for k, v in parsed.items() if k not in seen_keys}
     if remaining:
-        lines.append("\n[bold reverse] 📋 Other [/bold reverse]")
+        lines.append("\n[bold reverse] Other [/bold reverse]")
         for key, value in sorted(remaining.items()):
             formatted = format_value(key, value)
             lines.append(f"  [bold cyan]{key:.<24}[/bold cyan] {formatted}")
@@ -675,7 +675,7 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
     c = colors  # Short alias for cleaner formatting
 
     # Summary section
-    lines.append("\n[bold reverse] 👤 User Summary [/bold reverse]")
+    lines.append("\n[bold reverse] User Summary [/bold reverse]")
     lines.append(f"  [bold {c.primary}]{'Username':.<24}[/bold {c.primary}] [bold]{username}[/bold]")
     lines.append(f"  [bold {c.primary}]{'Running Jobs':.<24}[/bold {c.primary}] [bold]{user_stats.job_count}[/bold]")
     lines.append(f"  [bold {c.primary}]{'Total CPUs':.<24}[/bold {c.primary}] {user_stats.total_cpus}")
@@ -699,7 +699,7 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
             elif state in ("PENDING", "PD"):
                 pending_count += 1
 
-    lines.append("\n[bold reverse] 📊 Jobs by State [/bold reverse]")
+    lines.append("\n[bold reverse] Jobs by State [/bold reverse]")
     lines.append(
         f"  [bold {c.primary}]{'Running':.<24}[/bold {c.primary}] [bold {c.success}]{running_count}[/bold {c.success}]"
     )
@@ -709,7 +709,7 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Pending resources section
     if pending_stats:
-        lines.append("\n[bold reverse] ⏳ Pending Resources [/bold reverse]")
+        lines.append("\n[bold reverse] Pending Resources [/bold reverse]")
         lines.append(
             f"  [bold {c.primary}]{'Pending Jobs':.<24}[/bold {c.primary}] "
             f"[bold {c.warning}]{pending_stats.pending_job_count}[/bold {c.warning}]"
@@ -728,7 +728,7 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Fair-share priority section
     if priority_info:
-        lines.append("\n[bold reverse] ⚖️ Fair-Share Priority [/bold reverse]")
+        lines.append("\n[bold reverse] Fair-Share Priority [/bold reverse]")
         lines.append(f"  [bold {c.primary}]{'Account':.<24}[/bold {c.primary}] {priority_info['account']}")
         lines.append(f"  [bold {c.primary}]{'Raw Shares':.<24}[/bold {c.primary}] {priority_info['raw_shares']}")
         lines.append(f"  [bold {c.primary}]{'Norm Shares':.<24}[/bold {c.primary}] {priority_info['norm_shares']}")
@@ -742,7 +742,7 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Energy consumption section
     if energy_stats:
-        lines.append("\n[bold reverse] ⚡ Energy (6 months) [/bold reverse]")
+        lines.append("\n[bold reverse] Energy (6 months) [/bold reverse]")
         energy_display = _format_energy_wh(energy_stats.total_energy_wh)
         lines.append(
             f"  [bold {c.primary}]{'Total Energy':.<24}[/bold {c.primary}] [{c.accent}]{energy_display}[/{c.accent}]"
@@ -753,7 +753,7 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Pending job priorities section
     if job_priorities:
-        lines.append("\n[bold reverse] 🎯 Pending Job Priorities [/bold reverse]")
+        lines.append("\n[bold reverse] Pending Job Priorities [/bold reverse]")
         lines.append("")
         # Header
         lines.append(
@@ -791,7 +791,7 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Jobs list
     if jobs:
-        lines.append("\n[bold reverse] 📋 Job List [/bold reverse]")
+        lines.append("\n[bold reverse] Job List [/bold reverse]")
         lines.append("")
         # Header
         lines.append(
@@ -862,7 +862,7 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
     c = colors  # Short alias for cleaner formatting
 
     # Account Summary section
-    lines.append("\n[bold reverse] 🏢 Account Summary [/bold reverse]")
+    lines.append("\n[bold reverse] Account Summary [/bold reverse]")
     lines.append(f"  [bold {c.primary}]{'Account Name':.<24}[/bold {c.primary}] [bold]{account_name}[/bold]")
     lines.append(
         f"  [bold {c.primary}]{'Users in Account':.<24}[/bold {c.primary}] [bold]{len(users_in_account)}[/bold]"
@@ -878,7 +878,7 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Account Fair-Share Priority section
     if account_priority:
-        lines.append("\n[bold reverse] ⚖️ Account Fair-Share Priority [/bold reverse]")
+        lines.append("\n[bold reverse] Account Fair-Share Priority [/bold reverse]")
         lines.append(
             f"  [bold {c.primary}]{'Raw Shares':.<24}[/bold {c.primary}] {account_priority.get('raw_shares', 'N/A')}"
         )
@@ -920,7 +920,7 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
         total_nodes += _parse_node_count(nodes_str)
 
     # Resource Usage section
-    lines.append("\n[bold reverse] 💻 Current Resource Usage [/bold reverse]")
+    lines.append("\n[bold reverse] Current Resource Usage [/bold reverse]")
     lines.append(f"  [bold {c.primary}]{'Total CPUs':.<24}[/bold {c.primary}] {total_cpus}")
     lines.append(f"  [bold {c.primary}]{'Total Memory (GB)':.<24}[/bold {c.primary}] {total_memory_gb:.1f}")
     lines.append(f"  [bold {c.primary}]{'Total GPUs':.<24}[/bold {c.primary}] {total_gpus}")
@@ -928,7 +928,7 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Users in Account section
     if users_in_account:
-        lines.append("\n[bold reverse] 👥 Users in Account [/bold reverse]")
+        lines.append("\n[bold reverse] Users in Account [/bold reverse]")
         lines.append("")
         # Header
         lines.append(
@@ -963,7 +963,7 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Pending Job Priorities section
     if job_priorities:
-        lines.append("\n[bold reverse] 🎯 Pending Job Priorities [/bold reverse]")
+        lines.append("\n[bold reverse] Pending Job Priorities [/bold reverse]")
         lines.append("")
         # Header
         lines.append(
@@ -995,7 +995,7 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Running Jobs section
     if running_jobs:
-        lines.append("\n[bold reverse] 📋 Running Jobs [/bold reverse]")
+        lines.append("\n[bold reverse] Running Jobs [/bold reverse]")
         lines.append("")
         # Header
         lines.append(

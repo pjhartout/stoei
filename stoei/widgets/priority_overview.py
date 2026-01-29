@@ -172,7 +172,7 @@ class PriorityOverviewTab(VerticalScroll):
         # Sub-tab header with keyboard shortcuts
         with Horizontal(id="priority-subtab-header"):
             yield Static(
-                "[bold]⚖️  Priority[/bold]  "
+                "[bold]Priority[/bold]  "
                 "[bold reverse] u [/bold reverse]Users  "
                 "[dim]a[/dim] Accounts  "
                 "[dim]j[/dim] Jobs",
@@ -293,7 +293,7 @@ class PriorityOverviewTab(VerticalScroll):
             )
             jobs_style = "[bold reverse] j [/bold reverse]Jobs" if active == "jobs" else "[dim]j[/dim] Jobs"
 
-            header.update(f"[bold]⚖️  Priority[/bold]  {users_style}  {accounts_style}  {jobs_style}")
+            header.update(f"[bold]Priority[/bold]  {users_style}  {accounts_style}  {jobs_style}")
         except Exception as exc:
             logger.debug(f"Failed to update subtab header: {exc}")
 

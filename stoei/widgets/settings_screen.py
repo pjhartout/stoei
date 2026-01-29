@@ -74,7 +74,7 @@ class SettingsScreen(Screen[Settings | None]):
     def compose(self) -> ComposeResult:
         """Compose the settings screen layout."""
         with Vertical(id="settings-container"):
-            yield Static("⚙️  [bold]Settings[/bold]", id="settings-title")
+            yield Static("[bold]Settings[/bold]", id="settings-title")
             yield Static("Theme", classes="settings-label")
             yield Select(
                 [(label, value) for value, label in THEME_LABELS.items()],
@@ -122,9 +122,9 @@ class SettingsScreen(Screen[Settings | None]):
             yield Static("Energy history (months)", classes="settings-label")
             yield Input(str(self._settings.energy_history_months), id="settings-energy-months")
             with Container(id="settings-button-row"):
-                yield Button("💾 Save", variant="primary", id="settings-save")
-                yield Button("🔄 Reload Energy", variant="success", id="settings-reload-energy")
-                yield Button("✕ Cancel", variant="default", id="settings-cancel")
+                yield Button("Save", variant="primary", id="settings-save")
+                yield Button("Reload Energy", variant="success", id="settings-reload-energy")
+                yield Button("Cancel", variant="default", id="settings-cancel")
 
     def on_mount(self) -> None:
         """Focus the first setting control."""

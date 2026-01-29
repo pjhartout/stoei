@@ -218,7 +218,7 @@ class UserOverviewTab(VerticalScroll):
         # Sub-tab header with keyboard shortcuts
         with Horizontal(id="user-subtab-header"):
             yield Static(
-                "[bold]👥 User Overview[/bold]  "
+                "[bold]User Overview[/bold]  "
                 "[bold reverse] r [/bold reverse]Running  "
                 "[dim]p[/dim] Pending  "
                 "[dim]e[/dim] Energy",
@@ -339,7 +339,7 @@ class UserOverviewTab(VerticalScroll):
             pending_style = "[bold reverse] p [/bold reverse]Pending" if active == "pending" else "[dim]p[/dim] Pending"
             energy_style = "[bold reverse] e [/bold reverse]Energy" if active == "energy" else "[dim]e[/dim] Energy"
 
-            header.update(f"[bold]👥 User Overview[/bold]  {running_style}  {pending_style}  {energy_style}")
+            header.update(f"[bold]User Overview[/bold]  {running_style}  {pending_style}  {energy_style}")
         except Exception as exc:
             logger.debug(f"Failed to update subtab header: {exc}")
 
