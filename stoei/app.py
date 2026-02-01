@@ -19,7 +19,13 @@ from textual.worker import Worker, WorkerState
 from stoei.colors import get_theme_colors
 from stoei.keybindings import Actions, KeybindingConfig
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
-from stoei.settings import Settings, load_settings, save_settings
+from stoei.settings import (
+    MAX_SIDEBAR_WIDTH_PERCENT,
+    MIN_SIDEBAR_WIDTH_PERCENT,
+    Settings,
+    load_settings,
+    save_settings,
+)
 from stoei.slurm.array_parser import parse_array_size
 from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
@@ -155,6 +161,9 @@ class SlurmMonitor(App[None]):
         Binding("plus", "column_grow", "Increase Column Width", show=False),
         Binding("minus", "column_shrink", "Decrease Column Width", show=False),
         Binding("0", "column_reset", "Reset Column Width", show=False),
+        # Sidebar controls
+        Binding("}", "sidebar_grow", "Grow Sidebar", show=False),
+        Binding("{", "sidebar_shrink", "Shrink Sidebar", show=False),
     ]
     JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList", "Timeline")
     JOB_TABLE_COLUMN_CONFIGS: ClassVar[list[ColumnConfig]] = [
@@ -278,6 +287,9 @@ class SlurmMonitor(App[None]):
 
         # Jobs table is now set up by FilterableDataTable
         logger.debug("Jobs table ready for data")
+
+        # Apply initial sidebar width from settings
+        self._apply_sidebar_width()
 
         # Show loading screen and start step-by-step loading
         self._loading_screen = LoadingScreen(LOADING_STEPS)
@@ -711,6 +723,75 @@ class SlurmMonitor(App[None]):
         if table and table.reset_selected_column_width():
             self._save_column_widths()
             self.notify("Column width reset", timeout=1)
+
+    def _calculate_sidebar_width(self) -> int:
+        """Calculate sidebar width based on percentage setting and terminal width.
+
+        Returns:
+            Width in characters, clamped to reasonable bounds.
+        """
+        from stoei.widgets.cluster_sidebar import ClusterSidebar
+
+        terminal_width = self.size.width
+        percent = self._settings.sidebar_width_percent
+        calculated_width = int(terminal_width * percent / 100)
+        # Clamp to sidebar min/max
+        return max(ClusterSidebar.MIN_WIDTH, min(ClusterSidebar.MAX_WIDTH, calculated_width))
+
+    def _apply_sidebar_width(self) -> None:
+        """Apply the current sidebar width setting."""
+        try:
+            sidebar = self.query_one("#cluster-sidebar", ClusterSidebar)
+            width = self._calculate_sidebar_width()
+            sidebar.set_width(width)
+        except Exception as exc:
+            logger.debug(f"Failed to apply sidebar width: {exc}")
+
+    def action_sidebar_grow(self) -> None:
+        """Increase sidebar width by 5%."""
+        current_percent = self._settings.sidebar_width_percent
+        new_percent = min(MAX_SIDEBAR_WIDTH_PERCENT, current_percent + 5)
+        if new_percent != current_percent:
+            self._settings = Settings(
+                theme=self._settings.theme,
+                log_level=self._settings.log_level,
+                max_log_lines=self._settings.max_log_lines,
+                refresh_interval=self._settings.refresh_interval,
+                job_history_days=self._settings.job_history_days,
+                log_viewer_lines=self._settings.log_viewer_lines,
+                keybind_mode=self._settings.keybind_mode,
+                keybind_overrides=self._settings.keybind_overrides,
+                energy_loading_enabled=self._settings.energy_loading_enabled,
+                energy_history_months=self._settings.energy_history_months,
+                column_widths=self._settings.column_widths,
+                sidebar_width_percent=new_percent,
+            )
+            save_settings(self._settings)
+            self._apply_sidebar_width()
+            self.notify(f"Sidebar: {new_percent}%", timeout=1)
+
+    def action_sidebar_shrink(self) -> None:
+        """Decrease sidebar width by 5%."""
+        current_percent = self._settings.sidebar_width_percent
+        new_percent = max(MIN_SIDEBAR_WIDTH_PERCENT, current_percent - 5)
+        if new_percent != current_percent:
+            self._settings = Settings(
+                theme=self._settings.theme,
+                log_level=self._settings.log_level,
+                max_log_lines=self._settings.max_log_lines,
+                refresh_interval=self._settings.refresh_interval,
+                job_history_days=self._settings.job_history_days,
+                log_viewer_lines=self._settings.log_viewer_lines,
+                keybind_mode=self._settings.keybind_mode,
+                keybind_overrides=self._settings.keybind_overrides,
+                energy_loading_enabled=self._settings.energy_loading_enabled,
+                energy_history_months=self._settings.energy_history_months,
+                column_widths=self._settings.column_widths,
+                sidebar_width_percent=new_percent,
+            )
+            save_settings(self._settings)
+            self._apply_sidebar_width()
+            self.notify(f"Sidebar: {new_percent}%", timeout=1)
 
     def _save_column_widths(self) -> None:
         """Persist current column widths to settings."""
@@ -2362,6 +2443,8 @@ class SlurmMonitor(App[None]):
     def on_resize(self) -> None:
         """Handle window resize events."""
         self._check_window_size()
+        # Recalculate sidebar width based on new terminal size
+        self._apply_sidebar_width()
 
     async def action_quit(self) -> None:
         """Quit the application."""

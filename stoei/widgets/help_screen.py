@@ -141,6 +141,13 @@ class HelpScreen(Screen[None]):
                 ],
             ),
             self._format_section(
+                "Sidebar",
+                [
+                    (_format_key(kb.get_key(Actions.SIDEBAR_GROW)), "Grow sidebar width"),
+                    (_format_key(kb.get_key(Actions.SIDEBAR_SHRINK)), "Shrink sidebar width"),
+                ],
+            ),
+            self._format_section(
                 "Jobs Tab",
                 [
                     ("↑/↓", "Navigate jobs list"),

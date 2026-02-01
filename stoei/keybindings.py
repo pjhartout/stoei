@@ -71,6 +71,10 @@ class Actions:
     COLUMN_WIDTH_DECREASE = "column_width_decrease"
     COLUMN_WIDTH_RESET = "column_width_reset"
 
+    # Sidebar actions
+    SIDEBAR_GROW = "sidebar_grow"
+    SIDEBAR_SHRINK = "sidebar_shrink"
+
 
 @dataclass
 class KeyBinding:
@@ -180,6 +184,9 @@ def _create_vim_preset() -> KeybindingPreset:
             Actions.COLUMN_WIDTH_INCREASE: KeyBinding("plus", "Increase column width"),
             Actions.COLUMN_WIDTH_DECREASE: KeyBinding("minus", "Decrease column width"),
             Actions.COLUMN_WIDTH_RESET: KeyBinding("0", "Reset column width"),
+            # Sidebar
+            Actions.SIDEBAR_GROW: KeyBinding("}", "Grow sidebar"),
+            Actions.SIDEBAR_SHRINK: KeyBinding("{", "Shrink sidebar"),
         },
     )
 
@@ -241,6 +248,9 @@ def _create_emacs_preset() -> KeybindingPreset:
             Actions.COLUMN_WIDTH_INCREASE: KeyBinding("plus", "Increase column width"),
             Actions.COLUMN_WIDTH_DECREASE: KeyBinding("minus", "Decrease column width"),
             Actions.COLUMN_WIDTH_RESET: KeyBinding("0", "Reset column width"),
+            # Sidebar
+            Actions.SIDEBAR_GROW: KeyBinding("}", "Grow sidebar"),
+            Actions.SIDEBAR_SHRINK: KeyBinding("{", "Shrink sidebar"),
         },
     )
 
