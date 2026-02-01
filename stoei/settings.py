@@ -38,6 +38,11 @@ DEFAULT_JOB_HISTORY_DAYS = 7
 # Energy loading settings
 DEFAULT_ENERGY_HISTORY_MONTHS = 6
 
+# Sidebar width settings (as percentage of terminal width)
+MIN_SIDEBAR_WIDTH_PERCENT = 15
+MAX_SIDEBAR_WIDTH_PERCENT = 50
+DEFAULT_SIDEBAR_WIDTH_PERCENT = 33  # 1/3 of terminal width
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -57,6 +62,8 @@ class Settings:
     energy_history_months: int = DEFAULT_ENERGY_HISTORY_MONTHS
     # Column widths per table: (("jobs", (("name", 30), ("state", 12))), ...)
     column_widths: tuple[tuple[str, tuple[tuple[str, int], ...]], ...] = ()
+    # Sidebar width as percentage of terminal width (default 33% = 1/3)
+    sidebar_width_percent: int = DEFAULT_SIDEBAR_WIDTH_PERCENT
 
     def get_keybindings(self) -> KeybindingConfig:
         """Get the keybinding configuration.
@@ -142,6 +149,15 @@ class Settings:
         # Parse column widths
         column_widths = _parse_column_widths(data.get("column_widths"))
 
+        # Parse sidebar width
+        sidebar_width_percent = _coerce_int(data.get("sidebar_width_percent"))
+        if (
+            sidebar_width_percent is None
+            or sidebar_width_percent < MIN_SIDEBAR_WIDTH_PERCENT
+            or sidebar_width_percent > MAX_SIDEBAR_WIDTH_PERCENT
+        ):
+            sidebar_width_percent = DEFAULT_SIDEBAR_WIDTH_PERCENT
+
         return cls(
             theme=theme,
             log_level=log_level,
@@ -154,6 +170,7 @@ class Settings:
             energy_loading_enabled=energy_loading_enabled,
             energy_history_months=energy_history_months,
             column_widths=column_widths,
+            sidebar_width_percent=sidebar_width_percent,
         )
 
     def to_dict(self) -> dict[str, object]:
@@ -179,6 +196,7 @@ class Settings:
             "energy_loading_enabled": self.energy_loading_enabled,
             "energy_history_months": self.energy_history_months,
             "column_widths": column_widths_dict,
+            "sidebar_width_percent": self.sidebar_width_percent,
         }
 
 

@@ -112,6 +112,10 @@ class ClusterStats:
 class ClusterSidebar(VerticalScroll):
     """Scrollable widget to display cluster load statistics in a sidebar."""
 
+    # Minimum and maximum width in characters
+    MIN_WIDTH = 25
+    MAX_WIDTH = 80
+
     DEFAULT_CSS: ClassVar[str] = """
     ClusterSidebar {
         width: 30;
@@ -153,6 +157,15 @@ class ClusterSidebar(VerticalScroll):
         self._data_loaded: bool = False
         self._content_markup: str = "[bold]Cluster Load[/bold]\n\n[bright_black]Loading cluster data...[/bright_black]"
         self._content_widget: Static | None = None
+
+    def set_width(self, width: int) -> None:
+        """Set the sidebar width in characters.
+
+        Args:
+            width: The width in characters (clamped to MIN_WIDTH..MAX_WIDTH).
+        """
+        clamped_width = max(self.MIN_WIDTH, min(self.MAX_WIDTH, width))
+        self.styles.width = clamped_width
 
     def compose(self) -> ComposeResult:
         """Compose the scrollable content."""
