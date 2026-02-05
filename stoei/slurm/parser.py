@@ -3,12 +3,18 @@
 import re
 from typing import TYPE_CHECKING
 
+from stoei.slurm.gpu_parser import parse_gpu_entries
+
 if TYPE_CHECKING:
     pass
 
 # Constants for parsing
 MIN_SQUEUE_PARTS = 8  # JobID, Name, State, Time, Nodes, NodeList, SubmitTime, StartTime
 MIN_SACCT_PARTS = 10  # JobID, Name, State, Restarts, Elapsed, ExitCode, NodeList, Submit, Start, End
+
+# Pre-compiled regex patterns for TRES parsing (performance optimization)
+_TRES_CPU_PATTERN = re.compile(r"cpu=(\d+)", re.IGNORECASE)
+_TRES_MEM_PATTERN = re.compile(r"mem=(\d+)([GMT])", re.IGNORECASE)
 
 
 def parse_scontrol_output(raw_output: str) -> dict[str, str]:
@@ -260,3 +266,52 @@ def parse_sprio_output(entries: list[tuple[str, ...]]) -> list[dict[str, str]]:
     job_priorities.sort(key=priority_sort_key, reverse=True)
 
     return job_priorities
+
+
+def parse_tres_resources(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
+    """Parse TRES string to extract CPU, memory (GB), and GPU entries.
+
+    This is the canonical TRES parsing function. All TRES parsing should use this
+    function to avoid code duplication.
+
+    Args:
+        tres_str: TRES string in format like "cpu=32,mem=256G,node=4,gres/gpu=16"
+            or "cpu=32,mem=256G,node=4,gres/gpu:h200=8".
+
+    Returns:
+        Tuple of (cpus, memory_gb, gpu_entries) where gpu_entries is a list of
+        (gpu_type, gpu_count) tuples.
+    """
+    cpus = 0
+    memory_gb = 0.0
+
+    if not tres_str or tres_str.strip() == "":
+        return cpus, memory_gb, []
+
+    # Parse CPU count (using pre-compiled pattern)
+    cpu_match = _TRES_CPU_PATTERN.search(tres_str)
+    if cpu_match:
+        try:
+            cpus = int(cpu_match.group(1))
+        except ValueError:
+            cpus = 0
+
+    # Parse memory (can be in G, M, or T) - using pre-compiled pattern
+    mem_match = _TRES_MEM_PATTERN.search(tres_str)
+    if mem_match:
+        try:
+            mem_value = int(mem_match.group(1))
+            mem_unit = mem_match.group(2).upper()
+            if mem_unit == "G":
+                memory_gb = float(mem_value)
+            elif mem_unit == "M":
+                memory_gb = mem_value / 1024.0
+            elif mem_unit == "T":
+                memory_gb = mem_value * 1024.0
+        except ValueError:
+            memory_gb = 0.0
+
+    # Parse GPU entries using the existing gpu_parser function
+    gpu_entries = parse_gpu_entries(tres_str)
+
+    return cpus, memory_gb, gpu_entries

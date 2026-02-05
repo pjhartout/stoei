@@ -130,6 +130,7 @@ class JobCache:
         self._initialized = True
         self._data_lock = Lock()
         self._jobs: list[Job] = []
+        self._jobs_by_id: dict[str, Job] = {}  # O(1) lookup index
         self._total_jobs: int = 0
         self._total_requeues: int = 0
         self._max_requeues: int = 0
@@ -236,9 +237,13 @@ class JobCache:
             )
             jobs.append(job)
 
+        # Build job ID index for O(1) lookups
+        jobs_by_id = {job.job_id: job for job in jobs}
+
         # Update cache atomically
         with self._data_lock:
             self._jobs = jobs
+            self._jobs_by_id = jobs_by_id
             self._total_jobs = total_jobs
             self._total_requeues = total_requeues
             self._max_requeues = max_requeues
@@ -293,12 +298,9 @@ class JobCache:
             return [j for j in self._jobs if j.is_active]
 
     def get_job_by_id(self, job_id: str) -> Job | None:
-        """Get a specific job by ID."""
+        """Get a specific job by ID (O(1) lookup)."""
         with self._data_lock:
-            for job in self._jobs:
-                if job.job_id == job_id:
-                    return job
-        return None
+            return self._jobs_by_id.get(job_id)
 
     @classmethod
     def reset(cls) -> None:

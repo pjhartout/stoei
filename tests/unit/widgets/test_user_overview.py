@@ -195,8 +195,10 @@ class TestUserOverviewTab:
 
     def test_parse_tres_with_memory_gb(self) -> None:
         """Test parsing TRES with memory in GB."""
+        from stoei.slurm.parser import parse_tres_resources
+
         tres_str = "cpu=32,mem=256G,node=4,gres/gpu=16"
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
         assert cpus == 32
         assert memory_gb == 256.0
         assert len(gpu_entries) == 1
@@ -204,8 +206,10 @@ class TestUserOverviewTab:
 
     def test_parse_tres_with_memory_mb(self) -> None:
         """Test parsing TRES with memory in MB (converted to GB)."""
+        from stoei.slurm.parser import parse_tres_resources
+
         tres_str = "cpu=8,mem=8192M,node=1,gres/gpu=1"
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
         assert cpus == 8
         assert memory_gb == 8.0  # 8192 MB / 1024 = 8 GB
         assert len(gpu_entries) == 1
@@ -213,16 +217,20 @@ class TestUserOverviewTab:
 
     def test_parse_tres_without_gpus(self) -> None:
         """Test parsing TRES without GPU information."""
+        from stoei.slurm.parser import parse_tres_resources
+
         tres_str = "cpu=16,mem=128G,node=2"
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
         assert cpus == 16
         assert memory_gb == 128.0
         assert len(gpu_entries) == 0
 
     def test_parse_tres_without_memory(self) -> None:
         """Test parsing TRES without memory information."""
+        from stoei.slurm.parser import parse_tres_resources
+
         tres_str = "cpu=32,node=4,gres/gpu=8"
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
         assert cpus == 32
         assert memory_gb == 0.0
         assert len(gpu_entries) == 1
@@ -230,23 +238,29 @@ class TestUserOverviewTab:
 
     def test_parse_tres_empty_string(self) -> None:
         """Test parsing empty TRES string."""
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres("")
+        from stoei.slurm.parser import parse_tres_resources
+
+        cpus, memory_gb, gpu_entries = parse_tres_resources("")
         assert cpus == 0
         assert memory_gb == 0.0
         assert len(gpu_entries) == 0
 
     def test_parse_tres_invalid_format(self) -> None:
         """Test parsing invalid TRES format."""
+        from stoei.slurm.parser import parse_tres_resources
+
         tres_str = "invalid format"
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
         assert cpus == 0
         assert memory_gb == 0.0
         assert len(gpu_entries) == 0
 
     def test_parse_tres_with_gpu_types(self) -> None:
         """Test parsing TRES with GPU type information."""
+        from stoei.slurm.parser import parse_tres_resources
+
         tres_str = "cpu=32,mem=256G,node=4,gres/gpu:h200=8"
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
         assert cpus == 32
         assert memory_gb == 256.0
         assert len(gpu_entries) == 1
@@ -254,8 +268,10 @@ class TestUserOverviewTab:
 
     def test_parse_tres_with_multiple_gpu_types(self) -> None:
         """Test parsing TRES with multiple GPU types."""
+        from stoei.slurm.parser import parse_tres_resources
+
         tres_str = "cpu=32,mem=256G,node=4,gres/gpu:h200=8,gres/gpu:a100=4"
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
         assert cpus == 32
         assert memory_gb == 256.0
         assert len(gpu_entries) == 2

@@ -1,7 +1,5 @@
 """User overview tab widget with sub-tabs for running, pending, and energy views."""
 
-import contextlib
-import re
 from collections import defaultdict
 from dataclasses import dataclass
 from typing import ClassVar, Literal, TypedDict
@@ -27,8 +25,8 @@ from stoei.slurm.gpu_parser import (
     calculate_total_gpus,
     format_gpu_types,
     has_specific_gpu_types,
-    parse_gpu_entries,
 )
+from stoei.slurm.parser import parse_tres_resources
 from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
 from stoei.widgets.screens import EnergyEnableModal
 
@@ -478,48 +476,6 @@ class UserOverviewTab(VerticalScroll):
             logger.debug(f"Failed to update energy period label: {exc}")
 
     @staticmethod
-    def _parse_tres(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
-        """Parse TRES string to extract CPU, memory (GB), and GPU entries.
-
-        Args:
-            tres_str: TRES string in format like "cpu=32,mem=256G,node=4,gres/gpu=16"
-                or "cpu=32,mem=256G,node=4,gres/gpu:h200=8".
-
-        Returns:
-            Tuple of (cpus, memory_gb, gpu_entries) where gpu_entries is a list of
-            (gpu_type, gpu_count) tuples.
-        """
-        cpus = 0
-        memory_gb = 0.0
-
-        if not tres_str or tres_str.strip() == "":
-            return cpus, memory_gb, []
-
-        # Parse CPU count
-        cpu_match = re.search(r"cpu=(\d+)", tres_str)
-        if cpu_match:
-            with contextlib.suppress(ValueError):
-                cpus = int(cpu_match.group(1))
-
-        # Parse memory (can be in G or M)
-        mem_match = re.search(r"mem=(\d+)([GM])", tres_str, re.IGNORECASE)
-        if mem_match:
-            try:
-                mem_value = int(mem_match.group(1))
-                mem_unit = mem_match.group(2).upper()
-                if mem_unit == "G":
-                    memory_gb = float(mem_value)
-                elif mem_unit == "M":
-                    memory_gb = mem_value / 1024.0
-            except ValueError:
-                pass
-
-        # Use shared GPU parser
-        gpu_entries = parse_gpu_entries(tres_str)
-
-        return cpus, memory_gb, gpu_entries
-
-    @staticmethod
     def _parse_node_count(nodes_str: str) -> int:
         """Parse node count from nodes string.
 
@@ -587,7 +543,7 @@ class UserOverviewTab(VerticalScroll):
 
         # Parse TRES for CPU, memory, and GPU information
         tres_str = job[tres_index].strip() if len(job) > tres_index else ""
-        cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
 
         # Use TRES CPU count if available, otherwise estimate from nodes
         if cpus > 0:
@@ -747,7 +703,7 @@ class UserOverviewTab(VerticalScroll):
             if not tres_str:
                 continue
 
-            cpus, memory_gb, gpu_entries = UserOverviewTab._parse_tres(tres_str)
+            cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
             data["pending_cpus"] += cpus * array_size
             data["pending_memory_gb"] += memory_gb * array_size
 

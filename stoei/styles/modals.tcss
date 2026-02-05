@@ -788,8 +788,137 @@ SettingsScreen #settings-cancel:focus {
 }
 
 /* =============================================================================
- * USER INFO SCREEN - Full-screen info viewer
+ * GENERIC INFO SCREEN - Base styles for info viewer screens
+ * Used by NodeInfoScreen, UserInfoScreen, AccountInfoScreen
  * ============================================================================= */
+GenericInfoScreen,
+NodeInfoScreen,
+UserInfoScreen {
+    layout: vertical;
+    background: $background;
+}
+
+GenericInfoScreen > Vertical,
+NodeInfoScreen > Vertical,
+UserInfoScreen > Vertical {
+    width: 100%;
+    height: 100%;
+    padding: 0;
+    background: $panel;
+}
+
+GenericInfoScreen #info-header,
+NodeInfoScreen #info-header,
+UserInfoScreen #info-header {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-bottom: heavy $accent;
+}
+
+GenericInfoScreen #info-title,
+NodeInfoScreen #info-title,
+UserInfoScreen #info-title {
+    width: 100%;
+    content-align: center middle;
+    color: $accent;
+    text-style: bold;
+}
+
+GenericInfoScreen #info-subtitle,
+NodeInfoScreen #info-subtitle,
+UserInfoScreen #info-subtitle {
+    width: 100%;
+    content-align: center middle;
+    color: $text-muted;
+    margin-top: 1;
+}
+
+GenericInfoScreen #info-content,
+NodeInfoScreen #info-content,
+UserInfoScreen #info-content {
+    height: 1fr;
+    padding: 1 2;
+    background: $background;
+}
+
+GenericInfoScreen #info-text,
+NodeInfoScreen #info-text,
+UserInfoScreen #info-text {
+    width: 100%;
+    color: $foreground;
+}
+
+GenericInfoScreen #error-container,
+NodeInfoScreen #error-container,
+UserInfoScreen #error-container {
+    height: 1fr;
+    padding: 2;
+    content-align: center middle;
+    background: $background;
+}
+
+GenericInfoScreen #error-icon,
+NodeInfoScreen #error-icon,
+UserInfoScreen #error-icon {
+    width: 100%;
+    content-align: center middle;
+    color: $error;
+    text-style: bold;
+}
+
+GenericInfoScreen #error-text,
+NodeInfoScreen #error-text,
+UserInfoScreen #error-text {
+    width: 100%;
+    content-align: center middle;
+    color: $error;
+    margin-top: 1;
+}
+
+GenericInfoScreen #info-footer,
+NodeInfoScreen #info-footer,
+UserInfoScreen #info-footer {
+    width: 100%;
+    height: auto;
+    padding: 1 2;
+    background: $panel;
+    border-top: solid $border-muted;
+    layout: horizontal;
+    align: center middle;
+}
+
+GenericInfoScreen #hint-text,
+NodeInfoScreen #hint-text,
+UserInfoScreen #hint-text {
+    width: 1fr;
+    content-align: left middle;
+    color: $text-muted;
+    margin-right: 2;
+}
+
+GenericInfoScreen #close-button,
+NodeInfoScreen #close-button,
+UserInfoScreen #close-button {
+    width: auto;
+    min-width: 16;
+    background: $surface;
+}
+
+GenericInfoScreen #close-button:focus,
+NodeInfoScreen #close-button:focus,
+UserInfoScreen #close-button:focus {
+    border: tall $accent;
+}
+
+GenericInfoScreen #info-content:focus,
+NodeInfoScreen #info-content:focus,
+UserInfoScreen #info-content:focus {
+    border: tall $accent;
+}
+
+/* Legacy ID support for backwards compatibility */
 UserInfoScreen {
     layout: vertical;
     background: $background;

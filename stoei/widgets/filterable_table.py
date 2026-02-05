@@ -15,6 +15,7 @@ from textual.events import Key
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import DataTable, Input, Static
+from textual.widgets.data_table import ColumnKey
 
 from stoei.keybindings import Actions, KeybindingConfig, get_default_config
 from stoei.logger import get_logger
@@ -22,9 +23,10 @@ from stoei.logger import get_logger
 if TYPE_CHECKING:
     from textual.widgets.data_table import CellType, RowKey
 
-from textual.widgets.data_table import ColumnKey
-
 logger = get_logger(__name__)
+
+# Pre-compiled regex pattern for removing Rich markup (performance optimization)
+_RICH_MARKUP_PATTERN = re.compile(r"\[.*?\]")
 
 
 class SortDirection(Enum):
@@ -503,8 +505,8 @@ class FilterableDataTable(Vertical):
             col_idx = self._column_key_to_index.get(col_key)
             if col_idx is not None and col_idx < len(row):
                 cell_value = str(row[col_idx]).lower()
-                # Remove Rich markup for comparison
-                cell_value = re.sub(r"\[.*?\]", "", cell_value)
+                # Remove Rich markup for comparison (using pre-compiled pattern)
+                cell_value = _RICH_MARKUP_PATTERN.sub("", cell_value)
                 if filter_value not in cell_value:
                     return False
 
@@ -513,8 +515,8 @@ class FilterableDataTable(Vertical):
             found = False
             for cell in row:
                 cell_value = str(cell).lower()
-                # Remove Rich markup for comparison
-                cell_value = re.sub(r"\[.*?\]", "", cell_value)
+                # Remove Rich markup for comparison (using pre-compiled pattern)
+                cell_value = _RICH_MARKUP_PATTERN.sub("", cell_value)
                 if self._filter_state.general_filter in cell_value:
                     found = True
                     break
@@ -554,7 +556,7 @@ class FilterableDataTable(Vertical):
             Returns:
                 Cell value as string, with Rich markup removed and whitespace stripped.
             """
-            return re.sub(r"\[.*?\]", "", str(value)).strip()
+            return _RICH_MARKUP_PATTERN.sub("", str(value)).strip()
 
         def try_parse_float(value: str) -> float | None:
             """Try parsing a float from a string.

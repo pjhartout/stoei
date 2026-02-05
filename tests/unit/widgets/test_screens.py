@@ -1466,7 +1466,8 @@ class TestScreensInApp:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            content = screen.query_one("#user-info-content", VerticalScroll)
+            # GenericInfoScreen base class uses #info-content
+            content = screen.query_one("#info-content", VerticalScroll)
             assert content is not None
 
     async def test_node_info_screen_displays_content(self) -> None:
@@ -1482,5 +1483,6 @@ class TestScreensInApp:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            content = screen.query_one("#node-info-content", VerticalScroll)
+            # GenericInfoScreen base class uses #info-content
+            content = screen.query_one("#info-content", VerticalScroll)
             assert content is not None
