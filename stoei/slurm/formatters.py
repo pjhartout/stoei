@@ -131,7 +131,7 @@ def format_value(key: str, value: str, colors: ThemeColors | None = None) -> str
 
     # State coloring
     if key in ("JobState", "State"):
-        base_state = value.split()[0]  # Handle "RUNNING by 12345" etc.
+        base_state = value.split(maxsplit=1)[0]  # Handle "RUNNING by 12345" etc.
         color = _get_state_color(base_state, colors)
         formatted = f"[bold {color}]{value}[/bold {color}]"
     # Exit codes

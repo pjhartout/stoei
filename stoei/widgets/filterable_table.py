@@ -22,6 +22,8 @@ from stoei.logger import get_logger
 if TYPE_CHECKING:
     from textual.widgets.data_table import CellType, RowKey
 
+from textual.widgets.data_table import ColumnKey
+
 logger = get_logger(__name__)
 
 
@@ -816,7 +818,7 @@ class FilterableDataTable(Vertical):
 
         # Get the column from the DataTable
         try:
-            column = table.columns.get(col_config.key)
+            column = table.columns.get(ColumnKey(col_config.key))
             if column is None:
                 logger.warning(f"Column {col_config.key} not found in DataTable")
                 return False
@@ -857,12 +859,13 @@ class FilterableDataTable(Vertical):
         table = self.table
 
         try:
-            column = table.columns.get(col_config.key)
+            column = table.columns.get(ColumnKey(col_config.key))
             if column is None:
                 return False
 
             # Reset to the default width from ColumnConfig
-            column.width = col_config.width
+            # If width is None (auto), use 0 to let DataTable auto-size
+            column.width = col_config.width if col_config.width is not None else 0
             table.refresh()
 
             logger.debug(f"Reset column {col_config.key} to width {col_config.width}")

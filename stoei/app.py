@@ -730,8 +730,6 @@ class SlurmMonitor(App[None]):
         Returns:
             Width in characters, clamped to reasonable bounds.
         """
-        from stoei.widgets.cluster_sidebar import ClusterSidebar
-
         terminal_width = self.size.width
         percent = self._settings.sidebar_width_percent
         calculated_width = int(terminal_width * percent / 100)
