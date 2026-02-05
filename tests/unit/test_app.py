@@ -902,73 +902,82 @@ class TestUpdateUIFromCache:
                 assert str(jobs_table.get_row_at(0)[0]) == "101"
 
 
-class TestParseTresForPending:
-    """Tests for the _parse_tres_for_pending method."""
+class TestParseTresResources:
+    """Tests for the parse_tres_resources function.
 
-    @pytest.fixture(autouse=True)
-    def mock_slurm(self) -> None:
-        """Mock SLURM availability check."""
-        with patch("stoei.app.check_slurm_available", return_value=(True, None)):
-            yield
+    Note: The function is now located in stoei.slurm.parser module.
+    These tests verify the integration point used by the app.
+    """
 
-    @pytest.fixture
-    def app(self) -> SlurmMonitor:
-        """Create a SlurmMonitor instance for testing."""
-        return SlurmMonitor()
-
-    def test_parse_tres_empty_string(self, app: SlurmMonitor) -> None:
+    def test_parse_tres_empty_string(self) -> None:
         """Test parsing empty TRES string."""
-        cpus, memory, gpus = app._parse_tres_for_pending("")
+        from stoei.slurm.parser import parse_tres_resources
+
+        cpus, memory, gpus = parse_tres_resources("")
         assert cpus == 0
         assert memory == 0.0
         assert gpus == []
 
-    def test_parse_tres_cpu_only(self, app: SlurmMonitor) -> None:
+    def test_parse_tres_cpu_only(self) -> None:
         """Test parsing TRES with CPU only."""
-        cpus, memory, gpus = app._parse_tres_for_pending("cpu=32")
+        from stoei.slurm.parser import parse_tres_resources
+
+        cpus, memory, gpus = parse_tres_resources("cpu=32")
         assert cpus == 32
         assert memory == 0.0
         assert gpus == []
 
-    def test_parse_tres_memory_gb(self, app: SlurmMonitor) -> None:
+    def test_parse_tres_memory_gb(self) -> None:
         """Test parsing TRES with memory in GB."""
-        cpus, memory, gpus = app._parse_tres_for_pending("cpu=8,mem=256G")
+        from stoei.slurm.parser import parse_tres_resources
+
+        cpus, memory, gpus = parse_tres_resources("cpu=8,mem=256G")
         assert cpus == 8
         assert memory == 256.0
         assert gpus == []
 
-    def test_parse_tres_memory_mb(self, app: SlurmMonitor) -> None:
+    def test_parse_tres_memory_mb(self) -> None:
         """Test parsing TRES with memory in MB."""
-        cpus, memory, gpus = app._parse_tres_for_pending("cpu=8,mem=2048M")
+        from stoei.slurm.parser import parse_tres_resources
+
+        cpus, memory, gpus = parse_tres_resources("cpu=8,mem=2048M")
         assert cpus == 8
         assert memory == 2.0  # 2048 MB = 2 GB
         assert gpus == []
 
-    def test_parse_tres_memory_tb(self, app: SlurmMonitor) -> None:
+    def test_parse_tres_memory_tb(self) -> None:
         """Test parsing TRES with memory in TB."""
-        cpus, memory, gpus = app._parse_tres_for_pending("cpu=8,mem=2T")
+        from stoei.slurm.parser import parse_tres_resources
+
+        cpus, memory, gpus = parse_tres_resources("cpu=8,mem=2T")
         assert cpus == 8
         assert memory == 2048.0  # 2 TB = 2048 GB
         assert gpus == []
 
-    def test_parse_tres_with_gpus(self, app: SlurmMonitor) -> None:
+    def test_parse_tres_with_gpus(self) -> None:
         """Test parsing TRES with GPUs."""
-        cpus, memory, gpus = app._parse_tres_for_pending("cpu=64,mem=512G,node=8,gres/gpu=32")
+        from stoei.slurm.parser import parse_tres_resources
+
+        cpus, memory, gpus = parse_tres_resources("cpu=64,mem=512G,node=8,gres/gpu=32")
         assert cpus == 64
         assert memory == 512.0
         assert gpus == [("gpu", 32)]
 
-    def test_parse_tres_with_gpu_types(self, app: SlurmMonitor) -> None:
+    def test_parse_tres_with_gpu_types(self) -> None:
         """Test parsing TRES with typed GPUs."""
-        cpus, memory, gpus = app._parse_tres_for_pending("cpu=64,mem=512G,gres/gpu:h200=8")
+        from stoei.slurm.parser import parse_tres_resources
+
+        cpus, memory, gpus = parse_tres_resources("cpu=64,mem=512G,gres/gpu:h200=8")
         assert cpus == 64
         assert memory == 512.0
         assert gpus == [("h200", 8)]
 
-    def test_parse_tres_full_example(self, app: SlurmMonitor) -> None:
+    def test_parse_tres_full_example(self) -> None:
         """Test parsing a full TRES string."""
+        from stoei.slurm.parser import parse_tres_resources
+
         tres = "cpu=768,mem=8000G,node=4,gres/gpu=32"
-        cpus, memory, gpus = app._parse_tres_for_pending(tres)
+        cpus, memory, gpus = parse_tres_resources(tres)
         assert cpus == 768
         assert memory == 8000.0
         assert gpus == [("gpu", 32)]

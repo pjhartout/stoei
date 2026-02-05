@@ -1,8 +1,8 @@
 """Main Textual TUI application for stoei."""
 
-import contextlib
 import re
 import time
+from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar
 
@@ -52,7 +52,7 @@ from stoei.slurm.gpu_parser import (
     parse_gpu_entries,
     parse_gpu_from_gres,
 )
-from stoei.slurm.parser import parse_sprio_output, parse_sshare_output
+from stoei.slurm.parser import parse_sprio_output, parse_sshare_output, parse_tres_resources
 from stoei.slurm.validation import check_slurm_available
 from stoei.slurm.wait_time import calculate_partition_wait_stats
 from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
@@ -750,20 +750,7 @@ class SlurmMonitor(App[None]):
         current_percent = self._settings.sidebar_width_percent
         new_percent = min(MAX_SIDEBAR_WIDTH_PERCENT, current_percent + 5)
         if new_percent != current_percent:
-            self._settings = Settings(
-                theme=self._settings.theme,
-                log_level=self._settings.log_level,
-                max_log_lines=self._settings.max_log_lines,
-                refresh_interval=self._settings.refresh_interval,
-                job_history_days=self._settings.job_history_days,
-                log_viewer_lines=self._settings.log_viewer_lines,
-                keybind_mode=self._settings.keybind_mode,
-                keybind_overrides=self._settings.keybind_overrides,
-                energy_loading_enabled=self._settings.energy_loading_enabled,
-                energy_history_months=self._settings.energy_history_months,
-                column_widths=self._settings.column_widths,
-                sidebar_width_percent=new_percent,
-            )
+            self._settings = replace(self._settings, sidebar_width_percent=new_percent)
             save_settings(self._settings)
             self._apply_sidebar_width()
             self.notify(f"Sidebar: {new_percent}%", timeout=1)
@@ -773,20 +760,7 @@ class SlurmMonitor(App[None]):
         current_percent = self._settings.sidebar_width_percent
         new_percent = max(MIN_SIDEBAR_WIDTH_PERCENT, current_percent - 5)
         if new_percent != current_percent:
-            self._settings = Settings(
-                theme=self._settings.theme,
-                log_level=self._settings.log_level,
-                max_log_lines=self._settings.max_log_lines,
-                refresh_interval=self._settings.refresh_interval,
-                job_history_days=self._settings.job_history_days,
-                log_viewer_lines=self._settings.log_viewer_lines,
-                keybind_mode=self._settings.keybind_mode,
-                keybind_overrides=self._settings.keybind_overrides,
-                energy_loading_enabled=self._settings.energy_loading_enabled,
-                energy_history_months=self._settings.energy_history_months,
-                column_widths=self._settings.column_widths,
-                sidebar_width_percent=new_percent,
-            )
+            self._settings = replace(self._settings, sidebar_width_percent=new_percent)
             save_settings(self._settings)
             self._apply_sidebar_width()
             self.notify(f"Sidebar: {new_percent}%", timeout=1)
@@ -809,23 +783,9 @@ class SlurmMonitor(App[None]):
             existing_widths = dict(self._settings.column_widths)
             existing_widths[active_tab] = tuple(widths.items())
 
-            # Create new settings with updated column_widths
-            new_settings = Settings(
-                theme=self._settings.theme,
-                log_level=self._settings.log_level,
-                max_log_lines=self._settings.max_log_lines,
-                refresh_interval=self._settings.refresh_interval,
-                job_history_days=self._settings.job_history_days,
-                log_viewer_lines=self._settings.log_viewer_lines,
-                keybind_mode=self._settings.keybind_mode,
-                keybind_overrides=self._settings.keybind_overrides,
-                energy_loading_enabled=self._settings.energy_loading_enabled,
-                energy_history_months=self._settings.energy_history_months,
-                column_widths=tuple(existing_widths.items()),
-            )
-
-            self._settings = new_settings
-            save_settings(new_settings)
+            # Create new settings with updated column_widths using replace()
+            self._settings = replace(self._settings, column_widths=tuple(existing_widths.items()))
+            save_settings(self._settings)
             logger.debug(f"Saved column widths for {active_tab}: {widths}")
 
         except Exception as exc:
@@ -1241,49 +1201,6 @@ class SlurmMonitor(App[None]):
                 stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
                 stats.allocated_gpus += gpu_count
 
-    def _parse_tres_for_pending(self, tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
-        """Parse TRES string to extract CPU, memory (GB), and GPU entries.
-
-        Args:
-            tres_str: TRES string in format like "cpu=32,mem=256G,node=4,gres/gpu=16"
-                or "cpu=32,mem=256G,node=4,gres/gpu:h200=8".
-
-        Returns:
-            Tuple of (cpus, memory_gb, gpu_entries) where gpu_entries is a list of
-            (gpu_type, gpu_count) tuples.
-        """
-        cpus = 0
-        memory_gb = 0.0
-
-        if not tres_str or tres_str.strip() == "":
-            return cpus, memory_gb, []
-
-        # Parse CPU count
-        cpu_match = re.search(r"cpu=(\d+)", tres_str)
-        if cpu_match:
-            with contextlib.suppress(ValueError):
-                cpus = int(cpu_match.group(1))
-
-        # Parse memory (can be in G, M, or T)
-        mem_match = re.search(r"mem=(\d+)([GMT])", tres_str, re.IGNORECASE)
-        if mem_match:
-            try:
-                mem_value = int(mem_match.group(1))
-                mem_unit = mem_match.group(2).upper()
-                if mem_unit == "G":
-                    memory_gb = float(mem_value)
-                elif mem_unit == "M":
-                    memory_gb = mem_value / 1024.0
-                elif mem_unit == "T":
-                    memory_gb = mem_value * 1024.0
-            except ValueError:
-                pass
-
-        # Use shared GPU parser
-        gpu_entries = parse_gpu_entries(tres_str)
-
-        return cpus, memory_gb, gpu_entries
-
     def _aggregate_pending_gpus(
         self,
         gpu_entries: list[tuple[str, int]],
@@ -1343,7 +1260,7 @@ class SlurmMonitor(App[None]):
             if len(job) < min_fields_for_tres or not job[tres_index]:
                 continue
 
-            cpus, memory_gb, gpu_entries = self._parse_tres_for_pending(job[tres_index])
+            cpus, memory_gb, gpu_entries = parse_tres_resources(job[tres_index])
             pending_cpus += cpus * array_size
             pending_memory_gb += memory_gb * array_size
             partition_stats.cpus += cpus * array_size

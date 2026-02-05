@@ -3,15 +3,14 @@
 from __future__ import annotations
 
 import math
-import re
 from dataclasses import dataclass
 from datetime import datetime
 from typing import TYPE_CHECKING
 
 from stoei.colors import FALLBACK_COLORS, ThemeColors
 from stoei.slurm.energy import ENERGY_KWH_THRESHOLD, ENERGY_MWH_THRESHOLD
-from stoei.slurm.gpu_parser import calculate_total_gpus, parse_gpu_entries
-from stoei.slurm.parser import parse_scontrol_output
+from stoei.slurm.gpu_parser import calculate_total_gpus
+from stoei.slurm.parser import parse_scontrol_output, parse_tres_resources
 
 if TYPE_CHECKING:
     from stoei.widgets.user_overview import UserEnergyStats, UserPendingStats, UserStats
@@ -573,43 +572,6 @@ def _format_energy_wh(wh: float) -> str:
     return f"{wh:.1f} Wh"
 
 
-def _parse_tres_resources(tres_str: str) -> tuple[int, float, list[tuple[str, int]]]:
-    """Parse CPU, memory (GB), and GPU entries from a TRES string.
-
-    Args:
-        tres_str: TRES string (e.g. "cpu=32,mem=256G,gres/gpu:h200=8").
-
-    Returns:
-        Tuple of (cpus, memory_gb, gpu_entries).
-    """
-    cpus = 0
-    memory_gb = 0.0
-    if not tres_str or tres_str.strip() == "":
-        return cpus, memory_gb, []
-
-    cpu_match = re.search(r"cpu=(\d+)", tres_str, re.IGNORECASE)
-    if cpu_match:
-        try:
-            cpus = int(cpu_match.group(1))
-        except ValueError:
-            cpus = 0
-
-    mem_match = re.search(r"mem=(\d+)([GM])", tres_str, re.IGNORECASE)
-    if mem_match:
-        try:
-            mem_value = int(mem_match.group(1))
-            unit = mem_match.group(2).upper()
-            if unit == "G":
-                memory_gb = float(mem_value)
-            elif unit == "M":
-                memory_gb = mem_value / 1024.0
-        except ValueError:
-            memory_gb = 0.0
-
-    gpu_entries = parse_gpu_entries(tres_str)
-    return cpus, memory_gb, gpu_entries
-
-
 def _parse_node_count(nodes_str: str) -> int:
     """Parse node count from a node count string.
 
@@ -911,7 +873,7 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
             continue
 
         tres_str = job[tres_index].strip()
-        cpus, memory_gb, gpu_entries = _parse_tres_resources(tres_str)
+        cpus, memory_gb, gpu_entries = parse_tres_resources(tres_str)
         total_cpus += cpus
         total_memory_gb += memory_gb
         total_gpus += calculate_total_gpus(gpu_entries)
