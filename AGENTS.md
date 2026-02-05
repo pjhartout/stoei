@@ -79,3 +79,7 @@ I want to have a clear code structure. In the end, I want the main source code f
    ```
 
 **Do NOT ask the user - just run these commands automatically after code changes.**
+
+## Commit Attribution
+
+**IMPORTANT**: AI agents (Claude, Cursor, etc.) should NOT add themselves as co-authors in git commits. Do not use `Co-Authored-By` trailers or any other form of AI attribution in commit messages. Commits should only attribute human contributors.
