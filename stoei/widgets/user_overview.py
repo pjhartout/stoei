@@ -44,6 +44,7 @@ class UserStats:
     total_gpus: int
     total_nodes: int
     gpu_types: str = ""
+    node_names: str = ""
 
 
 class _UserDataDict(TypedDict):
@@ -55,6 +56,7 @@ class _UserDataDict(TypedDict):
     total_gpus: int
     total_nodes: int
     gpu_types: dict[str, int]
+    node_names: set[str]
 
 
 @dataclass
@@ -169,6 +171,7 @@ class UserOverviewTab(VerticalScroll):
         ColumnConfig(name="GPUs", key="gpus", sortable=True, filterable=True),
         ColumnConfig(name="GPU Types", key="gpu_types", sortable=True, filterable=True),
         ColumnConfig(name="Nodes", key="nodes", sortable=True, filterable=True),
+        ColumnConfig(name="NodeList", key="nodelist", sortable=True, filterable=True, width=20),
     ]
 
     PENDING_USERS_COLUMNS: ClassVar[list[ColumnConfig]] = [
@@ -393,6 +396,7 @@ class UserOverviewTab(VerticalScroll):
                     str(user.total_gpus) if user.total_gpus > 0 else "0",
                     gpu_types_display,
                     str(user.total_nodes),
+                    user.node_names if user.node_names else "N/A",
                 )
             )
 
@@ -525,14 +529,16 @@ class UserOverviewTab(VerticalScroll):
         job: tuple[str, ...],
         nodes_index: int,
         tres_index: int,
+        nodelist_index: int = 7,
     ) -> None:
         """Process a single job and update user data.
 
         Args:
             user_data: User data dictionary to update.
             job: Job tuple from squeue.
-            nodes_index: Index of nodes in job tuple.
+            nodes_index: Index of nodes count in job tuple.
             tres_index: Index of TRES in job tuple.
+            nodelist_index: Index of NodeList (actual node names) in job tuple.
         """
         user_data["job_count"] += 1
 
@@ -540,6 +546,13 @@ class UserOverviewTab(VerticalScroll):
         nodes_str = job[nodes_index].strip() if len(job) > nodes_index else "0"
         node_count = UserOverviewTab._parse_node_count(nodes_str)
         user_data["total_nodes"] += node_count
+
+        # Collect actual node names from NodeList field
+        nodelist_str = job[nodelist_index].strip() if len(job) > nodelist_index else ""
+        if nodelist_str and not nodelist_str.startswith("("):
+            node_names = user_data["node_names"]
+            if isinstance(node_names, set):
+                node_names.add(nodelist_str)
 
         # Parse TRES for CPU, memory, and GPU information
         tres_str = job[tres_index].strip() if len(job) > tres_index else ""
@@ -583,6 +596,8 @@ class UserOverviewTab(VerticalScroll):
         user_stats: list[UserStats] = []
         for username, data in user_data.items():
             gpu_types_str = UserOverviewTab._format_gpu_types(data["gpu_types"])
+            node_names = data["node_names"]
+            node_names_str = ",".join(sorted(node_names)) if isinstance(node_names, set) else ""
             user_stats.append(
                 UserStats(
                     username=username,
@@ -592,6 +607,7 @@ class UserOverviewTab(VerticalScroll):
                     total_gpus=int(data["total_gpus"]),
                     total_nodes=int(data["total_nodes"]),
                     gpu_types=gpu_types_str,
+                    node_names=node_names_str,
                 )
             )
         return user_stats
@@ -623,6 +639,7 @@ class UserOverviewTab(VerticalScroll):
                 "total_gpus": 0,
                 "total_nodes": 0,
                 "gpu_types": defaultdict(int),
+                "node_names": set(),
             }
 
         user_data: dict[str, _UserDataDict] = defaultdict(_default_user_data)

@@ -42,6 +42,60 @@ class TestValidateUsername:
         assert result == "Invalid username characters"
 
 
+class TestParseFixedWidthSqueueLine:
+    """Tests for _parse_fixed_width_squeue_line with wider NodeList column."""
+
+    def test_parses_line_with_wide_nodelist(self) -> None:
+        """Test parsing a fixed-width line with 80-char NodeList field."""
+        from stoei.slurm.commands import _parse_fixed_width_squeue_line
+
+        # Build a line matching the format:
+        # JobID:30, Name:50, UserName:15, Partition:15, StateCompact:10, TimeUsed:12, NumNodes:6, NodeList:80, tres:80
+        job_id = "12345".ljust(30)
+        name = "train_model".ljust(50)
+        user = "testuser".ljust(15)
+        partition = "gpu-a100".ljust(15)
+        state = "R".ljust(10)
+        time_used = "1:23:45".ljust(12)
+        num_nodes = "4".ljust(6)
+        node_list = "gpu-node[001-004],cpu-node[010-012]".ljust(80)
+        tres = "cpu=128,mem=512G,gres/gpu:a100=16"
+
+        line = job_id + name + user + partition + state + time_used + num_nodes + node_list + tres
+        result = _parse_fixed_width_squeue_line(line)
+
+        assert result is not None
+        assert result[0] == "12345"
+        assert result[1] == "train_model"
+        assert result[2] == "testuser"
+        assert result[3] == "gpu-a100"
+        assert result[4] == "R"
+        assert result[5] == "1:23:45"
+        assert result[6] == "4"
+        assert result[7] == "gpu-node[001-004],cpu-node[010-012]"
+        assert "cpu=128" in result[8]
+
+    def test_parses_line_with_short_nodelist(self) -> None:
+        """Test parsing a line where NodeList is shorter than 80 chars."""
+        from stoei.slurm.commands import _parse_fixed_width_squeue_line
+
+        job_id = "99999".ljust(30)
+        name = "short_job".ljust(50)
+        user = "alice".ljust(15)
+        partition = "cpu".ljust(15)
+        state = "R".ljust(10)
+        time_used = "0:05:00".ljust(12)
+        num_nodes = "1".ljust(6)
+        node_list = "node01".ljust(80)
+        tres = "cpu=4,mem=16G"
+
+        line = job_id + name + user + partition + state + time_used + num_nodes + node_list + tres
+        result = _parse_fixed_width_squeue_line(line)
+
+        assert result is not None
+        assert result[7] == "node01"
+
+
 class TestGetUserJobs:
     """Tests for get_user_jobs function."""
 

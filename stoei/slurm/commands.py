@@ -553,7 +553,7 @@ def get_node_info(node_name: str) -> tuple[str, str | None]:
 
 # Fixed-width column positions for squeue -O format (all users, includes UserName)
 # Must match format string in get_all_running_jobs():
-#   "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80"
+#   "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,tres:80"
 _SQUEUE_ALL_COL_JOBID_END = 30
 _SQUEUE_ALL_COL_NAME_END = 80
 _SQUEUE_ALL_COL_USER_END = 95
@@ -561,18 +561,18 @@ _SQUEUE_ALL_COL_PARTITION_END = 110
 _SQUEUE_ALL_COL_STATE_END = 120
 _SQUEUE_ALL_COL_TIME_END = 132
 _SQUEUE_ALL_COL_NODES_END = 138
-_SQUEUE_ALL_COL_NODELIST_END = 168
+_SQUEUE_ALL_COL_NODELIST_END = 218
 
 # Fixed-width column positions for squeue -O format (single user, no UserName)
 # Must match format string in get_user_jobs():
-#   "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80"
+#   "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,tres:80"
 _SQUEUE_USER_COL_JOBID_END = 30
 _SQUEUE_USER_COL_NAME_END = 80
 _SQUEUE_USER_COL_PARTITION_END = 95
 _SQUEUE_USER_COL_STATE_END = 105
 _SQUEUE_USER_COL_TIME_END = 117
 _SQUEUE_USER_COL_NODES_END = 123
-_SQUEUE_USER_COL_NODELIST_END = 153
+_SQUEUE_USER_COL_NODELIST_END = 203
 
 
 def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
@@ -649,7 +649,7 @@ def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
     command = [
         squeue,
         "-O",
-        "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
+        "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,tres:80",
         "-a",  # Show all partitions
         "-t",
         "RUNNING,PENDING",
@@ -743,7 +743,7 @@ def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
         "-u",
         username,
         "-O",
-        "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
+        "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,tres:80",
         "-t",
         "RUNNING,PENDING",
         "--noheader",

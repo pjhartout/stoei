@@ -459,6 +459,7 @@ _USER_INFO_MIN_JOB_FIELDS = 6
 _USER_INFO_STATE_INDEX = 3
 _USER_INFO_STATE_WIDTH = 8
 _USER_INFO_NODES_WIDTH = 6
+_USER_INFO_NODELIST_WIDTH = 20
 
 # Display widths for user priority table
 _USER_INFO_PRIORITY_WIDTH = 10
@@ -648,6 +649,10 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
             f"  [bold {c.primary}]{'GPU Types':.<24}[/bold {c.primary}] [{c.accent}]{user_stats.gpu_types}[/{c.accent}]"
         )
     lines.append(f"  [bold {c.primary}]{'Total Nodes':.<24}[/bold {c.primary}] {user_stats.total_nodes}")
+    if user_stats.node_names:
+        lines.append(
+            f"  [bold {c.primary}]{'NodeList':.<24}[/bold {c.primary}] [{c.accent}]{user_stats.node_names}[/{c.accent}]"
+        )
 
     # Jobs by state
     running_count = 0
@@ -763,10 +768,11 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
             f"{'State':<{_USER_INFO_STATE_WIDTH}} "
             f"{'Partition':<{_USER_INFO_PARTITION_WIDTH}} "
             f"{'Time':<{_USER_INFO_TIME_WIDTH}} "
-            f"{'Nodes':<{_USER_INFO_NODES_WIDTH}}"
+            f"{'Nodes':<{_USER_INFO_NODES_WIDTH}} "
+            f"{'NodeList':<{_USER_INFO_NODELIST_WIDTH}}"
             "[/dim]"
         )
-        lines.append(f"  [dim]{'─' * 70}[/dim]")
+        lines.append(f"  [dim]{'─' * 92}[/dim]")
 
         for job in jobs:
             if len(job) < _USER_INFO_MIN_JOB_FIELDS:
@@ -778,6 +784,12 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
             state = job[3]
             time_used = job[4][:_USER_INFO_TIME_WIDTH] if len(job[4]) > _USER_INFO_TIME_WIDTH else job[4]
             nodes = job[5]
+            nodelist_index = 6
+            nodelist = (
+                job[nodelist_index][:_USER_INFO_NODELIST_WIDTH]
+                if len(job) > nodelist_index and len(job[nodelist_index]) > _USER_INFO_NODELIST_WIDTH
+                else (job[nodelist_index] if len(job) > nodelist_index else "")
+            )
 
             # Color-code the state
             state_upper = state.strip().upper()
@@ -787,7 +799,10 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
             else:
                 state_display = f"{state:<{_USER_INFO_STATE_WIDTH}}"
 
-            lines.append(f"  {job_id:<12} {name:<15} {state_display} {partition:<12} {time_used:<10} {nodes:<6}")
+            lines.append(
+                f"  {job_id:<12} {name:<15} {state_display} {partition:<12} "
+                f"{time_used:<10} {nodes:<6} {nodelist:<{_USER_INFO_NODELIST_WIDTH}}"
+            )
     else:
         lines.append("\n[italic]No active jobs found for this user.[/italic]")
 
