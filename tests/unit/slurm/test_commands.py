@@ -3,7 +3,7 @@
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from stoei.slurm.commands import _validate_username
+from stoei.slurm.commands import _parse_fixed_width_squeue_line, _validate_username
 
 
 class TestValidateUsername:
@@ -47,8 +47,6 @@ class TestParseFixedWidthSqueueLine:
 
     def test_parses_line_with_wide_nodelist(self) -> None:
         """Test parsing a fixed-width line with 80-char NodeList field."""
-        from stoei.slurm.commands import _parse_fixed_width_squeue_line
-
         # Build a line matching the format:
         # JobID:30, Name:50, UserName:15, Partition:15, StateCompact:10, TimeUsed:12, NumNodes:6, NodeList:80, tres:80
         job_id = "12345".ljust(30)
@@ -77,8 +75,6 @@ class TestParseFixedWidthSqueueLine:
 
     def test_parses_line_with_short_nodelist(self) -> None:
         """Test parsing a line where NodeList is shorter than 80 chars."""
-        from stoei.slurm.commands import _parse_fixed_width_squeue_line
-
         job_id = "99999".ljust(30)
         name = "short_job".ljust(50)
         user = "alice".ljust(15)

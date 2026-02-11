@@ -529,7 +529,7 @@ class UserOverviewTab(VerticalScroll):
         job: tuple[str, ...],
         nodes_index: int,
         tres_index: int,
-        nodelist_index: int = 7,
+        nodelist_index: int,
     ) -> None:
         """Process a single job and update user data.
 
@@ -628,6 +628,7 @@ class UserOverviewTab(VerticalScroll):
         min_job_fields = 8  # Minimum: JobID, Name, User, Partition, State, Time, Nodes, NodeList
         username_index = 2
         nodes_index = 6
+        nodelist_index = 7
         tres_index = 8  # Optional 9th field
 
         def _default_user_data() -> _UserDataDict:
@@ -657,6 +658,7 @@ class UserOverviewTab(VerticalScroll):
                 job,
                 nodes_index,
                 tres_index,
+                nodelist_index,
             )
 
         return UserOverviewTab._convert_to_user_stats(user_data)

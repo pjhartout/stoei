@@ -785,11 +785,8 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
             time_used = job[4][:_USER_INFO_TIME_WIDTH] if len(job[4]) > _USER_INFO_TIME_WIDTH else job[4]
             nodes = job[5]
             nodelist_index = 6
-            nodelist = (
-                job[nodelist_index][:_USER_INFO_NODELIST_WIDTH]
-                if len(job) > nodelist_index and len(job[nodelist_index]) > _USER_INFO_NODELIST_WIDTH
-                else (job[nodelist_index] if len(job) > nodelist_index else "")
-            )
+            nodelist = job[nodelist_index] if len(job) > nodelist_index else ""
+            nodelist = nodelist[:_USER_INFO_NODELIST_WIDTH]
 
             # Color-code the state
             state_upper = state.strip().upper()
