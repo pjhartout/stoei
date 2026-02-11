@@ -27,7 +27,7 @@ def normalize_array_job_id(job_id: str) -> str:
     """
     if not job_id:
         return job_id
-    return job_id.split("_[")[0] if "_[" in job_id else job_id
+    return job_id.split("_[", maxsplit=1)[0] if "_[" in job_id else job_id
 
 
 def parse_array_size(job_id: str) -> int:
