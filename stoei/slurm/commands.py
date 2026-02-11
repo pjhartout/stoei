@@ -376,7 +376,7 @@ def get_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
         "-u",
         username,
         "-o",
-        "%.10i|%.15j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S",
+        "%.30i|%.50j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S",
     ]
     logger.debug(f"Running squeue command for user {username}")
 
@@ -552,15 +552,15 @@ def get_node_info(node_name: str) -> tuple[str, str | None]:
 
 
 # Fixed-width column positions for squeue -O format
-# Format: JobID:20,Name:20,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
-_SQUEUE_COL_JOBID_END = 20
-_SQUEUE_COL_NAME_END = 40
-_SQUEUE_COL_USER_END = 55
-_SQUEUE_COL_PARTITION_END = 70
-_SQUEUE_COL_STATE_END = 80
-_SQUEUE_COL_TIME_END = 92
-_SQUEUE_COL_NODES_END = 98
-_SQUEUE_COL_NODELIST_END = 128
+# Format: JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
+_SQUEUE_COL_JOBID_END = 30
+_SQUEUE_COL_NAME_END = 80
+_SQUEUE_COL_USER_END = 95
+_SQUEUE_COL_PARTITION_END = 110
+_SQUEUE_COL_STATE_END = 120
+_SQUEUE_COL_TIME_END = 132
+_SQUEUE_COL_NODES_END = 138
+_SQUEUE_COL_NODELIST_END = 168
 
 
 def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
@@ -616,7 +616,7 @@ def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
     command = [
         squeue,
         "-O",
-        "JobID:20,Name:20,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
+        "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
         "-a",  # Show all partitions
         "-t",
         "RUNNING,PENDING",
@@ -709,7 +709,7 @@ def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
         "-u",
         username,
         "-O",
-        "JobID:20,Name:20,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
+        "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80",
         "-t",
         "RUNNING,PENDING",
         "--noheader",
@@ -729,13 +729,13 @@ def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
     lines = result.stdout.strip().split("\n")
 
     # Column positions for user jobs (similar to get_all_running_jobs but without username)
-    col_jobid_end = 20
-    col_name_end = 40
-    col_partition_end = 55
-    col_state_end = 65
-    col_time_end = 77
-    col_nodes_end = 83
-    col_nodelist_end = 113
+    col_jobid_end = 30
+    col_name_end = 80
+    col_partition_end = 95
+    col_state_end = 105
+    col_time_end = 117
+    col_nodes_end = 123
+    col_nodelist_end = 153
 
     for line in lines:
         if not line.strip():

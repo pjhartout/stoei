@@ -167,7 +167,7 @@ class SlurmMonitor(App[None]):
     ]
     JOB_TABLE_COLUMNS: ClassVar[tuple[str, ...]] = ("JobID", "Name", "State", "Time", "Nodes", "NodeList", "Timeline")
     JOB_TABLE_COLUMN_CONFIGS: ClassVar[list[ColumnConfig]] = [
-        ColumnConfig(name="JobID", key="jobid", sortable=True, filterable=True, width=12),
+        ColumnConfig(name="JobID", key="jobid", sortable=True, filterable=True, width=20),
         ColumnConfig(name="Name", key="name", sortable=True, filterable=True, width=30),  # Wider to fix truncation
         ColumnConfig(name="State", key="state", sortable=True, filterable=True, width=12),
         ColumnConfig(name="Time", key="time", sortable=True, filterable=True, width=12),
@@ -1842,8 +1842,11 @@ class SlurmMonitor(App[None]):
         Args:
             job_id: The SLURM job ID to fetch.
         """
-        job_info, error = get_job_info(job_id)
-        stdout_path, stderr_path, _ = get_job_log_paths(job_id)
+        # Normalize array range notation to base job ID for scontrol/sacct queries
+        # e.g., "2135097_[3952-4331%500]" -> "2135097"
+        query_id = job_id.split("_[")[0] if "_[" in job_id else job_id
+        job_info, error = get_job_info(query_id)
+        stdout_path, stderr_path, _ = get_job_log_paths(query_id)
         # Schedule UI update on main thread
         self.call_from_thread(
             lambda: self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
