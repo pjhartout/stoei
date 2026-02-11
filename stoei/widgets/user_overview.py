@@ -517,9 +517,8 @@ class UserOverviewTab(VerticalScroll):
         gpu_counts = aggregate_gpu_counts(gpu_entries)
 
         gpu_types_dict = user_data["gpu_types"]
-        if isinstance(gpu_types_dict, dict):
-            for gpu_type, count in gpu_counts.items():
-                gpu_types_dict[gpu_type] += count
+        for gpu_type, count in gpu_counts.items():
+            gpu_types_dict[gpu_type] += count
 
         user_data["total_gpus"] += calculate_total_gpus(gpu_entries)
 
@@ -550,9 +549,7 @@ class UserOverviewTab(VerticalScroll):
         # Collect actual node names from NodeList field
         nodelist_str = job[nodelist_index].strip() if len(job) > nodelist_index else ""
         if nodelist_str and not nodelist_str.startswith("("):
-            node_names = user_data["node_names"]
-            if isinstance(node_names, set):
-                node_names.add(nodelist_str)
+            user_data["node_names"].add(nodelist_str)
 
         # Parse TRES for CPU, memory, and GPU information
         tres_str = job[tres_index].strip() if len(job) > tres_index else ""
@@ -596,8 +593,7 @@ class UserOverviewTab(VerticalScroll):
         user_stats: list[UserStats] = []
         for username, data in user_data.items():
             gpu_types_str = UserOverviewTab._format_gpu_types(data["gpu_types"])
-            node_names = data["node_names"]
-            node_names_str = ",".join(sorted(node_names)) if isinstance(node_names, set) else ""
+            node_names_str = ",".join(sorted(data["node_names"]))
             user_stats.append(
                 UserStats(
                     username=username,
@@ -730,9 +726,7 @@ class UserOverviewTab(VerticalScroll):
             for gpu_type, gpu_count in gpu_entries:
                 scaled_count = gpu_count * array_size
                 data["pending_gpus"] += scaled_count
-                gpu_types_dict = data["gpu_types"]
-                if isinstance(gpu_types_dict, dict):
-                    gpu_types_dict[gpu_type] += scaled_count
+                data["gpu_types"][gpu_type] += scaled_count
 
         # Convert to UserPendingStats list
         result: list[UserPendingStats] = []
