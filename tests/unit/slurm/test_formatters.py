@@ -681,3 +681,62 @@ class TestFormatUserInfo:
 
         assert "12345" in result
         # 12346 should not appear in job list (but may appear in count)
+
+    def test_format_includes_nodelist_in_summary(self) -> None:
+        """Test that NodeList appears in User Summary when node_names is set."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=2,
+            total_cpus=32,
+            total_memory_gb=128.0,
+            total_gpus=4,
+            total_nodes=3,
+            gpu_types="4x A100",
+            node_names="gpu01,gpu[02-03]",
+        )
+        jobs: list[tuple[str, ...]] = []
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        assert "NodeList" in result
+        assert "gpu01,gpu[02-03]" in result
+
+    def test_format_excludes_nodelist_when_empty(self) -> None:
+        """Test that NodeList line is not shown when node_names is empty."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=8,
+            total_memory_gb=32.0,
+            total_gpus=0,
+            total_nodes=1,
+        )
+        jobs: list[tuple[str, ...]] = []
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        # NodeList should not appear as a summary label when node_names is empty
+        lines = result.split("\n")
+        assert not any("NodeList" in line and ".." in line for line in lines)
+
+    def test_format_includes_nodelist_per_job(self) -> None:
+        """Test that NodeList appears in Job List rows."""
+        user_stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=8,
+            total_memory_gb=32.0,
+            total_gpus=1,
+            total_nodes=1,
+            node_names="gpu01",
+        )
+        jobs: list[tuple[str, ...]] = [
+            ("12345", "train_model", "gpu-a100", "R", "1:30:00", "1", "gpu01", "cpu=8,mem=32G"),
+        ]
+
+        result = format_user_info("testuser", user_stats, jobs)
+
+        # The Job List header should include NodeList
+        assert "NodeList" in result
+        # The job row should contain the node name
+        assert "gpu01" in result

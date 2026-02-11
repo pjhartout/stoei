@@ -500,6 +500,73 @@ class TestUserOverviewTab:
         assert result[0].total_gpus == 8  # Only h200, generic is skipped
         assert result[0].gpu_types == "8x H200"
 
+    def test_aggregate_user_stats_collects_node_names(self) -> None:
+        """Test that node names are collected from NodeList field."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "2", "gpu[01-02]"),
+            ("12346", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "cpu10"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].node_names == "cpu10,gpu[01-02]"
+
+    def test_aggregate_user_stats_deduplicates_nodes(self) -> None:
+        """Test that duplicate NodeList values are deduplicated."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "gpu01"),
+            ("12346", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "gpu01"),
+            ("12347", "job3", "user1", "gpu", "RUNNING", "0:15:00", "1", "gpu02"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].node_names == "gpu01,gpu02"
+
+    def test_aggregate_user_stats_filters_pending_reasons(self) -> None:
+        """Test that pending reason strings like (Resources) are excluded from node_names."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "gpu01"),
+            ("12346", "job2", "user1", "gpu", "PENDING", "0:00:00", "1", "(Resources)"),
+            ("12347", "job3", "user1", "gpu", "PENDING", "0:00:00", "1", "(Priority)"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].node_names == "gpu01"
+
+    def test_aggregate_user_stats_empty_nodelist(self) -> None:
+        """Test that empty NodeList produces empty node_names."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", ""),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].node_names == ""
+
+    def test_aggregate_user_stats_node_names_multiple_users(self) -> None:
+        """Test node_names aggregation across multiple users."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "gpu01"),
+            ("12346", "job2", "user2", "gpu", "RUNNING", "0:30:00", "2", "gpu[02-03]"),
+            ("12347", "job3", "user1", "gpu", "RUNNING", "0:15:00", "1", "cpu01"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 2
+        user1 = next(u for u in result if u.username == "user1")
+        user2 = next(u for u in result if u.username == "user2")
+        assert user1.node_names == "cpu01,gpu01"
+        assert user2.node_names == "gpu[02-03]"
+
+    def test_user_stats_node_names_default(self) -> None:
+        """Test that UserStats has empty node_names by default."""
+        stats = UserStats(
+            username="testuser",
+            job_count=1,
+            total_cpus=4,
+            total_memory_gb=16.0,
+            total_gpus=0,
+            total_nodes=1,
+        )
+        assert stats.node_names == ""
+
 
 class TestUserPendingStats:
     """Tests for the UserPendingStats dataclass."""
