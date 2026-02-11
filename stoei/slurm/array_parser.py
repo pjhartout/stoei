@@ -3,6 +3,33 @@
 import re
 
 
+def normalize_array_job_id(job_id: str) -> str:
+    """Extract base job ID from array range notation.
+
+    Strips bracket-based array range notation that scontrol/sacct
+    cannot accept, while preserving single array task IDs.
+
+    Args:
+        job_id: SLURM job ID string (may include array notation).
+
+    Returns:
+        Base job ID without array range brackets.
+
+    Examples:
+        >>> normalize_array_job_id("12345")
+        '12345'
+        >>> normalize_array_job_id("12345_5")
+        '12345_5'
+        >>> normalize_array_job_id("12345_[0-99]")
+        '12345'
+        >>> normalize_array_job_id("2135097_[3952-4331%500]")
+        '2135097'
+    """
+    if not job_id:
+        return job_id
+    return job_id.split("_[")[0] if "_[" in job_id else job_id
+
+
 def parse_array_size(job_id: str) -> int:
     """Parse job ID and return array size (1 for non-array jobs).
 

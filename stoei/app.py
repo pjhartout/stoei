@@ -26,7 +26,7 @@ from stoei.settings import (
     load_settings,
     save_settings,
 )
-from stoei.slurm.array_parser import parse_array_size
+from stoei.slurm.array_parser import normalize_array_job_id, parse_array_size
 from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
     cancel_job,
@@ -1842,9 +1842,7 @@ class SlurmMonitor(App[None]):
         Args:
             job_id: The SLURM job ID to fetch.
         """
-        # Normalize array range notation to base job ID for scontrol/sacct queries
-        # e.g., "2135097_[3952-4331%500]" -> "2135097"
-        query_id = job_id.split("_[")[0] if "_[" in job_id else job_id
+        query_id = normalize_array_job_id(job_id)
         job_info, error = get_job_info(query_id)
         stdout_path, stderr_path, _ = get_job_log_paths(query_id)
         # Schedule UI update on main thread

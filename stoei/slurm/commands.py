@@ -551,16 +551,28 @@ def get_node_info(node_name: str) -> tuple[str, str | None]:
         return "", f"Error: {exc}"
 
 
-# Fixed-width column positions for squeue -O format
-# Format: JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80
-_SQUEUE_COL_JOBID_END = 30
-_SQUEUE_COL_NAME_END = 80
-_SQUEUE_COL_USER_END = 95
-_SQUEUE_COL_PARTITION_END = 110
-_SQUEUE_COL_STATE_END = 120
-_SQUEUE_COL_TIME_END = 132
-_SQUEUE_COL_NODES_END = 138
-_SQUEUE_COL_NODELIST_END = 168
+# Fixed-width column positions for squeue -O format (all users, includes UserName)
+# Must match format string in get_all_running_jobs():
+#   "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80"
+_SQUEUE_ALL_COL_JOBID_END = 30
+_SQUEUE_ALL_COL_NAME_END = 80
+_SQUEUE_ALL_COL_USER_END = 95
+_SQUEUE_ALL_COL_PARTITION_END = 110
+_SQUEUE_ALL_COL_STATE_END = 120
+_SQUEUE_ALL_COL_TIME_END = 132
+_SQUEUE_ALL_COL_NODES_END = 138
+_SQUEUE_ALL_COL_NODELIST_END = 168
+
+# Fixed-width column positions for squeue -O format (single user, no UserName)
+# Must match format string in get_user_jobs():
+#   "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:30,tres:80"
+_SQUEUE_USER_COL_JOBID_END = 30
+_SQUEUE_USER_COL_NAME_END = 80
+_SQUEUE_USER_COL_PARTITION_END = 95
+_SQUEUE_USER_COL_STATE_END = 105
+_SQUEUE_USER_COL_TIME_END = 117
+_SQUEUE_USER_COL_NODES_END = 123
+_SQUEUE_USER_COL_NODELIST_END = 153
 
 
 def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
@@ -572,25 +584,45 @@ def _parse_fixed_width_squeue_line(line: str) -> tuple[str, ...] | None:
     Returns:
         Tuple of (job_id, name, user, partition, state, time_used, num_nodes, node_list, tres) or None.
     """
-    if len(line) < _SQUEUE_COL_JOBID_END:
+    if len(line) < _SQUEUE_ALL_COL_JOBID_END:
         return None
 
-    job_id = line[0:_SQUEUE_COL_JOBID_END].strip()
+    job_id = line[0:_SQUEUE_ALL_COL_JOBID_END].strip()
     if not job_id:
         return None
 
-    name = line[_SQUEUE_COL_JOBID_END:_SQUEUE_COL_NAME_END].strip() if len(line) > _SQUEUE_COL_JOBID_END else ""
-    user = line[_SQUEUE_COL_NAME_END:_SQUEUE_COL_USER_END].strip() if len(line) > _SQUEUE_COL_NAME_END else ""
-    partition = line[_SQUEUE_COL_USER_END:_SQUEUE_COL_PARTITION_END].strip() if len(line) > _SQUEUE_COL_USER_END else ""
+    name = (
+        line[_SQUEUE_ALL_COL_JOBID_END:_SQUEUE_ALL_COL_NAME_END].strip()
+        if len(line) > _SQUEUE_ALL_COL_JOBID_END
+        else ""
+    )
+    user = (
+        line[_SQUEUE_ALL_COL_NAME_END:_SQUEUE_ALL_COL_USER_END].strip() if len(line) > _SQUEUE_ALL_COL_NAME_END else ""
+    )
+    partition = (
+        line[_SQUEUE_ALL_COL_USER_END:_SQUEUE_ALL_COL_PARTITION_END].strip()
+        if len(line) > _SQUEUE_ALL_COL_USER_END
+        else ""
+    )
     state = (
-        line[_SQUEUE_COL_PARTITION_END:_SQUEUE_COL_STATE_END].strip() if len(line) > _SQUEUE_COL_PARTITION_END else ""
+        line[_SQUEUE_ALL_COL_PARTITION_END:_SQUEUE_ALL_COL_STATE_END].strip()
+        if len(line) > _SQUEUE_ALL_COL_PARTITION_END
+        else ""
     )
-    time_used = line[_SQUEUE_COL_STATE_END:_SQUEUE_COL_TIME_END].strip() if len(line) > _SQUEUE_COL_STATE_END else ""
-    num_nodes = line[_SQUEUE_COL_TIME_END:_SQUEUE_COL_NODES_END].strip() if len(line) > _SQUEUE_COL_TIME_END else ""
+    time_used = (
+        line[_SQUEUE_ALL_COL_STATE_END:_SQUEUE_ALL_COL_TIME_END].strip()
+        if len(line) > _SQUEUE_ALL_COL_STATE_END
+        else ""
+    )
+    num_nodes = (
+        line[_SQUEUE_ALL_COL_TIME_END:_SQUEUE_ALL_COL_NODES_END].strip() if len(line) > _SQUEUE_ALL_COL_TIME_END else ""
+    )
     node_list = (
-        line[_SQUEUE_COL_NODES_END:_SQUEUE_COL_NODELIST_END].strip() if len(line) > _SQUEUE_COL_NODES_END else ""
+        line[_SQUEUE_ALL_COL_NODES_END:_SQUEUE_ALL_COL_NODELIST_END].strip()
+        if len(line) > _SQUEUE_ALL_COL_NODES_END
+        else ""
     )
-    tres = line[_SQUEUE_COL_NODELIST_END:].strip() if len(line) > _SQUEUE_COL_NODELIST_END else ""
+    tres = line[_SQUEUE_ALL_COL_NODELIST_END:].strip() if len(line) > _SQUEUE_ALL_COL_NODELIST_END else ""
 
     return (job_id, name, user, partition, state, time_used, num_nodes, node_list, tres)
 
@@ -613,6 +645,7 @@ def get_all_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
 
     # Use -O format which supports Tres field directly
     # This eliminates the need for per-job scontrol calls
+    # Column widths must match _SQUEUE_ALL_COL_* constants
     command = [
         squeue,
         "-O",
@@ -704,6 +737,7 @@ def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
         return [], "squeue not found"
 
     # Use -O format which supports Tres field directly
+    # Column widths must match _SQUEUE_USER_COL_* constants
     command = [
         squeue,
         "-u",
@@ -728,33 +762,48 @@ def get_user_jobs(username: str) -> tuple[list[tuple[str, ...]], str | None]:
     jobs: list[tuple[str, ...]] = []
     lines = result.stdout.strip().split("\n")
 
-    # Column positions for user jobs (similar to get_all_running_jobs but without username)
-    col_jobid_end = 30
-    col_name_end = 80
-    col_partition_end = 95
-    col_state_end = 105
-    col_time_end = 117
-    col_nodes_end = 123
-    col_nodelist_end = 153
-
     for line in lines:
         if not line.strip():
             continue
 
-        if len(line) < col_jobid_end:
+        if len(line) < _SQUEUE_USER_COL_JOBID_END:
             continue
 
-        job_id = line[0:col_jobid_end].strip()
+        job_id = line[0:_SQUEUE_USER_COL_JOBID_END].strip()
         if not job_id:
             continue
 
-        name = line[col_jobid_end:col_name_end].strip() if len(line) > col_jobid_end else ""
-        partition = line[col_name_end:col_partition_end].strip() if len(line) > col_name_end else ""
-        state = line[col_partition_end:col_state_end].strip() if len(line) > col_partition_end else ""
-        time_used = line[col_state_end:col_time_end].strip() if len(line) > col_state_end else ""
-        num_nodes = line[col_time_end:col_nodes_end].strip() if len(line) > col_time_end else ""
-        node_list = line[col_nodes_end:col_nodelist_end].strip() if len(line) > col_nodes_end else ""
-        tres = line[col_nodelist_end:].strip() if len(line) > col_nodelist_end else ""
+        name = (
+            line[_SQUEUE_USER_COL_JOBID_END:_SQUEUE_USER_COL_NAME_END].strip()
+            if len(line) > _SQUEUE_USER_COL_JOBID_END
+            else ""
+        )
+        partition = (
+            line[_SQUEUE_USER_COL_NAME_END:_SQUEUE_USER_COL_PARTITION_END].strip()
+            if len(line) > _SQUEUE_USER_COL_NAME_END
+            else ""
+        )
+        state = (
+            line[_SQUEUE_USER_COL_PARTITION_END:_SQUEUE_USER_COL_STATE_END].strip()
+            if len(line) > _SQUEUE_USER_COL_PARTITION_END
+            else ""
+        )
+        time_used = (
+            line[_SQUEUE_USER_COL_STATE_END:_SQUEUE_USER_COL_TIME_END].strip()
+            if len(line) > _SQUEUE_USER_COL_STATE_END
+            else ""
+        )
+        num_nodes = (
+            line[_SQUEUE_USER_COL_TIME_END:_SQUEUE_USER_COL_NODES_END].strip()
+            if len(line) > _SQUEUE_USER_COL_TIME_END
+            else ""
+        )
+        node_list = (
+            line[_SQUEUE_USER_COL_NODES_END:_SQUEUE_USER_COL_NODELIST_END].strip()
+            if len(line) > _SQUEUE_USER_COL_NODES_END
+            else ""
+        )
+        tres = line[_SQUEUE_USER_COL_NODELIST_END:].strip() if len(line) > _SQUEUE_USER_COL_NODELIST_END else ""
 
         jobs.append((job_id, name, partition, state, time_used, num_nodes, node_list, tres))
 
