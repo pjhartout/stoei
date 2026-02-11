@@ -1,6 +1,6 @@
 """Tests for array job parsing utilities."""
 
-from stoei.slurm.array_parser import parse_array_size
+from stoei.slurm.array_parser import normalize_array_job_id, parse_array_size
 
 
 class TestParseArraySize:
@@ -79,6 +79,41 @@ class TestParseArraySize:
         # Pending array notation
         assert parse_array_size("47700_[0-49]") == 50
         assert parse_array_size("47700_[0-99%10]") == 100
+
+
+class TestNormalizeArrayJobId:
+    """Tests for normalize_array_job_id function."""
+
+    def test_regular_job_id(self) -> None:
+        """Regular job ID passes through unchanged."""
+        assert normalize_array_job_id("12345") == "12345"
+        assert normalize_array_job_id("2135097") == "2135097"
+
+    def test_single_array_task_unchanged(self) -> None:
+        """Single array task IDs pass through unchanged."""
+        assert normalize_array_job_id("12345_5") == "12345_5"
+        assert normalize_array_job_id("12345_0") == "12345_0"
+        assert normalize_array_job_id("2135097_42") == "2135097_42"
+
+    def test_array_range_notation(self) -> None:
+        """Array range notation is stripped to base job ID."""
+        assert normalize_array_job_id("12345_[0-99]") == "12345"
+        assert normalize_array_job_id("2135097_[3952-4331%500]") == "2135097"
+        assert normalize_array_job_id("12345_[1,3,5,7-10]") == "12345"
+
+    def test_empty_string(self) -> None:
+        """Empty string returns empty string."""
+        assert normalize_array_job_id("") == ""
+
+    def test_malformed_bracket(self) -> None:
+        """Malformed bracket notation still extracts base ID."""
+        assert normalize_array_job_id("12345_[") == "12345"
+        assert normalize_array_job_id("12345_[]") == "12345"
+
+    def test_real_world_pending_array(self) -> None:
+        """Real-world pending array job IDs from squeue."""
+        assert normalize_array_job_id("47700_[0-49]") == "47700"
+        assert normalize_array_job_id("47700_[0-99%10]") == "47700"
 
 
 class TestEdgeCases:
