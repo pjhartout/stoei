@@ -53,7 +53,7 @@ from stoei.slurm.gpu_parser import (
     parse_gpu_from_gres,
 )
 from stoei.slurm.parser import parse_sprio_output, parse_sshare_output, parse_tres_resources
-from stoei.slurm.validation import check_slurm_available
+from stoei.slurm.validation import check_slurm_available, get_current_username
 from stoei.slurm.wait_time import calculate_partition_wait_stats
 from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats, PendingPartitionStats
@@ -191,6 +191,7 @@ class SlurmMonitor(App[None]):
         self._job_cache: JobCache = JobCache()
         self._refresh_worker: Worker[None] | None = None
         self._initial_load_complete: bool = False
+        self._current_username: str = get_current_username()
         self._log_sink_id: int | None = None
         self._cluster_nodes: list[dict[str, str]] = []
         self._all_users_jobs: list[tuple[str, ...]] = []
@@ -237,6 +238,7 @@ class SlurmMonitor(App[None]):
                 with Container(id="tab-jobs-content", classes="tab-content"):
                     with Horizontal(id="jobs-header"):
                         yield Static("[bold]My Jobs[/bold]", id="jobs-title")
+                    yield Static("My Usage: No running jobs", id="my-usage-summary")
                     yield FilterableDataTable(
                         columns=self.JOB_TABLE_COLUMN_CONFIGS,
                         keybind_mode=self._settings.keybind_mode,
@@ -1051,6 +1053,9 @@ class SlurmMonitor(App[None]):
             except Exception:
                 logger.exception("Failed to find jobs table")
 
+        # Always update the My Usage banner (lives on the Jobs tab)
+        self._update_my_usage_summary(self._cached_running_user_stats)
+
         # Update cluster sidebar
         self._update_cluster_sidebar()
 
@@ -1519,6 +1524,36 @@ class SlurmMonitor(App[None]):
         user_tab.update_pending_users(self._cached_pending_user_stats)
         if self._cached_energy_user_stats:
             user_tab.update_energy_users(self._cached_energy_user_stats)
+        self._update_my_usage_summary(self._cached_running_user_stats)
+
+    def _update_my_usage_summary(self, users: list[UserStats]) -> None:
+        """Update the 'My Usage' banner on the Jobs tab.
+
+        Args:
+            users: List of all running user statistics.
+        """
+        try:
+            summary = self.query_one("#my-usage-summary", Static)
+        except Exception:
+            return
+
+        my_stats = next((u for u in users if u.username == self._current_username), None)
+        if my_stats is None:
+            summary.update("My Usage: No running jobs")
+            return
+
+        parts = [
+            f"{my_stats.total_cpus} CPUs",
+            f"{my_stats.total_memory_gb:.1f} GB RAM",
+        ]
+        if my_stats.total_gpus > 0:
+            gpu_label = f"{my_stats.total_gpus} GPUs"
+            if my_stats.gpu_types:
+                gpu_label += f" ({my_stats.gpu_types})"
+            parts.append(gpu_label)
+        parts.append(f"{my_stats.total_nodes} Nodes")
+
+        summary.update(f"My Usage: {' | '.join(parts)}")
 
     def _apply_priority_overview_from_cache(self) -> None:
         """Apply cached priority overview data to the UI (main thread only)."""

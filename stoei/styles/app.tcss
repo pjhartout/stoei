@@ -92,6 +92,14 @@ Footer > .footer--description {
     background: $panel;
 }
 
+#my-usage-summary {
+    height: 1;
+    width: 100%;
+    background: $panel;
+    color: $text;
+    text-style: bold;
+}
+
 /* DataTable styling */
 #jobs_table {
     height: 1fr;

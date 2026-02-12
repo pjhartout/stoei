@@ -7,6 +7,7 @@ from stoei.widgets.user_overview import (
     UserPendingStats,
     UserStats,
 )
+from textual.widgets import Static
 
 
 class TestUserStats:
@@ -1003,3 +1004,122 @@ class TestUserOverviewSubtabs:
             assert len(user_tab.energy_users) == 2
             assert user_tab.energy_users[0].username == "user1"
             assert user_tab.energy_users[1].username == "user2"
+
+
+class TestUpdateMyUsageSummary:
+    """Tests for _update_my_usage_summary on SlurmMonitor app."""
+
+    async def test_my_usage_with_running_jobs(self) -> None:
+        """Test banner shows correct stats when user has running jobs."""
+        from unittest.mock import patch
+
+        from stoei.app import SlurmMonitor
+
+        app = SlurmMonitor()
+        app._current_username = "alice"
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                users = [
+                    UserStats(
+                        username="alice",
+                        job_count=3,
+                        total_cpus=64,
+                        total_memory_gb=512.0,
+                        total_gpus=4,
+                        total_nodes=3,
+                        gpu_types="2x H200, 2x A100",
+                    ),
+                    UserStats(
+                        username="bob",
+                        job_count=1,
+                        total_cpus=8,
+                        total_memory_gb=32.0,
+                        total_gpus=0,
+                        total_nodes=1,
+                    ),
+                ]
+                app._update_my_usage_summary(users)
+                summary = app.query_one("#my-usage-summary", Static)
+                text = summary.content
+                assert "64 CPUs" in text
+                assert "512.0 GB RAM" in text
+                assert "4 GPUs (2x H200, 2x A100)" in text
+                assert "3 Nodes" in text
+
+    async def test_my_usage_no_running_jobs(self) -> None:
+        """Test banner shows 'No running jobs' when user is not in the list."""
+        from unittest.mock import patch
+
+        from stoei.app import SlurmMonitor
+
+        app = SlurmMonitor()
+        app._current_username = "alice"
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                users = [
+                    UserStats(
+                        username="bob",
+                        job_count=1,
+                        total_cpus=8,
+                        total_memory_gb=32.0,
+                        total_gpus=0,
+                        total_nodes=1,
+                    ),
+                ]
+                app._update_my_usage_summary(users)
+                summary = app.query_one("#my-usage-summary", Static)
+                assert "No running jobs" in summary.content
+
+    async def test_my_usage_no_gpus(self) -> None:
+        """Test banner omits GPU section when user has no GPUs."""
+        from unittest.mock import patch
+
+        from stoei.app import SlurmMonitor
+
+        app = SlurmMonitor()
+        app._current_username = "alice"
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                users = [
+                    UserStats(
+                        username="alice",
+                        job_count=2,
+                        total_cpus=16,
+                        total_memory_gb=64.0,
+                        total_gpus=0,
+                        total_nodes=1,
+                    ),
+                ]
+                app._update_my_usage_summary(users)
+                summary = app.query_one("#my-usage-summary", Static)
+                text = summary.content
+                assert "16 CPUs" in text
+                assert "64.0 GB RAM" in text
+                assert "GPU" not in text
+                assert "1 Nodes" in text
+
+    async def test_my_usage_with_empty_user_list(self) -> None:
+        """Test banner shows 'No running jobs' when user list is empty."""
+        from unittest.mock import patch
+
+        from stoei.app import SlurmMonitor
+
+        app = SlurmMonitor()
+        app._current_username = "alice"
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                app._update_my_usage_summary([])
+                summary = app.query_one("#my-usage-summary", Static)
+                assert "No running jobs" in summary.content
