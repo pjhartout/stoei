@@ -26,7 +26,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47441",
         "rope_pct_llama_",
-        "afkhan",
+        "user1",
         "gpu",
         "PENDING",
         "0:00",
@@ -37,7 +37,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47434",
         "rope_pct_llama_",
-        "afkhan",
+        "user1",
         "gpu",
         "PENDING",
         "0:00",
@@ -72,7 +72,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47587",
         "sam3_multigpu",
-        "flkar",
+        "user2",
         "gpu",
         "RUNNING",
         "5:29:36",
@@ -83,7 +83,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47474_5",
         "sdvae_sit_b_2_r",
-        "xichen",
+        "user3",
         "gpu",
         "RUNNING",
         "18:29",
@@ -94,7 +94,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47475_2",
         "sdvae_sit_b_2_r",
-        "xichen",
+        "user3",
         "gpu",
         "RUNNING",
         "32:59",
@@ -105,7 +105,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47429",
         "train",
-        "rmaser",
+        "user4",
         "gpu",
         "RUNNING",
         "12:30:07",
@@ -116,7 +116,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "46043",
         "foldmae",
-        "dchen",
+        "user5",
         "gpu",
         "RUNNING",
         "12:58:54",
@@ -127,7 +127,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47537",
         "foldmae",
-        "dchen",
+        "user5",
         "gpu",
         "PENDING",
         "0:00",
@@ -138,7 +138,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47670",
         "17_imagenet128_",
-        "bpogodzi",
+        "user6",
         "gpu",
         "PENDING",
         "0:00",
@@ -149,7 +149,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47671",
         "17_imagenet128_",
-        "bpogodzi",
+        "user6",
         "gpu",
         "PENDING",
         "0:00",
@@ -160,7 +160,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47462_11",
         "decomposed_rep_",
-        "jvanders",
+        "user7",
         "gpu",
         "RUNNING",
         "4:28",
@@ -171,7 +171,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47458_11",
         "decomposed_rep_",
-        "jvanders",
+        "user7",
         "RUNNING",
         "8:59",
         "1",
@@ -181,7 +181,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47461_11",
         "lora_rep_rope_f",
-        "jvanders",
+        "user7",
         "RUNNING",
         "8:59",
         "1",
@@ -191,20 +191,20 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47457_11",
         "lora_rep_rope_r",
-        "jvanders",
+        "user7",
         "RUNNING",
         "12:29",
         "1",
         "daisg101",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
-    ("47466_2", "train", "rmaser", "RUNNING", "10:10:41", "1", "daisg108", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
-    ("47466_3", "train", "rmaser", "RUNNING", "10:10:41", "1", "daisg109", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
-    ("47466_4", "train", "rmaser", "RUNNING", "10:10:41", "1", "daisg110", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
+    ("47466_2", "train", "user4", "RUNNING", "10:10:41", "1", "daisg108", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
+    ("47466_3", "train", "user4", "RUNNING", "10:10:41", "1", "daisg109", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
+    ("47466_4", "train", "user4", "RUNNING", "10:10:41", "1", "daisg110", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
     (
         "47649_8",
         "pat_commonsense",
-        "adhikar",
+        "user8",
         "RUNNING",
         "2:18:57",
         "1",
@@ -214,7 +214,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47649_6",
         "pat_commonsense",
-        "adhikar",
+        "user8",
         "RUNNING",
         "2:28:06",
         "1",
@@ -224,7 +224,7 @@ MOCK_JOBS_ALL_USERS = [
     (
         "47649_0",
         "pat_commonsense",
-        "adhikar",
+        "user8",
         "RUNNING",
         "2:28:32",
         "1",

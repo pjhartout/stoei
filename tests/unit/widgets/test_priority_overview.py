@@ -253,7 +253,7 @@ class TestPriorityOverviewTab:
 
             sshare_data = [
                 ("physics", "", "100", "0.25", "100000", "0.15", "0.15", "0.85"),
-                ("physics", "alice", "50", "0.125", "50000", "0.075", "0.15", "0.85"),
+                ("physics", "user10", "50", "0.125", "50000", "0.075", "0.15", "0.85"),
                 ("chemistry", "", "100", "0.25", "200000", "0.30", "0.30", "0.70"),
             ]
 
@@ -276,8 +276,8 @@ class TestPriorityOverviewTab:
             priority_tab = app.query_one("#priority-overview", PriorityOverviewTab)
 
             sprio_data = [
-                ("12345", "alice", "physics", "1500", "100", "800", "200", "300", "100"),
-                ("12346", "bob", "chemistry", "1200", "80", "600", "150", "270", "100"),
+                ("12345", "user10", "physics", "1500", "100", "800", "200", "300", "100"),
+                ("12346", "user11", "chemistry", "1200", "80", "600", "150", "270", "100"),
             ]
 
             priority_tab.update_from_sprio_data(sprio_data)
