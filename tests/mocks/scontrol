@@ -73,12 +73,12 @@ DEFAULT_JOB = """JobId={job_id} JobName=unknown_job
 
 
 # Real node data from current cluster
-MOCK_NODES_OUTPUT = """NodeName=daisg101 Arch=x86_64 CoresPerSocket=48
+MOCK_NODES_OUTPUT = """NodeName=gpu-node-01 Arch=x86_64 CoresPerSocket=48
    CPUAlloc=144 CPUEfctv=192 CPUTot=192 CPULoad=23.90
    AvailableFeatures=emeraldrapids,mem2T,gpu
    ActiveFeatures=emeraldrapids,mem2T,gpu
    Gres=gpu:h200:8(S:0-1)
-   NodeAddr=daisg101 NodeHostName=daisg101 Version=24.11.6
+   NodeAddr=gpu-node-01 NodeHostName=gpu-node-01 Version=24.11.6
    OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75)
    RealMemory=2000000 AllocMem=650000 FreeMem=1982929 Sockets=2 Boards=1
    State=MIXED+PLANNED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
@@ -89,12 +89,12 @@ MOCK_NODES_OUTPUT = """NodeName=daisg101 Arch=x86_64 CoresPerSocket=48
    AllocTRES=cpu=144,mem=650000M,gres/gpu=6,gres/gpu:h200=6
    CurrentWatts=0 AveWatts=0
 
-NodeName=daisg102 Arch=x86_64 CoresPerSocket=48
+NodeName=gpu-node-02 Arch=x86_64 CoresPerSocket=48
    CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=16.45
    AvailableFeatures=emeraldrapids,mem2T,gpu
    ActiveFeatures=emeraldrapids,mem2T,gpu
    Gres=gpu:h200:8(S:0-1)
-   NodeAddr=daisg102 NodeHostName=daisg102 Version=24.11.6
+   NodeAddr=gpu-node-02 NodeHostName=gpu-node-02 Version=24.11.6
    OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75)
    RealMemory=2000000 AllocMem=1050000 FreeMem=1903607 Sockets=2 Boards=1
    State=ALLOCATED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
@@ -105,12 +105,12 @@ NodeName=daisg102 Arch=x86_64 CoresPerSocket=48
    AllocTRES=cpu=192,mem=1050000M,gres/gpu=8,gres/gpu:h200=8
    CurrentWatts=0 AveWatts=0
 
-NodeName=daisg103 Arch=x86_64 CoresPerSocket=48
+NodeName=gpu-node-03 Arch=x86_64 CoresPerSocket=48
    CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=6.39
    AvailableFeatures=emeraldrapids,mem2T,gpu
    ActiveFeatures=emeraldrapids,mem2T,gpu
    Gres=gpu:h200:8(S:0-1)
-   NodeAddr=daisg103 NodeHostName=daisg103 Version=24.11.6
+   NodeAddr=gpu-node-03 NodeHostName=gpu-node-03 Version=24.11.6
    OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75)
    RealMemory=2000000 AllocMem=500000 FreeMem=1989378 Sockets=2 Boards=1
    State=ALLOCATED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
@@ -121,12 +121,12 @@ NodeName=daisg103 Arch=x86_64 CoresPerSocket=48
    AllocTRES=cpu=192,mem=500000M,gres/gpu=8,gres/gpu:h200=8
    CurrentWatts=0 AveWatts=0
 
-NodeName=daisg104 Arch=x86_64 CoresPerSocket=48
+NodeName=gpu-node-04 Arch=x86_64 CoresPerSocket=48
    CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=16.62
    AvailableFeatures=emeraldrapids,mem2T,gpu
    ActiveFeatures=emeraldrapids,mem2T,gpu
    Gres=gpu:h200:8(S:0-1)
-   NodeAddr=daisg104 NodeHostName=daisg104 Version=24.11.6
+   NodeAddr=gpu-node-04 NodeHostName=gpu-node-04 Version=24.11.6
    OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75)
    RealMemory=2000000 AllocMem=2000000 FreeMem=1916923 Sockets=2 Boards=1
    State=ALLOCATED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
@@ -137,12 +137,12 @@ NodeName=daisg104 Arch=x86_64 CoresPerSocket=48
    AllocTRES=cpu=192,mem=2000000M,gres/gpu=8,gres/gpu:h200=8
    CurrentWatts=0 AveWatts=0
 
-NodeName=daisg105 Arch=x86_64 CoresPerSocket=48
+NodeName=gpu-node-05 Arch=x86_64 CoresPerSocket=48
    CPUAlloc=144 CPUEfctv=192 CPUTot=192 CPULoad=15.01
    AvailableFeatures=emeraldrapids,mem2T,gpu
    ActiveFeatures=emeraldrapids,mem2T,gpu
    Gres=gpu:h200:8(S:0-1)
-   NodeAddr=daisg105 NodeHostName=daisg105 Version=24.11.6
+   NodeAddr=gpu-node-05 NodeHostName=gpu-node-05 Version=24.11.6
    OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75)
    RealMemory=2000000 AllocMem=482768 FreeMem=1882824 Sockets=2 Boards=1
    State=MIXED+PLANNED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A
@@ -153,12 +153,12 @@ NodeName=daisg105 Arch=x86_64 CoresPerSocket=48
    AllocTRES=cpu=144,mem=482768M,gres/gpu=6,gres/gpu:h200=6
    CurrentWatts=0 AveWatts=0
 
-NodeName=daisg106 Arch=x86_64 CoresPerSocket=48
+NodeName=gpu-node-06 Arch=x86_64 CoresPerSocket=48
    CPUAlloc=192 CPUEfctv=192 CPUTot=192 CPULoad=3.14
    AvailableFeatures=emeraldrapids,mem2T,gpu
    ActiveFeatures=emeraldrapids,mem2T,gpu
    Gres=gpu:h200:8(S:0-1)
-   NodeAddr=daisg106 NodeHostName=daisg106 Version=24.11.6
+   NodeAddr=gpu-node-06 NodeHostName=gpu-node-06 Version=24.11.6
    OS=Linux 6.4.0-150600.23.70-default #1 SMP PREEMPT_DYNAMIC Wed Sep 10 10:54:24 UTC 2025 (225af75)
    RealMemory=2000000 AllocMem=2000000 FreeMem=1222744 Sockets=2 Boards=1
    State=ALLOCATED ThreadsPerCore=2 TmpDisk=0 Weight=1 Owner=N/A MCS_label=N/A

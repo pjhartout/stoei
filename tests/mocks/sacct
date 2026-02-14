@@ -127,6 +127,28 @@ MOCK_HISTORY = [
     ),
 ]
 
+# Mock energy history data for --allusers queries
+# Format: (JobID, User, Elapsed, NCPUS, AllocTRES, State)
+MOCK_ENERGY_DATA = [
+    ("50001", "user1", "12:30:00", "64", "cpu=64,mem=512G,gres/gpu=32", "COMPLETED"),
+    ("50002", "user1", "8:15:00", "64", "cpu=64,mem=512G,gres/gpu=32", "COMPLETED"),
+    ("50003", "user2", "24:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50004", "user2", "6:45:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50005", "user3", "48:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50006", "user3", "36:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50007", "user3", "12:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50008", "user4", "72:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50009", "user4", "24:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50010", "user5", "168:00:00", "768", "cpu=768,mem=8000G,gres/gpu=32", "COMPLETED"),
+    ("50011", "user5", "96:00:00", "768", "cpu=768,mem=8000G,gres/gpu=32", "COMPLETED"),
+    ("50012", "user6", "4:30:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50013", "user7", "18:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50014", "user7", "12:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50015", "user7", "6:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50016", "user8", "10:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+    ("50017", "user8", "8:00:00", "192", "cpu=192,mem=2000G,gres/gpu=8", "COMPLETED"),
+]
+
 # Mock wait time data for --allusers queries
 # Format: (JobID, Partition, State, Submit, Start)
 MOCK_WAIT_TIME_DATA = [
@@ -139,6 +161,14 @@ MOCK_WAIT_TIME_DATA = [
     ("12351", "gpu-h200", "COMPLETED", "2024-01-15T09:00:00", "2024-01-15T09:45:00"),
     ("12352", "gpu-a100", "PENDING", "2024-01-15T10:50:00", "Unknown"),
 ]
+
+
+def output_energy_format(noheader: bool) -> None:
+    """Output energy format data (JobID,User,Elapsed,NCPUS,AllocTRES,State)."""
+    if not noheader:
+        print("JobID|User|Elapsed|NCPUS|AllocTRES|State")
+    for job in MOCK_ENERGY_DATA:
+        print("|".join(job))
 
 
 def output_wait_time_format(noheader: bool) -> None:
@@ -170,12 +200,15 @@ def main() -> None:
     parser.add_argument("-j", "--jobs", default=None)
     args = parser.parse_args()
 
-    # Check if this is a wait time query (--allusers with specific format)
+    # Route to the appropriate output based on query format
     format_str = args.format or ""
     is_wait_time_query = args.allusers and "Submit" in format_str and "Start" in format_str
+    is_energy_query = args.allusers and "AllocTRES" in format_str and "User" in format_str
 
     if is_wait_time_query:
         output_wait_time_format(args.noheader)
+    elif is_energy_query:
+        output_energy_format(args.noheader)
     else:
         output_standard_format(args.noheader)
 
