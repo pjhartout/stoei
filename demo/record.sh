@@ -1,6 +1,8 @@
 #!/bin/bash
 # Record VHS demo tapes and add animated captions with ffmpeg.
 #
+# Pipeline: VHS → raw MP4 → captioned MP4 → GIF (two-pass palette)
+#
 # Usage:
 #   ./demo/record.sh            # Record all 6 demo tapes
 #   ./demo/record.sh jobs       # Record a specific tape by name
@@ -40,29 +42,30 @@ caption_filter() {
     echo "drawtext=text='${text}':fontsize=${FONT_SIZE}:fontcolor=${FONT_COLOR}:box=1:boxcolor=${BOX_COLOR}:boxborderw=${BOX_BORDER}:x=(w-text_w)/2:y=16:enable='between(t,${start},${end})'"
 }
 
-# Add animated captions to a raw MP4
-# Args: $1=input_mp4 $2=output_mp4 $3...=caption filters joined with comma
-add_captions() {
+# Convert MP4 to GIF using two-pass palette for quality
+# Args: $1=input_mp4 $2=output_gif
+mp4_to_gif() {
     local input="$1" output="$2"
-    shift 2
-    local filters="$*"
+    local palette
+    palette="$(mktemp /tmp/palette-XXXXXX.png)"
 
-    if [ -z "$filters" ]; then
-        # No captions — just copy
-        cp "$input" "$output"
-        return
-    fi
+    # Pass 1: generate optimal palette
+    ffmpeg -y -i "$input" -vf "fps=15,scale=-1:-1:flags=lanczos,palettegen=stats_mode=diff" "$palette" 2>/dev/null
 
-    ffmpeg -y -i "$input" -vf "$filters" -c:v libx264 -preset fast -crf 18 -an "$output"
+    # Pass 2: encode GIF with palette
+    ffmpeg -y -i "$input" -i "$palette" -lavfi "fps=15,scale=-1:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=bayer:bayer_scale=5" "$output" 2>/dev/null
+
+    rm -f "$palette"
 }
 
-# Record a single tape and add captions
+# Record a single tape, add captions, and produce GIF
 record_tape() {
     local tape="$1"
     local name
     name="$(basename "$tape" .tape)"
     local raw_mp4="$DEMO_DIR/${name}-raw.mp4"
-    local final_mp4="$DEMO_DIR/${name}.mp4"
+    local captioned_mp4="$DEMO_DIR/${name}.mp4"
+    local final_gif="$DEMO_DIR/${name}.gif"
 
     echo "Recording: $name"
 
@@ -74,17 +77,28 @@ record_tape() {
     vhs "$tmp_tape"
     rm -f "$tmp_tape"
 
+    # Add captions to MP4
     if [ "$ADD_CAPTIONS" = "true" ]; then
         local filters
         filters="$(get_captions "$name")"
-        echo "Adding captions to: $name"
-        add_captions "$raw_mp4" "$final_mp4" "$filters"
-        rm -f "$raw_mp4"
+        if [ -n "$filters" ]; then
+            echo "  Adding captions..."
+            ffmpeg -y -i "$raw_mp4" -vf "$filters" -c:v libx264 -preset fast -crf 18 -an "$captioned_mp4" 2>/dev/null
+        else
+            cp "$raw_mp4" "$captioned_mp4"
+        fi
     else
-        mv "$raw_mp4" "$final_mp4"
+        cp "$raw_mp4" "$captioned_mp4"
     fi
 
-    echo "Done: demo/${name}.mp4"
+    # Convert to GIF
+    echo "  Converting to GIF..."
+    mp4_to_gif "$captioned_mp4" "$final_gif"
+
+    # Clean up intermediate files
+    rm -f "$raw_mp4" "$captioned_mp4"
+
+    echo "  Done: demo/${name}.gif"
 }
 
 # Map tape names to their caption filters

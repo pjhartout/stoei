@@ -8,27 +8,27 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes every 5 seconds and s
 
 ### Install & Launch
 
-<video src="demo/install.mp4" autoplay loop muted playsinline></video>
+![Install & Launch](demo/install.gif)
 
 ### Jobs
 
-<video src="demo/jobs.mp4" autoplay loop muted playsinline></video>
+![Jobs](demo/jobs.gif)
 
 ### Nodes
 
-<video src="demo/nodes.mp4" autoplay loop muted playsinline></video>
+![Nodes](demo/nodes.gif)
 
 ### Users
 
-<video src="demo/users.mp4" autoplay loop muted playsinline></video>
+![Users](demo/users.gif)
 
 ### Priority
 
-<video src="demo/priority.mp4" autoplay loop muted playsinline></video>
+![Priority](demo/priority.gif)
 
 ### Filtering
 
-<video src="demo/filtering.mp4" autoplay loop muted playsinline></video>
+![Filtering](demo/filtering.gif)
 
 ## Features
 
