@@ -7,7 +7,7 @@ Set FontSize 14
 Set Width 1400
 Set Height 800
 Set Framerate 30
-Set PlaybackSpeed 1.5
+Set PlaybackSpeed 1.0
 Set TypingSpeed 30ms
 Set Theme "nord"
 Set WindowBar Colorful
