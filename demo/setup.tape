@@ -1,13 +1,10 @@
 # Common setup for all demo tapes - Source this at the top
 # Sets up PATH for homebrew/uv, mock SLURM commands, and nord theme
 #
-# NOTE: Update the paths below if your project or homebrew location differs
+# Assumes record.sh has already cd'd to the project root
 
 Hide
 Type "export PATH=/opt/homebrew/bin:$PATH"
-Enter
-Sleep 0.3s
-Type "cd /Users/pjh/Documents/Git/stoei"
 Enter
 Sleep 0.3s
 Type "export PATH=$PWD/tests/mocks:$PATH"

@@ -26,20 +26,9 @@ FONT_SIZE = 14
 BAR_Y = 38  # below the window bar
 
 
-def get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
-    """Load a monospace font, falling back to default if unavailable."""
-    font_paths = [
-        "/System/Library/Fonts/SFMono-Regular.otf",
-        "/System/Library/Fonts/Menlo.ttc",
-        "/System/Library/Fonts/Monaco.dfont",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf",
-    ]
-    for path in font_paths:
-        try:
-            return ImageFont.truetype(path, size)
-        except OSError:
-            continue
-    return ImageFont.load_default()
+def get_font(size: int) -> ImageFont.FreeTypeFont:
+    """Load a scalable font at the given size (cross-platform)."""
+    return ImageFont.load_default(size=size)
 
 
 def add_captions(
