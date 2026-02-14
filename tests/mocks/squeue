@@ -77,7 +77,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "5:29:36",
         "1",
-        "daisg106",
+        "gpu-node-06",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -88,7 +88,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "18:29",
         "1",
-        "daisg114",
+        "gpu-node-14",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -99,7 +99,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "32:59",
         "1",
-        "daisg104",
+        "gpu-node-04",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -110,7 +110,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "12:30:07",
         "1",
-        "daisg116",
+        "gpu-node-16",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -121,7 +121,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "12:58:54",
         "4",
-        "daisg[111-113,115]",
+        "gpu-node-[11-13,15]",
         "cpu=768,mem=8000G,node=4,gres/gpu=32",
     ),
     (
@@ -165,7 +165,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "4:28",
         "1",
-        "daisg103",
+        "gpu-node-03",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -175,7 +175,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "8:59",
         "1",
-        "daisg102",
+        "gpu-node-02",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -185,7 +185,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "8:59",
         "1",
-        "daisg103",
+        "gpu-node-03",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -195,12 +195,12 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "12:29",
         "1",
-        "daisg101",
+        "gpu-node-01",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
-    ("47466_2", "train", "user4", "RUNNING", "10:10:41", "1", "daisg108", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
-    ("47466_3", "train", "user4", "RUNNING", "10:10:41", "1", "daisg109", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
-    ("47466_4", "train", "user4", "RUNNING", "10:10:41", "1", "daisg110", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
+    ("47466_2", "train", "user4", "RUNNING", "10:10:41", "1", "gpu-node-08", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
+    ("47466_3", "train", "user4", "RUNNING", "10:10:41", "1", "gpu-node-09", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
+    ("47466_4", "train", "user4", "RUNNING", "10:10:41", "1", "gpu-node-10", "cpu=192,mem=2000G,node=1,gres/gpu=8"),
     (
         "47649_8",
         "pat_commonsense",
@@ -208,7 +208,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "2:18:57",
         "1",
-        "daisg105",
+        "gpu-node-05",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -218,7 +218,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "2:28:06",
         "1",
-        "daisg107",
+        "gpu-node-07",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
     (
@@ -228,7 +228,7 @@ MOCK_JOBS_ALL_USERS = [
         "RUNNING",
         "2:28:32",
         "1",
-        "daisg110",
+        "gpu-node-10",
         "cpu=192,mem=2000G,node=1,gres/gpu=8",
     ),
 ]
