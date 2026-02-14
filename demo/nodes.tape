@@ -3,16 +3,16 @@
 
 Output "demo/nodes.gif"
 
-Set FontSize 14
-Set Width 1400
-Set Height 800
-Set Framerate 30
+Set FontSize 18
+Set Width 1000
+Set Height 600
+Set Framerate 15
 Set PlaybackSpeed 1.0
 Set TypingSpeed 30ms
 Set Theme "nord"
 Set WindowBar Colorful
-Set WindowBarSize 40
-Set Padding 10
+Set WindowBarSize 30
+Set Padding 8
 
 # Hidden setup + launch + wait for load + navigate to Nodes tab
 Source "demo/setup.tape"

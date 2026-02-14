@@ -19,11 +19,11 @@ import sys
 from PIL import Image, ImageDraw, ImageFont
 
 # Caption bar style
-BAR_HEIGHT = 32
+BAR_HEIGHT = 28
 BAR_COLOR = (0, 0, 0, 153)  # black @ 60% opacity
 TEXT_COLOR = (255, 255, 255, 255)  # white
-FONT_SIZE = 16
-BAR_Y = 48  # below the window bar
+FONT_SIZE = 14
+BAR_Y = 38  # below the window bar
 
 
 def get_font(size: int) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:

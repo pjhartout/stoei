@@ -1,7 +1,7 @@
 #!/bin/bash
 # Record VHS demo tapes as GIFs with animated caption overlays.
 #
-# Pipeline: VHS → raw GIF → captioned GIF (via Pillow)
+# Pipeline: VHS → raw GIF → captioned GIF (via Pillow) → optimized GIF (gifsicle)
 #
 # Usage:
 #   ./demo/record.sh            # Record all 6 demo tapes
@@ -9,7 +9,7 @@
 #   ./demo/record.sh --no-captions jobs  # Record without captions
 #
 # Prerequisites:
-#   brew install vhs
+#   brew install vhs gifsicle
 #   uv sync (Pillow dev dependency)
 
 set -euo pipefail
@@ -22,6 +22,11 @@ cd "$PROJECT_DIR"
 
 if ! command -v vhs &>/dev/null; then
     echo "Error: vhs is not installed. Install with: brew install vhs"
+    exit 1
+fi
+
+if ! command -v gifsicle &>/dev/null; then
+    echo "Error: gifsicle is not installed. Install with: brew install gifsicle"
     exit 1
 fi
 
@@ -57,7 +62,9 @@ record_tape() {
         vhs "$tape"
     fi
 
-    echo "  Done: demo/${name}.gif"
+    # Optimize: delta compression + reduced palette (TUI has few colors)
+    gifsicle -O3 --lossy=30 --colors 64 "$final_gif" -o "$final_gif"
+    echo "  Done: demo/${name}.gif ($(du -h "$final_gif" | cut -f1 | xargs))"
 }
 
 # Caption definitions per tape (JSON arrays)
