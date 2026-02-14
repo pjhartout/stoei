@@ -24,16 +24,16 @@ Type "3"
 Sleep 1s
 Show
 
-# Show the Users tab
-Sleep 1s
+# Show the Users tab (defaults to Running view)
+Sleep 2s
 
-# Toggle views
-Type "r"
-Sleep 1s
+# Switch to Pending view
 Type "p"
-Sleep 1s
+Sleep 2s
+
+# Switch to Energy view
 Type "e"
-Sleep 1s
+Sleep 2s
 
 # Quit
 Type "q"

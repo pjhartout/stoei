@@ -19,7 +19,7 @@ Sleep 0.3s
 Type "mkdir -p /tmp/stoei-demo-config"
 Enter
 Sleep 0.3s
-Type `printf '{"theme":"nord"}' > /tmp/stoei-demo-config/settings.json`
+Type `printf '{"theme":"nord","energy_loading_enabled":true}' > /tmp/stoei-demo-config/settings.json`
 Enter
 Sleep 0.3s
 Type "clear"
