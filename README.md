@@ -6,6 +6,8 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes every 5 seconds and s
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/github/license/pjhartout/stoei)](https://github.com/pjhartout/stoei/blob/main/LICENSE)
 
+![Demo](demo/demo.gif)
+
 ## Features
 
 - Auto-refreshing job list (5s)
