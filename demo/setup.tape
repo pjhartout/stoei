@@ -25,4 +25,4 @@ Sleep 0.3s
 Type "clear"
 Enter
 Sleep 0.3s
-Show
+# NOTE: stays hidden — each tape calls Show when ready

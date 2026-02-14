@@ -1,7 +1,7 @@
 # STOEI Demo: Nodes Tab
 # View nodes and sort columns
 
-Output "demo/nodes.mp4"
+Output "demo/nodes.gif"
 
 Set FontSize 14
 Set Width 1400
@@ -19,7 +19,7 @@ Source "demo/setup.tape"
 Hide
 Type "stoei"
 Enter
-Sleep 5s
+Sleep 8s
 Type "2"
 Sleep 1s
 Show

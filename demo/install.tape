@@ -1,7 +1,7 @@
 # STOEI Demo: Install & Launch
 # Records the uv tool install + first launch with loading screen
 
-Output "demo/install.mp4"
+Output "demo/install.gif"
 
 Set FontSize 14
 Set Width 1400
@@ -16,6 +16,7 @@ Set Padding 10
 
 # Hidden setup: PATH, mocks, nord config
 Source "demo/setup.tape"
+Show
 
 # -- Install stoei as a uv tool --
 Type "uv tool install ."

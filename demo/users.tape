@@ -1,7 +1,7 @@
 # STOEI Demo: Users Tab
 # View users and toggle between Running/Pending/Energy views
 
-Output "demo/users.mp4"
+Output "demo/users.gif"
 
 Set FontSize 14
 Set Width 1400
@@ -19,7 +19,7 @@ Source "demo/setup.tape"
 Hide
 Type "stoei"
 Enter
-Sleep 5s
+Sleep 8s
 Type "3"
 Sleep 1s
 Show

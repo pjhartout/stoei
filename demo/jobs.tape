@@ -1,7 +1,7 @@
 # STOEI Demo: Jobs Tab
 # Navigate rows and sort columns
 
-Output "demo/jobs.mp4"
+Output "demo/jobs.gif"
 
 Set FontSize 14
 Set Width 1400
@@ -19,7 +19,7 @@ Source "demo/setup.tape"
 Hide
 Type "stoei"
 Enter
-Sleep 5s
+Sleep 8s
 Show
 
 # Jobs tab is the default — show it

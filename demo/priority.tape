@@ -1,7 +1,7 @@
 # STOEI Demo: Priority Tab
 # View priority and toggle between Users/Accounts/Jobs views
 
-Output "demo/priority.mp4"
+Output "demo/priority.gif"
 
 Set FontSize 14
 Set Width 1400
@@ -19,7 +19,7 @@ Source "demo/setup.tape"
 Hide
 Type "stoei"
 Enter
-Sleep 5s
+Sleep 8s
 Type "4"
 Sleep 1s
 Show
