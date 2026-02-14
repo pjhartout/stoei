@@ -6,7 +6,29 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes every 5 seconds and s
 [![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/github/license/pjhartout/stoei)](https://github.com/pjhartout/stoei/blob/main/LICENSE)
 
-![Demo](demo/demo.gif)
+### Install & Launch
+
+![Install & Launch](demo/install-launch.gif)
+
+### Jobs
+
+![Jobs](demo/jobs.gif)
+
+### Nodes
+
+![Nodes](demo/nodes.gif)
+
+### Users
+
+![Users](demo/users.gif)
+
+### Priority
+
+![Priority](demo/priority.gif)
+
+### Filtering
+
+![Filtering](demo/filtering.gif)
 
 ## Features
 
@@ -14,7 +36,8 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes every 5 seconds and s
 - Job stats (running, pending, requeues)
 - Job history (last 24 hours)
 - Job detail view (Enter or `i`)
-- Tabs for Jobs, Nodes, and Users
+- Tabs for Jobs, Nodes, Users, and Priority
+- Quick filtering (`/`)
 
 ## Installation
 
