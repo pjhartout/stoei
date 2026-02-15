@@ -211,96 +211,124 @@ class TestRefreshDataAsync:
         # The method should NOT be a coroutine function
         assert not inspect.iscoroutinefunction(app._refresh_data_async)
 
-    def test_refresh_data_calls_cache_build(self) -> None:
-        """Verify that _refresh_data_async calls the cache _build_from_data."""
+    def _make_mock_worker(self) -> MagicMock:
+        """Create a mock Textual worker with is_cancelled=False."""
+        worker = MagicMock()
+        worker.is_cancelled = False
+        return worker
+
+    def test_refresh_data_posts_jobs_message(self) -> None:
+        """Verify that _refresh_data_async posts a JobsDataReady message."""
         app = SlurmMonitor()
+        posted_messages: list[object] = []
 
         with (
             patch("stoei.app.get_running_jobs", return_value=([], None)),
             patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)),
             patch("stoei.app.get_all_running_jobs", return_value=([], None)),
-            patch.object(app._job_cache, "_build_from_data") as mock_build,
+            patch("stoei.app.get_fair_share_priority", return_value=([], None)),
+            patch("stoei.app.get_pending_job_priority", return_value=([], None)),
+            patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
+            patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
+            patch.object(app, "post_message", side_effect=lambda m: posted_messages.append(m)),
             patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
-            mock_build.assert_called_once()
 
-    def test_refresh_data_schedules_ui_update(self) -> None:
-        """Verify that _refresh_data_async schedules UI update on main thread."""
+        jobs_messages = [m for m in posted_messages if isinstance(m, SlurmMonitor.JobsDataReady)]
+        assert len(jobs_messages) == 1
+        assert jobs_messages[0].running_jobs == []
+
+    def test_refresh_data_posts_nodes_message(self) -> None:
+        """Verify that _refresh_data_async posts a NodesDataReady message."""
         app = SlurmMonitor()
+        posted_messages: list[object] = []
+
+        with (
+            patch("stoei.app.get_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
+            patch("stoei.app.get_cluster_nodes", return_value=([{"NodeName": "n1"}], None)),
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_fair_share_priority", return_value=([], None)),
+            patch("stoei.app.get_pending_job_priority", return_value=([], None)),
+            patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
+            patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
+            patch.object(app, "post_message", side_effect=lambda m: posted_messages.append(m)),
+            patch.object(app, "call_from_thread"),
+        ):
+            app._refresh_data_async()
+
+        nodes_messages = [m for m in posted_messages if isinstance(m, SlurmMonitor.NodesDataReady)]
+        assert len(nodes_messages) == 1
+        assert nodes_messages[0].nodes == [{"NodeName": "n1"}]
+
+    def test_refresh_data_posts_all_jobs_message(self) -> None:
+        """Verify that _refresh_data_async posts an AllJobsDataReady message."""
+        app = SlurmMonitor()
+        posted_messages: list[object] = []
 
         with (
             patch("stoei.app.get_running_jobs", return_value=([], None)),
             patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)),
             patch("stoei.app.get_all_running_jobs", return_value=([], None)),
-            patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call_from_thread,
-            patch.object(app, "query_one"),
-        ):
-            app._refresh_data_async()
-            # It's called multiple times (for loading indicator, notify, and update), we check update is one of them
-            # mock_call_from_thread.assert_any_call(app._update_ui_from_cache)
-            # Or better, check that it's called with the update method
-            calls = [call.args[0] for call in mock_call_from_thread.call_args_list if call.args]
-            assert app._update_ui_from_cache in calls
-
-    def test_refresh_data_fetches_cluster_nodes(self) -> None:
-        """Verify that _refresh_data_async fetches cluster nodes."""
-        from unittest.mock import patch
-
-        app = SlurmMonitor()
-
-        with (
-            patch("stoei.app.get_running_jobs", return_value=([], None)),
-            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
-            patch("stoei.app.get_cluster_nodes", return_value=([], None)) as mock_get_nodes,
-            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
-            patch.object(app._job_cache, "_build_from_data"),
+            patch("stoei.app.get_fair_share_priority", return_value=([], None)),
+            patch("stoei.app.get_pending_job_priority", return_value=([], None)),
+            patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
+            patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
+            patch.object(app, "post_message", side_effect=lambda m: posted_messages.append(m)),
             patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
-            mock_get_nodes.assert_called_once()
 
-    def test_refresh_data_fetches_all_users_jobs(self) -> None:
-        """Verify that _refresh_data_async fetches all running jobs."""
-        from unittest.mock import patch
+        all_jobs_messages = [m for m in posted_messages if isinstance(m, SlurmMonitor.AllJobsDataReady)]
+        assert len(all_jobs_messages) == 1
 
+    def test_refresh_data_posts_complete_message(self) -> None:
+        """Verify that _refresh_data_async posts a RefreshCycleComplete message."""
         app = SlurmMonitor()
+        posted_messages: list[object] = []
 
         with (
             patch("stoei.app.get_running_jobs", return_value=([], None)),
             patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=([], None)) as mock_get_jobs,
-            patch.object(app._job_cache, "_build_from_data"),
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_fair_share_priority", return_value=([], None)),
+            patch("stoei.app.get_pending_job_priority", return_value=([], None)),
+            patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
+            patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
+            patch.object(app, "post_message", side_effect=lambda m: posted_messages.append(m)),
             patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
-            mock_get_jobs.assert_called_once()
+
+        complete_messages = [m for m in posted_messages if isinstance(m, SlurmMonitor.RefreshCycleComplete)]
+        assert len(complete_messages) == 1
 
     def test_refresh_data_handles_cluster_nodes_error(self) -> None:
-        """Verify that _refresh_data_async handles cluster nodes errors gracefully."""
-        from unittest.mock import patch
-
+        """Verify that _refresh_data_async posts NodesDataReady with empty list on error."""
         app = SlurmMonitor()
+        posted_messages: list[object] = []
 
         with (
             patch("stoei.app.get_running_jobs", return_value=([], None)),
             patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], "Error message")),
             patch("stoei.app.get_all_running_jobs", return_value=([], None)),
-            patch.object(app._job_cache, "_build_from_data"),
+            patch("stoei.app.get_fair_share_priority", return_value=([], None)),
+            patch("stoei.app.get_pending_job_priority", return_value=([], None)),
+            patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
+            patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
+            patch.object(app, "post_message", side_effect=lambda m: posted_messages.append(m)),
             patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
         ):
-            # Should not raise an error
             app._refresh_data_async()
-            assert app._cluster_nodes == []
+
+        nodes_messages = [m for m in posted_messages if isinstance(m, SlurmMonitor.NodesDataReady)]
+        assert len(nodes_messages) == 1
+        assert nodes_messages[0].nodes == []
 
 
 class TestCalculateClusterStats:

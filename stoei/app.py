@@ -2,6 +2,7 @@
 
 import re
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar
@@ -11,10 +12,11 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.events import Key
+from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
-from textual.worker import Worker, WorkerState
+from textual.worker import Worker, WorkerState, get_current_worker
 
 from stoei.colors import get_theme_colors
 from stoei.keybindings import Actions, KeybindingConfig
@@ -175,6 +177,64 @@ class SlurmMonitor(App[None]):
         ColumnConfig(name="NodeList", key="nodelist", sortable=True, filterable=True, width=20),
         ColumnConfig(name="Timeline", key="timeline", sortable=False, filterable=True),  # Auto width
     ]
+
+    # --- Data messages for incremental UI updates ---
+    # Each message carries raw data from a background fetch. Handlers run on the
+    # main thread so the UI stays responsive between deliveries.
+
+    class JobsDataReady(Message):
+        """Posted when user's job data (running + history) is fetched."""
+
+        def __init__(  # noqa: D107
+            self,
+            running_jobs: list[tuple[str, ...]] | None,
+            history_jobs: list[tuple[str, ...]] | None,
+            total_jobs: int,
+            total_requeues: int,
+            max_requeues: int,
+        ) -> None:
+            super().__init__()
+            self.running_jobs = running_jobs
+            self.history_jobs = history_jobs
+            self.total_jobs = total_jobs
+            self.total_requeues = total_requeues
+            self.max_requeues = max_requeues
+
+    class NodesDataReady(Message):
+        """Posted when cluster node data is fetched."""
+
+        def __init__(self, nodes: list[dict[str, str]]) -> None:  # noqa: D107
+            super().__init__()
+            self.nodes = nodes
+
+    class AllJobsDataReady(Message):
+        """Posted when all-users job data is fetched."""
+
+        def __init__(self, all_jobs: list[tuple[str, ...]]) -> None:  # noqa: D107
+            super().__init__()
+            self.all_jobs = all_jobs
+
+    class WaitTimeDataReady(Message):
+        """Posted when wait-time history is fetched."""
+
+        def __init__(self, wait_time_jobs: list[tuple[str, ...]]) -> None:  # noqa: D107
+            super().__init__()
+            self.wait_time_jobs = wait_time_jobs
+
+    class PriorityDataReady(Message):
+        """Posted when fair-share and priority data is fetched."""
+
+        def __init__(  # noqa: D107
+            self,
+            fair_share_entries: list[tuple[str, ...]],
+            job_priority_entries: list[tuple[str, ...]],
+        ) -> None:
+            super().__init__()
+            self.fair_share_entries = fair_share_entries
+            self.job_priority_entries = job_priority_entries
+
+    class RefreshCycleComplete(Message):
+        """Posted when all background fetches have completed (success or failure)."""
 
     def get_theme_variable_defaults(self) -> dict[str, str]:
         """Provide default values for custom theme variables."""
@@ -830,106 +890,159 @@ class SlurmMonitor(App[None]):
             thread=True,
         )
 
-    def _refresh_cluster_data(self) -> None:
-        """Refresh cluster-level data (nodes, all jobs, wait times, priority)."""
-        # Refresh cluster nodes (single scontrol command)
+    # --- Parallel fetch helpers (run inside ThreadPoolExecutor threads) ---
+
+    def _fetch_user_jobs(self) -> tuple[list[tuple[str, ...]] | None, list[tuple[str, ...]] | None, int, int, int]:
+        """Fetch user's running jobs and history.
+
+        Returns:
+            Tuple of (running_jobs, history_jobs, total_jobs, total_requeues, max_requeues).
+        """
+        running_jobs: list[tuple[str, ...]] | None
+        running_raw, r_error = get_running_jobs()
+        if r_error:
+            logger.warning(f"Failed to refresh running jobs: {r_error}")
+            running_jobs = None
+        else:
+            running_jobs = running_raw
+
+        history_jobs: list[tuple[str, ...]] | None
+        job_history_days = self._settings.job_history_days
+        history_raw, total_jobs, total_requeues, max_requeues, h_error = get_job_history(days=job_history_days)
+        if h_error:
+            logger.warning(f"Failed to refresh job history: {h_error}")
+            history_jobs = None
+        else:
+            history_jobs = history_raw
+
+        return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
+
+    def _fetch_nodes(self) -> list[dict[str, str]]:
+        """Fetch cluster node data.
+
+        Returns:
+            List of node data dicts, empty on error.
+        """
         nodes, error = get_cluster_nodes()
         if error:
             logger.warning(f"Failed to get cluster nodes: {error}")
-        else:
-            logger.debug(f"Fetched {len(nodes)} cluster nodes")
-            self._cluster_nodes = nodes
+            return []
+        logger.debug(f"Fetched {len(nodes)} cluster nodes")
+        return nodes
 
-        # Refresh all running jobs (single squeue command with TRES)
+    def _fetch_all_jobs(self) -> list[tuple[str, ...]]:
+        """Fetch all-users running job data.
+
+        Returns:
+            List of job tuples, empty on error.
+        """
         all_jobs, error = get_all_running_jobs()
         if error:
             logger.warning(f"Failed to get all running jobs: {error}")
-        else:
-            logger.debug(f"Fetched {len(all_jobs)} running jobs from all users")
-            self._all_users_jobs = all_jobs
+            return []
+        logger.debug(f"Fetched {len(all_jobs)} running jobs from all users")
+        return all_jobs
 
-        # Refresh wait time history for cluster sidebar
+    def _fetch_wait_time(self) -> list[tuple[str, ...]]:
+        """Fetch wait-time history.
+
+        Returns:
+            List of wait-time job tuples, empty on error.
+        """
         wait_time_jobs, error = get_wait_time_job_history(hours=1)
         if error:
             logger.warning(f"Failed to get wait time history: {error}")
-        else:
-            logger.debug(f"Fetched {len(wait_time_jobs)} jobs for wait time calculation")
-            self._wait_time_jobs = wait_time_jobs
+            return []
+        logger.debug(f"Fetched {len(wait_time_jobs)} jobs for wait time calculation")
+        return wait_time_jobs
 
-        # Refresh fair-share priority data
-        fair_share_entries, error = get_fair_share_priority()
-        if error:
-            logger.warning(f"Failed to get fair-share priority: {error}")
+    def _fetch_priority(self) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]]]:
+        """Fetch fair-share and pending job priority data.
+
+        Returns:
+            Tuple of (fair_share_entries, job_priority_entries).
+        """
+        fair_share_entries: list[tuple[str, ...]] = []
+        job_priority_entries: list[tuple[str, ...]] = []
+
+        fs_entries, fs_error = get_fair_share_priority()
+        if fs_error:
+            logger.warning(f"Failed to get fair-share priority: {fs_error}")
         else:
+            fair_share_entries = fs_entries
             logger.debug(f"Fetched {len(fair_share_entries)} fair-share entries")
-            self._fair_share_entries = fair_share_entries
 
-        # Refresh pending job priority data
-        job_priority_entries, error = get_pending_job_priority()
-        if error:
-            logger.warning(f"Failed to get pending job priority: {error}")
+        jp_entries, jp_error = get_pending_job_priority()
+        if jp_error:
+            logger.warning(f"Failed to get pending job priority: {jp_error}")
         else:
+            job_priority_entries = jp_entries
             logger.debug(f"Fetched {len(job_priority_entries)} job priority entries")
-            self._job_priority_entries = job_priority_entries
 
-        # Pre-compute expensive view models in background to avoid UI blocking
-        self._compute_user_overview_cache()
-        self._compute_priority_overview_cache()
-        self._cached_node_infos = self._parse_node_infos()
-        self._cached_cluster_stats = self._calculate_cluster_stats()
-        logger.debug(
-            f"Pre-computed {len(self._cached_node_infos)} node infos, "
-            f"{len(self._cached_running_user_stats)} running user stats, "
-            f"{len(self._cached_pending_user_stats)} pending user stats, "
-            f"{len(self._cached_user_priorities)} user priorities, "
-            f"{len(self._cached_account_priorities)} account priorities, "
-            f"{len(self._cached_job_priorities)} job priorities, and cluster stats"
-        )
+        return fair_share_entries, job_priority_entries
+
+    # --- Main refresh worker ---
 
     def _refresh_data_async(self) -> None:
-        """Lightweight refresh of SLURM data (runs in background worker thread).
+        """Parallel refresh of SLURM data (runs in background worker thread).
 
-        This is used for periodic refreshes after initial load.
-        Uses single commands with no loops for efficiency.
+        Fetches independent data sources concurrently via ThreadPoolExecutor and
+        posts a Textual Message for each as it completes. Message handlers on the
+        main thread update the UI incrementally, keeping it responsive.
         """
-        logger.debug("Background refresh starting")
+        logger.debug("Background refresh starting (parallel)")
         self.call_from_thread(lambda: self._set_loading_indicator(True))
+        worker = get_current_worker()
 
         try:
-            # Refresh user's jobs (running + 7-day history)
-            running_jobs, r_error = get_running_jobs()
-            if r_error:
-                logger.warning(f"Failed to refresh running jobs: {r_error}")
-                running_jobs = None
+            with ThreadPoolExecutor(max_workers=5) as pool:
+                futures = {
+                    pool.submit(self._fetch_user_jobs): "user_jobs",
+                    pool.submit(self._fetch_nodes): "nodes",
+                    pool.submit(self._fetch_all_jobs): "all_jobs",
+                    pool.submit(self._fetch_wait_time): "wait_time",
+                    pool.submit(self._fetch_priority): "priority",
+                }
 
-            # Get history
-            job_history_days = self._settings.job_history_days
-            history_jobs, total_jobs, total_requeues, max_requeues, h_error = get_job_history(days=job_history_days)
-            if h_error:
-                logger.warning(f"Failed to refresh job history: {h_error}")
-                history_jobs = None
-            else:
-                self._last_history_jobs = history_jobs
-                self._last_history_stats = (total_jobs, total_requeues, max_requeues)
+                for future in as_completed(futures):
+                    if worker.is_cancelled:
+                        logger.debug("Refresh worker cancelled, aborting")
+                        return
+                    label = futures[future]
+                    try:
+                        result = future.result()
+                        self._post_fetch_message(label, result)
+                    except Exception:
+                        logger.exception(f"Failed to fetch {label}")
 
-            # Handle partial failures with fallback
-            if running_jobs is not None:
-                self._handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-            else:
-                self.call_from_thread(
-                    lambda: self.notify("Running jobs refresh failed - keeping old data", severity="warning")
-                )
-
-            # Refresh cluster-level data
-            self._refresh_cluster_data()
-
-            # Schedule UI update on main thread
-            self.call_from_thread(self._update_ui_from_cache)
+            # Signal that all fetches are done
+            self.post_message(self.RefreshCycleComplete())
+            logger.debug("Background refresh complete (all fetches done)")
 
         except Exception:
-            logger.exception("Error during refresh")
+            logger.exception("Error during parallel refresh")
         finally:
             self.call_from_thread(lambda: self._set_loading_indicator(False))
+
+    def _post_fetch_message(self, label: str, result: object) -> None:
+        """Post the appropriate Message for a completed fetch.
+
+        Args:
+            label: Identifier for the fetch type.
+            result: The data returned by the fetch helper.
+        """
+        if label == "user_jobs":
+            running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = result  # type: ignore[misc]
+            self.post_message(self.JobsDataReady(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues))
+        elif label == "nodes":
+            self.post_message(self.NodesDataReady(result))  # type: ignore[arg-type]
+        elif label == "all_jobs":
+            self.post_message(self.AllJobsDataReady(result))  # type: ignore[arg-type]
+        elif label == "wait_time":
+            self.post_message(self.WaitTimeDataReady(result))  # type: ignore[arg-type]
+        elif label == "priority":
+            fair_share, job_prio = result  # type: ignore[misc]
+            self.post_message(self.PriorityDataReady(fair_share, job_prio))
 
     def _handle_refresh_fallback(
         self,
@@ -1073,6 +1186,82 @@ class SlurmMonitor(App[None]):
 
         # Check window size and adjust layout
         self._check_window_size()
+
+    # --- Message handlers for incremental data updates ---
+
+    def on_slurm_monitor_jobs_data_ready(self, message: JobsDataReady) -> None:
+        """Handle fresh user job data from background fetch."""
+        if message.running_jobs is not None:
+            self._handle_refresh_fallback(
+                message.running_jobs,
+                message.history_jobs,
+                message.total_jobs,
+                message.total_requeues,
+                message.max_requeues,
+            )
+            # Update jobs table immediately
+            try:
+                jobs_filterable = self.query_one("#jobs-filterable-table", FilterableDataTable)
+                self._update_jobs_table(jobs_filterable)
+            except Exception:
+                logger.exception("Failed to update jobs table from message")
+        else:
+            self.notify("Running jobs refresh failed - keeping old data", severity="warning")
+
+    def on_slurm_monitor_nodes_data_ready(self, message: NodesDataReady) -> None:
+        """Handle fresh cluster node data from background fetch."""
+        self._cluster_nodes = message.nodes
+        # Pre-compute node infos and cluster stats on the main thread (fast: in-memory iteration)
+        self._cached_node_infos = self._parse_node_infos()
+        self._cached_cluster_stats = self._calculate_cluster_stats()
+        self._update_cluster_sidebar()
+        # Update node tab if it's active
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            if tab_container.active_tab == "nodes":
+                self._update_node_overview()
+        except Exception as exc:
+            logger.debug(f"Failed to update node tab from message: {exc}")
+
+    def on_slurm_monitor_all_jobs_data_ready(self, message: AllJobsDataReady) -> None:
+        """Handle fresh all-users job data from background fetch."""
+        self._all_users_jobs = message.all_jobs
+        # Re-compute user stats and cluster stats (pending resources depend on all-jobs)
+        self._compute_user_overview_cache()
+        self._cached_cluster_stats = self._calculate_cluster_stats()
+        self._update_my_usage_summary(self._cached_running_user_stats)
+        self._update_cluster_sidebar()
+        # Update user tab if it's active
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            if tab_container.active_tab == "users":
+                self._apply_user_overview_from_cache()
+        except Exception as exc:
+            logger.debug(f"Failed to update user tab from message: {exc}")
+
+    def on_slurm_monitor_wait_time_data_ready(self, message: WaitTimeDataReady) -> None:
+        """Handle fresh wait-time history from background fetch."""
+        self._wait_time_jobs = message.wait_time_jobs
+        # Recompute cluster stats to update wait-time stats in sidebar
+        self._cached_cluster_stats = self._calculate_cluster_stats()
+        self._update_cluster_sidebar()
+
+    def on_slurm_monitor_priority_data_ready(self, message: PriorityDataReady) -> None:
+        """Handle fresh priority data from background fetch."""
+        self._fair_share_entries = message.fair_share_entries
+        self._job_priority_entries = message.job_priority_entries
+        self._compute_priority_overview_cache()
+        # Update priority tab if it's active
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            if tab_container.active_tab == "priority":
+                self._apply_priority_overview_from_cache()
+        except Exception as exc:
+            logger.debug(f"Failed to update priority tab from message: {exc}")
+
+    def on_slurm_monitor_refresh_cycle_complete(self, _message: RefreshCycleComplete) -> None:
+        """Handle completion of a full refresh cycle."""
+        logger.debug("Refresh cycle complete - all data sources updated")
 
     def _format_state(self, state: str, category: JobState) -> str:
         """Format job state with color coding.

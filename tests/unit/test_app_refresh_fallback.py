@@ -8,7 +8,7 @@ from stoei.slurm.cache import JobCache
 
 
 class TestRefreshFallback:
-    """Tests for partial failure handling in _refresh_data_async."""
+    """Tests for partial failure handling in _handle_refresh_fallback."""
 
     @pytest.fixture(autouse=True)
     def reset_job_cache(self) -> None:
@@ -22,16 +22,8 @@ class TestRefreshFallback:
         running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1")]
         history_jobs = [("2", "job2", "COMPLETED", "0:00", "1", "node1")]
 
-        with (
-            patch("stoei.app.get_running_jobs", return_value=(running_jobs, None)),
-            patch("stoei.app.get_job_history", return_value=(history_jobs, 1, 0, 0, None)),
-            patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
-            patch.object(app._job_cache, "_build_from_data") as mock_build,
-            patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
-        ):
-            app._refresh_data_async()
+        with patch.object(app._job_cache, "_build_from_data") as mock_build:
+            app._handle_refresh_fallback(running_jobs, history_jobs, 1, 0, 0)
 
             # Should update cache with both
             mock_build.assert_called_once_with(running_jobs, history_jobs, 1, 0, 0)
@@ -47,15 +39,10 @@ class TestRefreshFallback:
         running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1")]
 
         with (
-            patch("stoei.app.get_running_jobs", return_value=(running_jobs, None)),
-            patch("stoei.app.get_job_history", return_value=(None, 0, 0, 0, "Error")),
-            patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
             patch.object(app._job_cache, "_build_from_data") as mock_build,
             patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
         ):
-            app._refresh_data_async()
+            app._handle_refresh_fallback(running_jobs, None, 0, 0, 0)
 
             # Should update cache with running jobs and default empty history
             # because _last_history_jobs is empty initially
@@ -73,15 +60,10 @@ class TestRefreshFallback:
         running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1")]
 
         with (
-            patch("stoei.app.get_running_jobs", return_value=(running_jobs, None)),
-            patch("stoei.app.get_job_history", return_value=(None, 0, 0, 0, "Error")),
-            patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
             patch.object(app._job_cache, "_build_from_data") as mock_build,
             patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
         ):
-            app._refresh_data_async()
+            app._handle_refresh_fallback(running_jobs, None, 0, 0, 0)
 
             # Should update cache with running jobs and CACHED history
             mock_build.assert_called_once_with(running_jobs, cached_history, 1, 0, 0)
@@ -98,18 +80,13 @@ class TestRefreshFallback:
         app._last_history_stats = (1, 0, 0)
 
         # New running jobs is EMPTY (job 1 finished)
-        running_jobs = []
+        running_jobs: list[tuple[str, ...]] = []
 
         with (
-            patch("stoei.app.get_running_jobs", return_value=(running_jobs, None)),
-            patch("stoei.app.get_job_history", return_value=(None, 0, 0, 0, "Error")),
-            patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
             patch.object(app._job_cache, "_build_from_data") as mock_build,
             patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
         ):
-            app._refresh_data_async()
+            app._handle_refresh_fallback(running_jobs, None, 0, 0, 0)
 
             # Expected: history_jobs should be exactly cached_history (no placeholder rows)
             call_args = mock_build.call_args
@@ -121,25 +98,41 @@ class TestRefreshFallback:
             assert passed_running == []
             assert passed_history == cached_history
 
-    def test_refresh_running_fail_history_ok(self) -> None:
-        """Test behavior when running jobs fail."""
+
+class TestJobsDataReadyHandler:
+    """Tests for the on_slurm_monitor_jobs_data_ready message handler."""
+
+    @pytest.fixture(autouse=True)
+    def reset_job_cache(self) -> None:
+        """Reset JobCache singleton before each test."""
+        JobCache.reset()
+
+    def test_handler_calls_fallback_when_running_jobs_present(self) -> None:
+        """Test that the handler calls _handle_refresh_fallback when running_jobs is not None."""
         app = SlurmMonitor()
 
+        running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1")]
         history_jobs = [("2", "job2", "COMPLETED", "0:00", "1", "node1")]
 
+        message = SlurmMonitor.JobsDataReady(running_jobs, history_jobs, 1, 0, 0)
+
         with (
-            patch("stoei.app.get_running_jobs", return_value=(None, "Error")),
-            patch("stoei.app.get_job_history", return_value=(history_jobs, 1, 0, 0, None)),
-            patch("stoei.app.get_cluster_nodes", return_value=([], None)),
-            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
-            patch.object(app._job_cache, "_build_from_data") as mock_build,
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_handle_refresh_fallback") as mock_fallback,
             patch.object(app, "query_one"),
         ):
-            app._refresh_data_async()
+            app.on_slurm_monitor_jobs_data_ready(message)
+            mock_fallback.assert_called_once_with(running_jobs, history_jobs, 1, 0, 0)
 
-            # Should NOT update cache because running jobs are critical
-            mock_build.assert_not_called()
+    def test_handler_notifies_on_running_jobs_failure(self) -> None:
+        """Test that the handler notifies when running_jobs is None."""
+        app = SlurmMonitor()
 
-            # BUT should update cached history for future use
-            assert app._last_history_jobs == history_jobs
+        message = SlurmMonitor.JobsDataReady(None, None, 0, 0, 0)
+
+        with (
+            patch.object(app, "_handle_refresh_fallback") as mock_fallback,
+            patch.object(app, "notify") as mock_notify,
+        ):
+            app.on_slurm_monitor_jobs_data_ready(message)
+            mock_fallback.assert_not_called()
+            mock_notify.assert_called_once()
