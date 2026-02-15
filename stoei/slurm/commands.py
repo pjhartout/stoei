@@ -356,10 +356,88 @@ def get_job_log_paths(job_id: str) -> tuple[str | None, str | None, str | None]:
     return stdout, stderr, None
 
 
-def get_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
+def get_job_info_and_log_paths(job_id: str) -> tuple[str, str | None, str | None, str | None]:
+    """Get formatted job info and log paths in a single fetch.
+
+    Combines get_job_info() and get_job_log_paths() to avoid redundant
+    scontrol/sacct subprocess calls. Calls each command at most once.
+
+    Args:
+        job_id: The SLURM job ID to query.
+
+    Returns:
+        Tuple of (formatted_info, error, stdout_path, stderr_path).
+    """
+    try:
+        validate_job_id(job_id)
+    except ValidationError as exc:
+        return "", str(exc), None, None
+
+    # Try scontrol first (works for active jobs)
+    raw_output, scontrol_error = _run_scontrol_for_job(job_id)
+    if not scontrol_error:
+        logger.info(f"Successfully retrieved info for job {job_id} via scontrol")
+        formatted = format_job_info(raw_output)
+        # Parse the same raw output for log paths (avoids second scontrol call)
+        parsed = parse_scontrol_output(raw_output)
+        stdout, stderr = _extract_log_paths(parsed, job_id)
+        return formatted, None, stdout, stderr
+
+    # Fall back to sacct for completed jobs
+    logger.debug(f"scontrol failed for {job_id}, trying sacct: {scontrol_error}")
+    raw_output, sacct_error = _run_sacct_for_job(job_id)
+    if not sacct_error:
+        parsed = parse_sacct_job_output(raw_output, SACCT_JOB_FIELDS)
+        if parsed:
+            logger.info(f"Successfully retrieved info for job {job_id} via sacct")
+            formatted = format_sacct_job_info(parsed)
+            stdout, stderr = _extract_log_paths(parsed, job_id)
+            return formatted, None, stdout, stderr
+        return "", "Could not parse sacct output", None, None
+
+    # Both failed
+    logger.warning(f"Could not get info for job {job_id}: scontrol={scontrol_error}, sacct={sacct_error}")
+    return "", f"Job not found. scontrol: {scontrol_error}", None, None
+
+
+def _extract_log_paths(parsed: dict[str, str], job_id: str) -> tuple[str | None, str | None]:
+    """Extract and expand log paths from parsed job info.
+
+    Args:
+        parsed: Parsed job information dictionary.
+        job_id: The job ID for placeholder expansion.
+
+    Returns:
+        Tuple of (stdout_path, stderr_path).
+    """
+    stdout = parsed.get("StdOut")
+    stderr = parsed.get("StdErr")
+
+    if stdout:
+        stdout = _expand_log_path(stdout, job_id, parsed)
+        if not stdout or not stdout.strip():
+            stdout = None
+    else:
+        stdout = None
+
+    if stderr:
+        stderr = _expand_log_path(stderr, job_id, parsed)
+        if not stderr or not stderr.strip():
+            stderr = None
+    else:
+        stderr = None
+
+    logger.debug(f"Log paths for job {job_id}: stdout={stdout}, stderr={stderr}")
+    return stdout, stderr
+
+
+def get_running_jobs(*, max_retries: int = DEFAULT_MAX_RETRIES) -> tuple[list[tuple[str, ...]], str | None]:
     """Return running/pending jobs from squeue.
 
     Uses retry logic with exponential backoff for transient failures.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: DEFAULT_MAX_RETRIES).
 
     Returns:
         Tuple of (List of tuples containing job information, optional error message).
@@ -380,7 +458,7 @@ def get_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
     ]
     logger.debug(f"Running squeue command for user {username}")
 
-    result, error = _run_with_retry(command, timeout=5, command_name="squeue")
+    result, error = _run_with_retry(command, timeout=5, command_name="squeue", max_retries=max_retries)
     if error or result is None:
         return [], error or "Unknown error"
 
@@ -393,13 +471,16 @@ def get_running_jobs() -> tuple[list[tuple[str, ...]], str | None]:
     return jobs, None
 
 
-def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int, str | None]:
+def get_job_history(
+    days: int = 7, *, max_retries: int = DEFAULT_MAX_RETRIES
+) -> tuple[list[tuple[str, ...]], int, int, int, str | None]:
     """Return job history for the last N days (sacct).
 
     Uses retry logic with exponential backoff for transient failures.
 
     Args:
         days: Number of days to look back for job history (default: 7).
+        max_retries: Maximum number of retry attempts (default: DEFAULT_MAX_RETRIES).
 
     Returns:
         Tuple of (jobs list, total jobs count, total requeues, max requeues, optional error message).
@@ -423,7 +504,7 @@ def get_job_history(days: int = 7) -> tuple[list[tuple[str, ...]], int, int, int
     ]
     logger.debug(f"Running sacct command for user {username} (last {days} days)")
 
-    result, error = _run_with_retry(command, timeout=10, command_name="sacct")
+    result, error = _run_with_retry(command, timeout=10, command_name="sacct", max_retries=max_retries)
     if error or result is None:
         return [], 0, 0, 0, error or "Unknown error"
 

@@ -114,6 +114,8 @@ class TestAppClusterIntegration:
                         "Partitions": "cpu",
                     }
                 ]
+                app._cached_node_infos = app._parse_node_infos()
+                app._dirty_nodes_tab = True
 
                 event = TabSwitched("nodes")
                 app.on_tab_switched(event)
@@ -139,6 +141,7 @@ class TestAppClusterIntegration:
                     ("12345", "job1", "user1", "gpu", "RUNNING", "00:05:00", "1", "node01"),
                     ("12346", "job2", "user2", "cpu", "PENDING", "00:00:00", "2", "node02"),
                 ]
+                app._dirty_users_tab = True
 
                 event = TabSwitched("users")
                 app.on_tab_switched(event)
