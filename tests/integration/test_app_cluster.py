@@ -194,8 +194,7 @@ class TestAppClusterIntegration:
             mock_jobs.assert_called_once()
 
     def test_app_handles_cluster_nodes_error(self, app: SlurmMonitor) -> None:
-        """Test that app handles cluster nodes fetch errors via NodesDataReady message."""
-        posted_messages: list[object] = []
+        """Test that app stores empty nodes on cluster nodes fetch error."""
         mock_worker = MagicMock()
         mock_worker.is_cancelled = False
 
@@ -208,14 +207,10 @@ class TestAppClusterIntegration:
             patch("stoei.app.get_pending_job_priority", return_value=([], None)),
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=mock_worker),
-            patch.object(app, "post_message", side_effect=lambda m: posted_messages.append(m)),
             patch.object(app, "call_from_thread"),
         ):
             app._refresh_data_async()
-            # NodesDataReady should carry empty list
-            nodes_msgs = [m for m in posted_messages if isinstance(m, SlurmMonitor.NodesDataReady)]
-            assert len(nodes_msgs) == 1
-            assert nodes_msgs[0].nodes == []
+            assert app._cluster_nodes == []
 
     def test_app_calculates_stats_with_empty_nodes(self, app: SlurmMonitor) -> None:
         """Test that app calculates stats correctly with empty node list."""

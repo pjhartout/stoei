@@ -1,7 +1,6 @@
 """Main Textual TUI application for stoei."""
 
 import re
-import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
@@ -281,6 +280,8 @@ class SlurmMonitor(App[None]):
         self._cached_user_priorities: list[UserPriority] = []
         self._cached_account_priorities: list[AccountPriority] = []
         self._cached_job_priorities: list[JobPriority] = []
+        # Pre-computed job rows from worker thread for fast initial UI population
+        self._precomputed_job_rows: list[tuple[str, ...]] = []
         # Dirty flags: True when data has changed but the tab's table hasn't been refreshed
         self._dirty_nodes_tab: bool = False
         self._dirty_users_tab: bool = False
@@ -376,6 +377,7 @@ class SlurmMonitor(App[None]):
         self._refresh_worker = self.run_worker(
             self._initial_load_async,
             name="initial_load",
+            group="data_load",
             exclusive=True,
             thread=True,
         )
@@ -422,14 +424,17 @@ class SlurmMonitor(App[None]):
         # Build job cache from fetched data
         self._loading_update_step(2)
         self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+
+        # Pre-compute row tuples in the worker thread so the main thread
+        # only needs to push them into the DataTable (the unavoidable DOM work).
+        jobs = self._sorted_jobs_for_display(self._job_cache.jobs)
+        self._precomputed_job_rows = [tuple(self._job_row_values(job)) for job in jobs]
+
         self._loading_complete_step(2, "Ready")
 
-        # Mark loading complete and transition.
-        # The sleep lets the main thread render the "Loading complete!" frame
-        # before _finish_initial_load blocks it with the heavy table update.
+        # Mark loading complete and transition to main UI.
         if self._loading_screen:
             self.call_from_thread(self._loading_screen.set_complete)
-        time.sleep(0.1)
         self.call_from_thread(self._finish_initial_load)
 
     def _execute_loading_steps(
@@ -518,8 +523,8 @@ class SlurmMonitor(App[None]):
     def _finish_initial_load(self) -> None:
         """Finish initial load and transition to main UI.
 
-        Populates the UI while the loading screen is still visible so the
-        TUI appears fully loaded the moment the screen is dismissed.
+        Uses pre-computed row data from the worker thread so the main thread
+        only does the unavoidable DataTable DOM work (add_rows).
         """
         # Set up log pane as a loguru sink
         log_pane = self.query_one("#log_pane", LogPane)
@@ -527,15 +532,21 @@ class SlurmMonitor(App[None]):
 
         logger.info("Initial load complete, populating UI")
 
-        # Populate UI behind the loading screen so the TUI is ready on reveal
-        self._update_ui_from_cache()
-
-        # Apply saved column widths to jobs table
+        # Use pre-computed rows from worker thread — avoids sorting and
+        # tuple creation on the main thread.
         try:
             jobs_filterable = self.query_one("#jobs-filterable-table", FilterableDataTable)
+            rows = self._precomputed_job_rows
+            self._precomputed_job_rows = []  # Free memory
+            jobs_filterable._all_rows = rows
+            table = jobs_filterable.table
+            table.clear(columns=False)
+            table.add_rows(rows)
+            jobs_filterable.display = len(rows) > 0
+            logger.debug(f"Jobs table populated: {len(rows)} jobs")
             self._apply_saved_column_widths("jobs", jobs_filterable)
         except Exception as exc:
-            logger.debug(f"Failed to apply saved column widths to jobs table: {exc}")
+            logger.debug(f"Failed to populate jobs table: {exc}")
 
         # Now dismiss the loading screen — TUI is fully populated
         if self._loading_screen:
@@ -800,6 +811,7 @@ class SlurmMonitor(App[None]):
         self._refresh_worker = self.run_worker(
             self._refresh_data_async,
             name="refresh_data",
+            group="data_load",
             exclusive=True,
             thread=True,
         )
@@ -918,12 +930,9 @@ class SlurmMonitor(App[None]):
     def _refresh_data_async(self) -> None:
         """Parallel refresh of SLURM data (runs in background worker thread).
 
-        Fetches independent data sources concurrently via ThreadPoolExecutor and
-        posts a Textual Message for each as it completes. Message handlers on the
-        main thread update the UI incrementally, keeping it responsive.
-
-        On the first cycle (before _initial_background_complete is set), energy
-        history is also fetched as a 6th parallel source.
+        Fetches all data sources concurrently, processes them in this thread
+        (cache building, sorting, row computation), then posts a single message
+        so the main thread only does lightweight UI widget updates.
         """
         is_first_cycle = not self._initial_background_complete
         logger.debug(f"Background refresh starting (parallel, first_cycle={is_first_cycle})")
@@ -931,6 +940,8 @@ class SlurmMonitor(App[None]):
         worker = get_current_worker()
 
         try:
+            # --- Phase 1: Fetch all data in parallel ---
+            results: dict[str, object] = {}
             max_workers = 6 if is_first_cycle else 5
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
                 futures = {
@@ -940,7 +951,6 @@ class SlurmMonitor(App[None]):
                     pool.submit(self._fetch_wait_time): "wait_time",
                     pool.submit(self._fetch_priority): "priority",
                 }
-                # Include energy history only on the first background cycle
                 if is_first_cycle:
                     futures[pool.submit(self._fetch_energy)] = "energy"
 
@@ -950,19 +960,130 @@ class SlurmMonitor(App[None]):
                         return
                     label = futures[future]
                     try:
-                        result = future.result()
-                        self._post_fetch_message(label, result)
+                        results[label] = future.result()
                     except Exception:
                         logger.exception(f"Failed to fetch {label}")
 
-            # Signal that all fetches are done
-            self.post_message(self.RefreshCycleComplete())
-            logger.debug("Background refresh complete (all fetches done)")
+            if worker.is_cancelled:
+                return
+
+            # Phase 2 + 3: compute in worker, then single UI update on main thread
+            job_rows = self._process_refresh_results(results)
+            self.call_from_thread(lambda: self._apply_refresh_to_ui(job_rows, is_first_cycle))
 
         except Exception:
             logger.exception("Error during parallel refresh")
         finally:
             self.call_from_thread(lambda: self._set_loading_indicator(False))
+
+    def _process_refresh_results(self, results: dict[str, object]) -> list[tuple[str, ...]]:
+        """Process fetched data in the worker thread (heavy computation).
+
+        Builds caches, pre-computes job rows, and stores derived data so the
+        main thread only needs to push data into widgets.
+
+        Args:
+            results: Dict of fetch label to result data.
+
+        Returns:
+            Pre-computed job table rows.
+        """
+        # Build job cache
+        if "user_jobs" in results:
+            running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = results["user_jobs"]  # type: ignore[misc]
+            if running_jobs is not None:
+                self._handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+
+        # Pre-compute job rows (sorting + row building)
+        job_rows = [tuple(self._job_row_values(job)) for job in self._sorted_jobs_for_display(self._job_cache.jobs)]
+
+        # Store fetched data
+        nodes = results.get("nodes", [])
+        all_jobs = results.get("all_jobs", [])
+        wait_time = results.get("wait_time", [])
+        priority = results.get("priority", ([], []))
+        fair_share_entries, job_priority_entries = priority  # type: ignore[misc]
+
+        self._cluster_nodes = nodes  # type: ignore[assignment]
+        self._all_users_jobs = all_jobs  # type: ignore[assignment]
+        self._wait_time_jobs = wait_time  # type: ignore[assignment]
+        self._fair_share_entries = fair_share_entries
+        self._job_priority_entries = job_priority_entries
+
+        # Pre-compute derived data
+        self._cached_node_infos = self._parse_node_infos()
+        self._cached_cluster_stats = self._calculate_cluster_stats()
+        self._compute_user_overview_cache()
+        self._compute_priority_overview_cache()
+
+        # Handle energy data (first cycle only)
+        if "energy" in results:
+            energy_jobs, energy_loaded = results["energy"]  # type: ignore[misc]
+            self._energy_history_jobs = energy_jobs
+            self._energy_data_loaded = energy_loaded
+            if energy_loaded:
+                self._cached_energy_user_stats = UserOverviewTab.aggregate_energy_stats(energy_jobs)
+
+        logger.debug("Background refresh: all computation done in worker thread")
+        return job_rows
+
+    def _apply_refresh_to_ui(self, job_rows: list[tuple[str, ...]], is_first_cycle: bool) -> None:
+        """Apply pre-computed refresh results to the UI (main thread only).
+
+        All heavy computation (sorting, cache building, row creation) was done
+        in the worker thread. This method only pushes data into widgets.
+
+        Args:
+            job_rows: Pre-computed job table rows.
+            is_first_cycle: Whether this is the first background refresh cycle.
+        """
+        # Update jobs table
+        try:
+            jobs_filterable = self.query_one("#jobs-filterable-table", FilterableDataTable)
+            jobs_filterable.set_data(job_rows)
+            jobs_filterable.display = len(job_rows) > 0
+        except Exception:
+            logger.exception("Failed to update jobs table from refresh")
+
+        # Update cluster sidebar
+        self._update_cluster_sidebar()
+
+        # Update My Usage banner
+        self._update_my_usage_summary(self._cached_running_user_stats)
+
+        # Update active tab or mark dirty
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            active = tab_container.active_tab
+            if active == "nodes":
+                self._update_node_overview()
+            else:
+                self._dirty_nodes_tab = True
+            if active == "users":
+                self._apply_user_overview_from_cache()
+            else:
+                self._dirty_users_tab = True
+            if active == "priority":
+                self._apply_priority_overview_from_cache()
+            else:
+                self._dirty_priority_tab = True
+        except Exception as exc:
+            logger.debug(f"Failed to update tab overviews: {exc}")
+
+        # Notifications for first cycle
+        if is_first_cycle:
+            self.notify("All cluster data loaded", timeout=3, severity="information")
+
+        # Clear job info cache and manage auto-refresh
+        self._job_info_cache.clear()
+        if is_first_cycle and not self._initial_background_complete:
+            self._initial_background_complete = True
+            self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
+            logger.info(
+                f"Background initial load complete. Auto-refresh started with interval {self.refresh_interval}s"
+            )
+        else:
+            logger.debug("Refresh cycle complete - all data sources updated")
 
     def _post_fetch_message(self, label: str, result: object) -> None:
         """Post the appropriate Message for a completed fetch.
@@ -1758,7 +1879,9 @@ class SlurmMonitor(App[None]):
                     self._compute_user_overview_cache()
                     self.call_from_thread(self._apply_user_overview_from_cache)
 
-                self.run_worker(compute_and_apply, name="compute_user_overview", exclusive=True, thread=True)
+                self.run_worker(
+                    compute_and_apply, name="compute_user_overview", group="compute_user", exclusive=True, thread=True
+                )
                 return
 
             self._apply_user_overview_from_cache()
@@ -1781,7 +1904,13 @@ class SlurmMonitor(App[None]):
                     self._compute_priority_overview_cache()
                     self.call_from_thread(self._apply_priority_overview_from_cache)
 
-                self.run_worker(compute_and_apply, name="compute_priority_overview", exclusive=True, thread=True)
+                self.run_worker(
+                    compute_and_apply,
+                    name="compute_priority_overview",
+                    group="compute_priority",
+                    exclusive=True,
+                    thread=True,
+                )
                 return
 
             self._apply_priority_overview_from_cache()
@@ -1903,7 +2032,9 @@ class SlurmMonitor(App[None]):
             return
 
         self.notify("Loading energy data...")
-        self.run_worker(self._reload_energy_data_async, exclusive=True, thread=True)
+        self.run_worker(
+            self._reload_energy_data_async, name="energy_reload", group="energy_reload", exclusive=True, thread=True
+        )
 
     def _reload_energy_data_async(self) -> None:
         """Load energy data asynchronously (runs in worker thread)."""
@@ -2119,6 +2250,7 @@ class SlurmMonitor(App[None]):
                 self.run_worker(
                     lambda: self._prefetch_job_info(job_id),
                     name="prefetch_job_info",
+                    group="prefetch_job_info",
                     exclusive=True,
                     thread=True,
                 )
