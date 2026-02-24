@@ -51,6 +51,10 @@ I want to have mostly self-explanatory code. Use the Readme to show the user how
 
 I want to have a clear code structure. In the end, I want the main source code for the package repository
 
+## Notifications
+
+- **Never show the same error notification repeatedly.** If a background operation (e.g., data refresh) fails on a recurring cycle, notify the user once. Only re-notify after the operation has recovered and then failed again. Manual user-triggered actions should always provide feedback regardless.
+
 ## Code style
 
 - **All imports must be hoisted to the top of the file** - no imports inside functions, methods, or conditional blocks. This is enforced by ruff rule PLC0415.
