@@ -80,6 +80,22 @@ uv sync
 uv run stoei
 ```
 
+### Editable install (development)
+
+Install from a local checkout so source changes take effect immediately:
+
+```bash
+git clone https://github.com/pjhartout/stoei.git
+cd stoei
+uv pip install -e .
+```
+
+Or to make `stoei` available on your PATH in editable mode:
+
+```bash
+uv tool install -e .
+```
+
 ### Alternative: pip
 
 ```bash
