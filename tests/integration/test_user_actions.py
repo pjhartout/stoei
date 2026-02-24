@@ -50,7 +50,7 @@ def slurm_monitor_factory(monkeypatch: pytest.MonkeyPatch) -> Callable[[], Slurm
     def fake_nodes() -> tuple[list[dict[str, str]], str | None]:
         return ([dict(node) for node in NODE_DATA], None)
 
-    def fake_running() -> tuple[list[tuple[str, ...]], str | None]:
+    def fake_running(**_kwargs: object) -> tuple[list[tuple[str, ...]], str | None]:
         return ([tuple(job) for job in RUNNING_JOBS], None)
 
     def fake_history(*_args, **_kwargs) -> tuple[list[tuple[str, ...]], int, int, int, str | None]:
@@ -118,6 +118,9 @@ async def test_manual_refresh_triggers_worker(slurm_monitor_factory: Callable[[]
 
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
+        await pilot.pause()
+        # Clear any calls from initial load completing
+        refresh_calls.clear()
         await pilot.press("r")
 
     assert refresh_calls == ["called"]

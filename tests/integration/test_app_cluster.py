@@ -1,6 +1,6 @@
 """Tests for cluster-related functionality in the main app."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from stoei.app import SlurmMonitor
@@ -114,6 +114,8 @@ class TestAppClusterIntegration:
                         "Partitions": "cpu",
                     }
                 ]
+                app._cached_node_infos = app._parse_node_infos()
+                app._dirty_nodes_tab = True
 
                 event = TabSwitched("nodes")
                 app.on_tab_switched(event)
@@ -139,6 +141,7 @@ class TestAppClusterIntegration:
                     ("12345", "job1", "user1", "gpu", "RUNNING", "00:05:00", "1", "node01"),
                     ("12346", "job2", "user2", "cpu", "PENDING", "00:00:00", "2", "node02"),
                 ]
+                app._dirty_users_tab = True
 
                 event = TabSwitched("users")
                 app.on_tab_switched(event)
@@ -169,28 +172,41 @@ class TestAppClusterIntegration:
                 assert logs_tab.display is False
 
     def test_app_refresh_fetches_cluster_data(self, app: SlurmMonitor) -> None:
-        """Test that app refresh fetches cluster data."""
+        """Test that app refresh posts messages for cluster data."""
+        posted_messages: list[object] = []
+        mock_worker = MagicMock()
+        mock_worker.is_cancelled = False
+
         with (
             patch("stoei.app.get_running_jobs", return_value=([], None)),
             patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([{"NodeName": "node01"}], None)) as mock_nodes,
             patch("stoei.app.get_all_running_jobs", return_value=([], None)) as mock_jobs,
-            patch.object(app._job_cache, "_build_from_data"),
+            patch("stoei.app.get_fair_share_priority", return_value=([], None)),
+            patch("stoei.app.get_pending_job_priority", return_value=([], None)),
+            patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
+            patch("stoei.app.get_current_worker", return_value=mock_worker),
+            patch.object(app, "post_message", side_effect=posted_messages.append),
             patch.object(app, "call_from_thread"),
-            patch.object(app, "query_one"),
         ):
             app._refresh_data_async()
             mock_nodes.assert_called_once()
             mock_jobs.assert_called_once()
 
     def test_app_handles_cluster_nodes_error(self, app: SlurmMonitor) -> None:
-        """Test that app handles cluster nodes fetch errors."""
+        """Test that app stores empty nodes on cluster nodes fetch error."""
+        mock_worker = MagicMock()
+        mock_worker.is_cancelled = False
+
         with (
-            patch("stoei.app.get_running_jobs", return_value=[]),
-            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0)),
+            patch("stoei.app.get_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_job_history", return_value=([], 0, 0, 0, None)),
             patch("stoei.app.get_cluster_nodes", return_value=([], "Error fetching nodes")),
-            patch("stoei.app.get_all_running_jobs", return_value=[]),
-            patch.object(app._job_cache, "_build_from_data"),
+            patch("stoei.app.get_all_running_jobs", return_value=([], None)),
+            patch("stoei.app.get_fair_share_priority", return_value=([], None)),
+            patch("stoei.app.get_pending_job_priority", return_value=([], None)),
+            patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
+            patch("stoei.app.get_current_worker", return_value=mock_worker),
             patch.object(app, "call_from_thread"),
         ):
             app._refresh_data_async()

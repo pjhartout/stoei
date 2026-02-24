@@ -6,6 +6,7 @@ from stoei.slurm.commands import (
     get_all_running_jobs,
     get_job_history,
     get_job_info,
+    get_job_info_and_log_paths,
     get_running_jobs,
 )
 from stoei.slurm.formatters import format_job_info, format_value
@@ -23,6 +24,7 @@ __all__ = [
     "get_current_username",
     "get_job_history",
     "get_job_info",
+    "get_job_info_and_log_paths",
     "get_running_jobs",
     "parse_scontrol_output",
     "validate_job_id",

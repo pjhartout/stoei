@@ -57,8 +57,8 @@ class LoguruMessage(Protocol):
 # Remove default handler
 logger.remove()
 
-# Define log directory (default logs/ under current working dir, overridable via STOEI_LOG_DIR)
-_default_log_dir = Path.cwd() / "logs"
+# Define log directory (default ~/.local/share/stoei/logs, overridable via STOEI_LOG_DIR)
+_default_log_dir = Path.home() / ".local" / "share" / "stoei" / "logs"
 LOG_DIR = Path(os.environ.get("STOEI_LOG_DIR", str(_default_log_dir))).expanduser().resolve()
 LOG_DIR.mkdir(parents=True, exist_ok=True)
 

@@ -614,10 +614,9 @@ class FilterableDataTable(Vertical):
         # Sort rows
         sorted_rows = self._sort_rows(filtered_rows)
 
-        # Update table
+        # Update table (batch add for performance with large datasets)
         table.clear(columns=False)
-        for row in sorted_rows:
-            table.add_row(*row)
+        table.add_rows(sorted_rows)
 
         # Restore cursor position
         if cursor_row is not None and table.row_count > 0:
