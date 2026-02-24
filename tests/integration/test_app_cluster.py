@@ -186,7 +186,7 @@ class TestAppClusterIntegration:
             patch("stoei.app.get_pending_job_priority", return_value=([], None)),
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=mock_worker),
-            patch.object(app, "post_message", side_effect=lambda m: posted_messages.append(m)),
+            patch.object(app, "post_message", side_effect=posted_messages.append),
             patch.object(app, "call_from_thread"),
         ):
             app._refresh_data_async()

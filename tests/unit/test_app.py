@@ -270,7 +270,7 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_pending_job_priority", return_value=([], None)),
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
-            patch.object(app, "call_from_thread", side_effect=lambda fn: call_from_thread_calls.append(fn)),
+            patch.object(app, "call_from_thread", side_effect=call_from_thread_calls.append),
         ):
             app._refresh_data_async()
 
@@ -670,6 +670,7 @@ class TestUpdateUIFromCache:
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
+            patch.object(app, "_prefetch_job_info"),
         ):
             async with app.run_test(size=(80, 24)):
                 # Add jobs directly to the cache
@@ -706,6 +707,7 @@ class TestUpdateUIFromCache:
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
+            patch.object(app, "_prefetch_job_info"),
         ):
             async with app.run_test(size=(80, 24)):
                 # Add mix of active and completed jobs
@@ -769,6 +771,7 @@ class TestUpdateUIFromCache:
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
+            patch.object(app, "_prefetch_job_info"),
         ):
             async with app.run_test(size=(80, 24)):
                 # Add initial jobs
@@ -821,6 +824,7 @@ class TestUpdateUIFromCache:
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
+            patch.object(app, "_prefetch_job_info"),
         ):
             async with app.run_test(size=(80, 24)):
                 # Initial cached job
@@ -867,6 +871,7 @@ class TestUpdateUIFromCache:
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
+            patch.object(app, "_prefetch_job_info"),
         ):
             async with app.run_test(size=(80, 24)):
                 app._job_cache._jobs = [
