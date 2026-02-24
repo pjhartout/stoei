@@ -506,3 +506,310 @@ class TestFilterableDataTableBindings:
         """Test that escape binding is included."""
         binding_keys = [b.key for b in FilterableDataTable.BINDINGS]
         assert "escape" in binding_keys
+
+
+class TestIncrementalUpdate:
+    """Tests for incremental diff-based updates in FilterableDataTable."""
+
+    @pytest.fixture
+    def sample_columns(self) -> list[ColumnConfig]:
+        """Create sample column configurations."""
+        return [
+            ColumnConfig(name="ID", key="id", sortable=True, filterable=True),
+            ColumnConfig(name="State", key="state", sortable=True, filterable=True),
+            ColumnConfig(name="Time", key="time", sortable=True, filterable=True),
+        ]
+
+    @pytest.mark.asyncio
+    async def test_cell_update_preserves_cursor(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that incremental cell updates preserve cursor position."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+                ("300", "RUNNING", "2:00"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+
+            # Move cursor to row 2 (job 300)
+            filterable.table.move_cursor(row=2)
+            await pilot.pause()
+            assert filterable.table.cursor_row == 2
+
+            # Update only the time column (cell-only change)
+            updated_rows = [
+                ("100", "RUNNING", "1:01"),
+                ("200", "PENDING", "0:31"),
+                ("300", "RUNNING", "2:01"),
+            ]
+            filterable.set_data(updated_rows)
+            await pilot.pause()
+
+            # Cursor should still be on row 2
+            assert filterable.table.cursor_row == 2
+            # Verify the data was updated
+            row_data = filterable.get_row_at(2)
+            assert "2:01" in str(row_data[2])
+
+    @pytest.mark.asyncio
+    async def test_same_data_produces_no_mutations(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that setting the same data again does not cause a full rebuild."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+
+            # Move cursor to row 1
+            filterable.table.move_cursor(row=1)
+            await pilot.pause()
+
+            # Set identical data
+            filterable.set_data(list(rows))
+            await pilot.pause()
+
+            # Cursor should still be on row 1
+            assert filterable.table.cursor_row == 1
+            assert filterable.row_count == 2
+
+    @pytest.mark.asyncio
+    async def test_new_row_triggers_full_rebuild(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that adding a new row falls back to full rebuild."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+            assert filterable.row_count == 2
+
+            # Add a new row
+            updated_rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+                ("300", "RUNNING", "0:05"),
+            ]
+            filterable.set_data(updated_rows)
+            await pilot.pause()
+
+            assert filterable.row_count == 3
+
+    @pytest.mark.asyncio
+    async def test_removed_row_triggers_full_rebuild(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that removing a row falls back to full rebuild."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+                ("300", "COMPLETED", "3:00"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+            assert filterable.row_count == 3
+
+            # Remove row 300
+            updated_rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+            ]
+            filterable.set_data(updated_rows)
+            await pilot.pause()
+
+            assert filterable.row_count == 2
+
+    @pytest.mark.asyncio
+    async def test_cursor_preserved_by_key_after_rebuild(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that cursor is restored to the same row key after a full rebuild."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+                ("300", "RUNNING", "2:00"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+
+            # Move cursor to row 2 (job 300)
+            filterable.table.move_cursor(row=2)
+            await pilot.pause()
+
+            # Add a new row (triggers full rebuild) - cursor should stay on job 300
+            updated_rows = [
+                ("100", "RUNNING", "1:01"),
+                ("200", "PENDING", "0:31"),
+                ("300", "RUNNING", "2:01"),
+                ("400", "RUNNING", "0:01"),
+            ]
+            filterable.set_data(updated_rows)
+            await pilot.pause()
+
+            # Cursor should be on row 2 still (job 300 is at index 2)
+            assert filterable.table.cursor_row == 2
+            row_data = filterable.get_row_at(2)
+            assert "300" in str(row_data[0])
+
+    @pytest.mark.asyncio
+    async def test_filter_visibility_change_triggers_rebuild(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that a row changing filter visibility triggers full rebuild."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+
+            # Apply filter for RUNNING only
+            filterable._apply_filter("state:RUNNING")
+            await pilot.pause()
+            assert filterable.row_count == 1
+
+            # Job 200 changes from PENDING to RUNNING - becomes visible
+            updated_rows = [
+                ("100", "RUNNING", "1:01"),
+                ("200", "RUNNING", "0:31"),
+            ]
+            filterable.set_data(updated_rows)
+            await pilot.pause()
+
+            # Now both rows match the filter
+            assert filterable.row_count == 2
+
+    @pytest.mark.asyncio
+    async def test_first_load_uses_full_build(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that the first set_data call does a full build."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            # _rows_by_key should be None before first set_data
+            assert filterable._rows_by_key is None
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+
+            # _rows_by_key should now be populated
+            assert filterable._rows_by_key is not None
+            assert len(filterable._rows_by_key) == 2
+            assert filterable.row_count == 2
+
+    @pytest.mark.asyncio
+    async def test_clear_resets_rows_by_key(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that clear() resets _rows_by_key to None."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [("100", "RUNNING", "1:00")]
+            filterable.set_data(rows)
+            await pilot.pause()
+            assert filterable._rows_by_key is not None
+
+            filterable.clear()
+            assert filterable._rows_by_key is None

@@ -11,17 +11,18 @@ from typing import TYPE_CHECKING, Any, ClassVar
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Vertical
+from textual.coordinate import Coordinate
 from textual.events import Key
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import DataTable, Input, Static
-from textual.widgets.data_table import ColumnKey
+from textual.widgets.data_table import ColumnKey, RowKey
 
 from stoei.keybindings import Actions, KeybindingConfig, get_default_config
 from stoei.logger import get_logger
 
 if TYPE_CHECKING:
-    from textual.widgets.data_table import CellType, RowKey
+    from textual.widgets.data_table import CellType
 
 logger = get_logger(__name__)
 
@@ -199,6 +200,9 @@ class FilterableDataTable(Vertical):
         self._filter_state = FilterState()
         # Store original data for filtering
         self._all_rows: list[tuple[Any, ...]] = []
+        # Keyed row index for incremental diff updates (None until first set_data)
+        self._rows_by_key: dict[str, tuple[Any, ...]] | None = None
+        self._key_column_index: int = 0
         # Map column names to keys for filtering
         self._column_name_to_key: dict[str, str] = {}
         self._column_key_to_index: dict[str, int] = {}
@@ -602,11 +606,22 @@ class FilterableDataTable(Vertical):
         return sorted(rows, key=get_sort_key, reverse=reverse)
 
     def _refresh_table_data(self) -> None:
-        """Refresh the table with filtered and sorted data."""
+        """Refresh the table with filtered and sorted data (full rebuild).
+
+        Used for sort/filter changes and as fallback when incremental
+        updates are not possible.
+        """
         table = self.table
 
-        # Save cursor position
+        # Save cursor key for identity-based restoration
+        cursor_key: str | None = None
         cursor_row = table.cursor_row
+        if table.row_count > 0 and cursor_row is not None and 0 <= cursor_row < table.row_count:
+            try:
+                row_key, _ = table.coordinate_to_cell_key(Coordinate(cursor_row, 0))
+                cursor_key = str(row_key)
+            except Exception:
+                logger.debug("Could not resolve cursor row key for restoration")
 
         # Filter rows
         filtered_rows = [row for row in self._all_rows if self._row_matches_filter(row)]
@@ -614,12 +629,25 @@ class FilterableDataTable(Vertical):
         # Sort rows
         sorted_rows = self._sort_rows(filtered_rows)
 
-        # Update table (batch add for performance with large datasets)
+        # Full rebuild with explicit row keys for identity tracking
         table.clear(columns=False)
-        table.add_rows(sorted_rows)
+        key_to_index: dict[str, int] = {}
+        try:
+            for idx, row in enumerate(sorted_rows):
+                key = str(row[self._key_column_index])
+                table.add_row(*row, key=key)
+                key_to_index[key] = idx
+        except Exception:
+            logger.debug("Keyed row build failed; falling back to keyless rebuild")
+            table.clear(columns=False)
+            table.add_rows(sorted_rows)
+            key_to_index.clear()
+            self._rows_by_key = None
 
-        # Restore cursor position
-        if cursor_row is not None and table.row_count > 0:
+        # Restore cursor by key identity, then by position
+        if cursor_key is not None and cursor_key in key_to_index:
+            table.move_cursor(row=key_to_index[cursor_key])
+        elif cursor_row is not None and table.row_count > 0:
             new_row = min(cursor_row, table.row_count - 1)
             table.move_cursor(row=new_row)
 
@@ -655,12 +683,74 @@ class FilterableDataTable(Vertical):
         """Set the table data.
 
         This stores all rows and applies current filter/sort.
+        Uses incremental cell updates when possible to preserve cursor
+        and scroll position.
 
         Args:
             rows: List of row data tuples.
         """
+        new_rows_by_key = {str(row[self._key_column_index]): row for row in rows}
         self._all_rows = list(rows)
-        self._refresh_table_data()
+
+        if self._rows_by_key is not None:
+            # Subsequent load: try incremental update
+            self._apply_incremental_update(new_rows_by_key)
+        else:
+            # First load: full build
+            self._rows_by_key = new_rows_by_key
+            self._refresh_table_data()
+
+    def _apply_incremental_update(self, new_rows_by_key: dict[str, tuple[Any, ...]]) -> None:
+        """Apply an incremental update, updating only changed cells.
+
+        Falls back to a full rebuild if the visible row set changes (rows
+        added, removed, or filter visibility changed). Cell-only updates
+        preserve cursor position and scroll state.
+
+        Args:
+            new_rows_by_key: New row data keyed by the key column value.
+        """
+        old_rows_by_key = self._rows_by_key
+        assert old_rows_by_key is not None  # noqa: S101 (caller guarantees)
+
+        # Determine which rows are visible under the current filter
+        old_visible = {k for k, v in old_rows_by_key.items() if self._row_matches_filter(v)}
+        new_visible = {k for k, v in new_rows_by_key.items() if self._row_matches_filter(v)}
+
+        # If the visible set changed, fall back to full rebuild
+        if old_visible != new_visible:
+            logger.debug(
+                f"Visible set changed "
+                f"(+{len(new_visible - old_visible)}, -{len(old_visible - new_visible)}); "
+                f"full rebuild"
+            )
+            self._rows_by_key = new_rows_by_key
+            self._refresh_table_data()
+            return
+
+        # Only cell updates for visible rows — cursor and scroll preserved
+        table = self.table
+        updated_cells = 0
+        unchanged_rows = 0
+        for key in new_visible:
+            old_row = old_rows_by_key[key]
+            new_row = new_rows_by_key[key]
+            if old_row != new_row:
+                for col_idx, col_config in enumerate(self._columns):
+                    if col_idx < len(old_row) and col_idx < len(new_row) and old_row[col_idx] != new_row[col_idx]:
+                        table.update_cell(key, col_config.key, new_row[col_idx], update_width=False)
+                        updated_cells += 1
+            else:
+                unchanged_rows += 1
+
+        self._rows_by_key = new_rows_by_key
+
+        # Update filter status
+        self._update_filter_status(len(new_visible), len(self._all_rows))
+
+        logger.debug(
+            f"Incremental update: {updated_cells} cells updated, {unchanged_rows}/{len(new_visible)} rows unchanged"
+        )
 
     def add_row(self, *cells: CellType, key: str | None = None) -> RowKey:
         """Add a row to the table.
@@ -673,6 +763,8 @@ class FilterableDataTable(Vertical):
             The row key.
         """
         self._all_rows.append(cells)
+        if self._rows_by_key is not None and key is not None:
+            self._rows_by_key[key] = cells
         # Only add to visible table if it matches filter
         if self._row_matches_filter(cells):
             return self.table.add_row(*cells, key=key)
@@ -686,6 +778,7 @@ class FilterableDataTable(Vertical):
             columns: Whether to also clear columns.
         """
         self._all_rows.clear()
+        self._rows_by_key = None
         self.table.clear(columns=columns)
 
     def on_key(self, event: Key) -> None:
