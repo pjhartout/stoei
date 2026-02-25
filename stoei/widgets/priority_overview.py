@@ -6,7 +6,6 @@ from typing import ClassVar, Literal
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Container, Horizontal, VerticalScroll
-from textual.message import Message
 from textual.widgets import Static
 
 from stoei.colors import ThemeColors, get_theme_colors
@@ -17,6 +16,21 @@ from stoei.slurm.parser import parse_sprio_output, parse_sshare_output
 from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
 
 logger = get_logger(__name__)
+
+
+def _safe_float(value: str) -> float:
+    """Parse a float from a string, returning 0.0 on failure.
+
+    Args:
+        value: String to parse.
+
+    Returns:
+        Parsed float or 0.0.
+    """
+    try:
+        return float(value)
+    except ValueError:
+        return 0.0
 
 
 def compute_dense_ranks(values: list[float]) -> list[str]:
@@ -88,17 +102,18 @@ class JobPriority:
     qos: str
 
 
-class PrioritySubtabSwitched(Message):
-    """Message sent when a sub-tab within the priority overview is switched."""
+@dataclass
+class PrebuiltPriorityData:
+    """Pre-computed priority data and display rows from background worker."""
 
-    def __init__(self, subtab_name: str) -> None:
-        """Initialize the PrioritySubtabSwitched message.
-
-        Args:
-            subtab_name: Name of the sub-tab that was switched to.
-        """
-        super().__init__()
-        self.subtab_name = subtab_name
+    user_priorities: list[UserPriority]
+    account_priorities: list[AccountPriority]
+    job_priorities: list[JobPriority]
+    user_rows: list[tuple[str, ...]]
+    account_rows: list[tuple[str, ...]]
+    job_rows: list[tuple[str, ...]]
+    my_job_rows: list[tuple[str, ...]]
+    summary_markup: str
 
 
 # Type alias for subtab names
@@ -157,7 +172,7 @@ def _format_status_cell(fair_share: str, colors: ThemeColors) -> str:
     return f"[{color}]{status}[/{color}]"
 
 
-def _build_my_priority_summary(
+def build_my_priority_summary(
     current_username: str,
     user_priorities: list[UserPriority],
     account_priorities: list[AccountPriority],
@@ -209,6 +224,198 @@ def _build_my_priority_summary(
         f"  Pending Jobs: [bold]{pending_count}[/bold]",
     ]
     return "\n".join(lines)
+
+
+def build_user_priority_rows(
+    priorities: list[UserPriority],
+    current_username: str,
+    colors: ThemeColors,
+) -> tuple[list[UserPriority], list[tuple[str, ...]]]:
+    """Sort, rank, and build display rows for user priorities.
+
+    This function does the heavy computation (sorting, ranking, row building)
+    and can be safely called from a background thread.
+
+    Args:
+        priorities: List of user priority statistics.
+        current_username: The current user's username for highlighting.
+        colors: Theme colors.
+
+    Returns:
+        Tuple of (sorted priorities with ranks, display row tuples).
+    """
+    sorted_priorities = sorted(priorities, key=lambda p: _safe_float(p.fair_share), reverse=True)
+
+    fs_values = [_safe_float(p.fair_share) for p in sorted_priorities]
+    ranks = compute_dense_ranks(fs_values)
+    for p, rank in zip(sorted_priorities, ranks, strict=True):
+        p.rank = rank
+
+    rows: list[tuple[str, ...]] = []
+    for p in sorted_priorities:
+        is_me = p.username == current_username
+        if is_me:
+            style = f"bold {colors.accent}"
+            rows.append(
+                (
+                    _style_cell(p.rank, style),
+                    _style_cell(f">> {p.username}", style),
+                    _style_cell(p.account, style),
+                    _style_cell(p.raw_shares, style),
+                    _style_cell(p.norm_shares, style),
+                    _style_cell(p.raw_usage, style),
+                    _style_cell(p.effective_usage, style),
+                    _format_fs_cell(p.fair_share, colors),
+                    _format_status_cell(p.fair_share, colors),
+                )
+            )
+        else:
+            rows.append(
+                (
+                    p.rank,
+                    p.username,
+                    p.account,
+                    p.raw_shares,
+                    p.norm_shares,
+                    p.raw_usage,
+                    p.effective_usage,
+                    _format_fs_cell(p.fair_share, colors),
+                    _format_status_cell(p.fair_share, colors),
+                )
+            )
+    return sorted_priorities, rows
+
+
+def build_account_priority_rows(
+    priorities: list[AccountPriority],
+    current_user_account: str,
+    colors: ThemeColors,
+) -> tuple[list[AccountPriority], list[tuple[str, ...]]]:
+    """Sort, rank, and build display rows for account priorities.
+
+    This function does the heavy computation (sorting, ranking, row building)
+    and can be safely called from a background thread.
+
+    Args:
+        priorities: List of account priority statistics.
+        current_user_account: The current user's account name for highlighting.
+        colors: Theme colors.
+
+    Returns:
+        Tuple of (sorted priorities with ranks, display row tuples).
+    """
+    sorted_priorities = sorted(priorities, key=lambda p: _safe_float(p.fair_share), reverse=True)
+
+    fs_values = [_safe_float(p.fair_share) for p in sorted_priorities]
+    ranks = compute_dense_ranks(fs_values)
+    for p, rank in zip(sorted_priorities, ranks, strict=True):
+        p.rank = rank
+
+    rows: list[tuple[str, ...]] = []
+    for p in sorted_priorities:
+        is_mine = p.account == current_user_account and current_user_account != ""
+        if is_mine:
+            style = f"bold {colors.accent}"
+            rows.append(
+                (
+                    _style_cell(p.rank, style),
+                    _style_cell(p.account, style),
+                    _style_cell(p.raw_shares, style),
+                    _style_cell(p.norm_shares, style),
+                    _style_cell(p.raw_usage, style),
+                    _style_cell(p.effective_usage, style),
+                    _format_fs_cell(p.fair_share, colors),
+                    _format_status_cell(p.fair_share, colors),
+                )
+            )
+        else:
+            rows.append(
+                (
+                    p.rank,
+                    p.account,
+                    p.raw_shares,
+                    p.norm_shares,
+                    p.raw_usage,
+                    p.effective_usage,
+                    _format_fs_cell(p.fair_share, colors),
+                    _format_status_cell(p.fair_share, colors),
+                )
+            )
+    return sorted_priorities, rows
+
+
+def build_job_priority_rows(
+    priorities: list[JobPriority],
+    current_username: str,
+    colors: ThemeColors,
+) -> tuple[list[JobPriority], list[tuple[str, ...]]]:
+    """Sort and build display rows for job priorities.
+
+    This function does the heavy computation (sorting, row building)
+    and can be safely called from a background thread.
+
+    Args:
+        priorities: List of job priority factors.
+        current_username: The current user's username for highlighting.
+        colors: Theme colors.
+
+    Returns:
+        Tuple of (sorted priorities, display row tuples).
+    """
+    sorted_priorities = sorted(priorities, key=lambda p: _safe_float(p.priority), reverse=True)
+
+    rows: list[tuple[str, ...]] = []
+    for p in sorted_priorities:
+        is_me = p.user == current_username
+        if is_me:
+            style = f"bold {colors.accent}"
+            rows.append(
+                (
+                    _style_cell(p.job_id, style),
+                    _style_cell(p.user, style),
+                    _style_cell(p.account, style),
+                    _style_cell(p.priority, style),
+                    _style_cell(p.age, style),
+                    _style_cell(p.fair_share, style),
+                    _style_cell(p.job_size, style),
+                    _style_cell(p.partition, style),
+                    _style_cell(p.qos, style),
+                )
+            )
+        else:
+            rows.append(
+                (
+                    p.job_id,
+                    p.user,
+                    p.account,
+                    p.priority,
+                    p.age,
+                    p.fair_share,
+                    p.job_size,
+                    p.partition,
+                    p.qos,
+                )
+            )
+    return sorted_priorities, rows
+
+
+def build_my_job_priority_rows(
+    job_priorities: list[JobPriority],
+    current_username: str,
+) -> list[tuple[str, ...]]:
+    """Build display rows for the current user's pending jobs.
+
+    Args:
+        job_priorities: All job priorities (already sorted).
+        current_username: The current user's username.
+
+    Returns:
+        Display row tuples for the user's pending jobs.
+    """
+    my_jobs = [j for j in job_priorities if j.user == current_username]
+    my_jobs.sort(key=lambda p: _safe_float(p.priority), reverse=True)
+
+    return [(p.job_id, p.priority, p.age, p.fair_share, p.job_size, p.partition, p.qos) for p in my_jobs]
 
 
 class PriorityOverviewTab(VerticalScroll):
@@ -327,6 +534,12 @@ class PriorityOverviewTab(VerticalScroll):
         self.job_priorities: list[JobPriority] = []
         self._active_subtab: PrioritySubtabName = "mine"
         self._settings = load_settings()
+        # Pre-built row caches for deferred on_mount application
+        self._pending_user_rows: list[tuple[str, ...]] | None = None
+        self._pending_account_rows: list[tuple[str, ...]] | None = None
+        self._pending_job_rows: list[tuple[str, ...]] | None = None
+        self._pending_my_job_rows: list[tuple[str, ...]] | None = None
+        self._pending_summary_markup: str | None = None
 
     def compose(self) -> ComposeResult:
         """Create the priority overview layout with sub-tabs."""
@@ -398,13 +611,22 @@ class PriorityOverviewTab(VerticalScroll):
             )
 
     def on_mount(self) -> None:
-        """Initialize the data tables."""
-        if self.user_priorities:
-            self.update_user_priorities(self.user_priorities)
-        if self.account_priorities:
-            self.update_account_priorities(self.account_priorities)
-        if self.job_priorities:
-            self.update_job_priorities(self.job_priorities)
+        """Apply any pre-built row data that arrived before mount."""
+        if self._pending_user_rows is not None:
+            self._apply_user_rows(self._pending_user_rows)
+            self._pending_user_rows = None
+        if self._pending_account_rows is not None:
+            self._apply_account_rows(self._pending_account_rows)
+            self._pending_account_rows = None
+        if self._pending_job_rows is not None:
+            self._apply_job_rows(self._pending_job_rows)
+            self._pending_job_rows = None
+        if self._pending_summary_markup is not None:
+            self._apply_summary_markup(self._pending_summary_markup)
+            self._pending_summary_markup = None
+        if self._pending_my_job_rows is not None:
+            self._apply_my_job_rows(self._pending_my_job_rows)
+            self._pending_my_job_rows = None
 
     @property
     def active_subtab(self) -> PrioritySubtabName:
@@ -438,6 +660,7 @@ class PriorityOverviewTab(VerticalScroll):
         try:
             active_container = self.query_one(f"#{active_container_id}", Container)
             active_container.remove_class("priority-subtab-hidden")
+            self._active_subtab = subtab
 
             # Focus the appropriate filterable table
             filterable_ids: dict[PrioritySubtabName, str] = {
@@ -452,9 +675,6 @@ class PriorityOverviewTab(VerticalScroll):
                 filterable_table.focus()
         except Exception as exc:
             logger.debug(f"Failed to show container {active_container_id}: {exc}")
-
-        self._active_subtab = subtab
-        self.post_message(PrioritySubtabSwitched(subtab))
 
     def _update_subtab_header(self, active: PrioritySubtabName) -> None:
         """Update the sub-tab header to highlight the active tab.
@@ -495,273 +715,170 @@ class PriorityOverviewTab(VerticalScroll):
         """Switch to the Jobs sub-tab."""
         self.switch_subtab("jobs")
 
-    def _get_current_user_account(self) -> str:
-        """Get the current user's account from the user priorities.
+    def _apply_user_rows(self, rows: list[tuple[str, ...]]) -> None:
+        """Push pre-built user priority rows into the table widget.
 
-        Returns:
-            The account name, or empty string if not found.
+        Args:
+            rows: Pre-built display row tuples.
         """
-        my_priority = next((p for p in self.user_priorities if p.username == self._current_username), None)
-        return my_priority.account if my_priority else ""
-
-    def update_my_priority_summary(self) -> None:
-        """Update the 'My Priority' summary panel."""
         try:
-            summary = self.query_one("#my-priority-summary", Static)
-        except Exception:
-            return
+            filterable = self.query_one("#user-priority-filterable-table", FilterableDataTable)
+            filterable.set_data(rows)
+        except Exception as exc:
+            logger.debug(f"Failed to apply user priority rows: {exc}")
 
-        colors = get_theme_colors(self.app)
-        markup = _build_my_priority_summary(
-            self._current_username,
-            self.user_priorities,
-            self.account_priorities,
-            self.job_priorities,
-            colors,
-        )
-        summary.update(markup)
+    def _apply_account_rows(self, rows: list[tuple[str, ...]]) -> None:
+        """Push pre-built account priority rows into the table widget.
 
-    def update_my_job_priorities(self) -> None:
-        """Update the 'My Priority' pending jobs table."""
+        Args:
+            rows: Pre-built display row tuples.
+        """
+        try:
+            filterable = self.query_one("#account-priority-filterable-table", FilterableDataTable)
+            filterable.set_data(rows)
+        except Exception as exc:
+            logger.debug(f"Failed to apply account priority rows: {exc}")
+
+    def _apply_job_rows(self, rows: list[tuple[str, ...]]) -> None:
+        """Push pre-built job priority rows into the table widget.
+
+        Args:
+            rows: Pre-built display row tuples.
+        """
+        try:
+            filterable = self.query_one("#job-priority-filterable-table", FilterableDataTable)
+            filterable.set_data(rows)
+        except Exception as exc:
+            logger.debug(f"Failed to apply job priority rows: {exc}")
+
+    def _apply_my_job_rows(self, rows: list[tuple[str, ...]]) -> None:
+        """Push pre-built 'my jobs' rows into the My Priority sub-tab table.
+
+        Args:
+            rows: Pre-built display row tuples.
+        """
         try:
             filterable = self.query_one("#my-job-priority-filterable-table", FilterableDataTable)
-        except Exception:
-            return
+            filterable.set_data(rows)
+        except Exception as exc:
+            logger.debug(f"Failed to apply my job priority rows: {exc}")
 
-        my_jobs = [j for j in self.job_priorities if j.user == self._current_username]
-
-        # Sort by priority descending
-        def sort_key(p: JobPriority) -> float:
-            try:
-                return float(p.priority)
-            except ValueError:
-                return 0.0
-
-        my_jobs.sort(key=sort_key, reverse=True)
-
-        rows: list[tuple[str, ...]] = []
-        for p in my_jobs:
-            rows.append(
-                (
-                    p.job_id,
-                    p.priority,
-                    p.age,
-                    p.fair_share,
-                    p.job_size,
-                    p.partition,
-                    p.qos,
-                )
-            )
-
-        filterable.set_data(rows)
-
-        # Update header with count
         try:
             header = self.query_one("#my-priority-jobs-header", Static)
-            header.update(f"[bold]Your Pending Jobs ({len(my_jobs)})[/bold]")
+            header.update(f"[bold]Your Pending Jobs ({len(rows)})[/bold]")
         except Exception as exc:
             logger.debug(f"Failed to update my-priority jobs header: {exc}")
 
+    def _apply_summary_markup(self, markup: str) -> None:
+        """Push pre-built summary markup into the My Priority summary widget.
+
+        Args:
+            markup: Rich markup string for the summary panel.
+        """
+        try:
+            summary = self.query_one("#my-priority-summary", Static)
+            summary.update(markup)
+        except Exception as exc:
+            logger.debug(f"Failed to apply priority summary: {exc}")
+
+    def apply_prebuilt_data(self, data: PrebuiltPriorityData) -> None:
+        """Apply pre-built priority data and rows to the widget.
+
+        All sorting, ranking, and row building has already been done in the
+        background worker. This method only stores the data and pushes
+        pre-built rows into the table widgets.
+
+        Args:
+            data: Pre-computed priority data bundle from background worker.
+        """
+        self.user_priorities = data.user_priorities
+        self.account_priorities = data.account_priorities
+        self.job_priorities = data.job_priorities
+
+        # Try to apply directly; if not mounted yet, store for on_mount
+        try:
+            self.query_one("#user-priority-filterable-table", FilterableDataTable)
+        except Exception:
+            # Not yet mounted — store for deferred application
+            self._pending_user_rows = data.user_rows
+            self._pending_account_rows = data.account_rows
+            self._pending_job_rows = data.job_rows
+            self._pending_my_job_rows = data.my_job_rows
+            self._pending_summary_markup = data.summary_markup
+            return
+
+        self._apply_user_rows(data.user_rows)
+        self._apply_account_rows(data.account_rows)
+        self._apply_job_rows(data.job_rows)
+        self._apply_summary_markup(data.summary_markup)
+        self._apply_my_job_rows(data.my_job_rows)
+
     def update_user_priorities(self, priorities: list[UserPriority]) -> None:
-        """Update the user priority data table.
+        """Update the user priority data table (with on-main-thread computation).
+
+        This is a convenience method for update_from_sshare_data.
+        For the production refresh path, use apply_prebuilt_data instead.
 
         Args:
             priorities: List of user priority statistics to display.
         """
         try:
-            filterable = self.query_one("#user-priority-filterable-table", FilterableDataTable)
-        except Exception:
+            self.query_one("#user-priority-filterable-table", FilterableDataTable)
+        except Exception as exc:
+            logger.debug(f"User priority table not mounted yet, storing data: {exc}")
             self.user_priorities = priorities
             return
 
-        # Sort by fair share descending (highest priority first)
-        def sort_key(p: UserPriority) -> float:
-            try:
-                return float(p.fair_share)
-            except ValueError:
-                return 0.0
-
-        sorted_priorities = sorted(priorities, key=sort_key, reverse=True)
-
-        # Compute dense ranks
-        fs_values = [sort_key(p) for p in sorted_priorities]
-        ranks = compute_dense_ranks(fs_values)
-        for p, rank in zip(sorted_priorities, ranks, strict=True):
-            p.rank = rank
-
-        self.user_priorities = sorted_priorities
-
-        # Build row data with color-coding and highlighting
         colors = get_theme_colors(self.app)
-        rows: list[tuple[str, ...]] = []
-        for p in sorted_priorities:
-            is_me = p.username == self._current_username
-            if is_me:
-                # Highlight current user's row
-                style = f"bold {colors.accent}"
-                rows.append(
-                    (
-                        _style_cell(p.rank, style),
-                        _style_cell(f">> {p.username}", style),
-                        _style_cell(p.account, style),
-                        _style_cell(p.raw_shares, style),
-                        _style_cell(p.norm_shares, style),
-                        _style_cell(p.raw_usage, style),
-                        _style_cell(p.effective_usage, style),
-                        _format_fs_cell(p.fair_share, colors),
-                        _format_status_cell(p.fair_share, colors),
-                    )
-                )
-            else:
-                rows.append(
-                    (
-                        p.rank,
-                        p.username,
-                        p.account,
-                        p.raw_shares,
-                        p.norm_shares,
-                        p.raw_usage,
-                        p.effective_usage,
-                        _format_fs_cell(p.fair_share, colors),
-                        _format_status_cell(p.fair_share, colors),
-                    )
-                )
-
-        filterable.set_data(rows)
-
-        # Also update my priority summary and jobs if mounted
-        self.update_my_priority_summary()
-        self.update_my_job_priorities()
+        sorted_priorities, rows = build_user_priority_rows(priorities, self._current_username, colors)
+        self.user_priorities = sorted_priorities
+        self._apply_user_rows(rows)
 
     def update_account_priorities(self, priorities: list[AccountPriority]) -> None:
-        """Update the account priority data table.
+        """Update the account priority data table (with on-main-thread computation).
+
+        This is a convenience method for update_from_sshare_data.
+        For the production refresh path, use apply_prebuilt_data instead.
 
         Args:
             priorities: List of account priority statistics to display.
         """
         try:
-            filterable = self.query_one("#account-priority-filterable-table", FilterableDataTable)
-        except Exception:
+            self.query_one("#account-priority-filterable-table", FilterableDataTable)
+        except Exception as exc:
+            logger.debug(f"Account priority table not mounted yet, storing data: {exc}")
             self.account_priorities = priorities
             return
 
-        # Sort by fair share descending (highest priority first)
-        def sort_key(p: AccountPriority) -> float:
-            try:
-                return float(p.fair_share)
-            except ValueError:
-                return 0.0
-
-        sorted_priorities = sorted(priorities, key=sort_key, reverse=True)
-
-        # Compute dense ranks
-        fs_values = [sort_key(p) for p in sorted_priorities]
-        ranks = compute_dense_ranks(fs_values)
-        for p, rank in zip(sorted_priorities, ranks, strict=True):
-            p.rank = rank
-
-        self.account_priorities = sorted_priorities
-
-        # Build row data with color-coding and highlighting
         colors = get_theme_colors(self.app)
-        my_account = self._get_current_user_account()
-        rows: list[tuple[str, ...]] = []
-        for p in sorted_priorities:
-            is_mine = p.account == my_account and my_account != ""
-            if is_mine:
-                style = f"bold {colors.accent}"
-                rows.append(
-                    (
-                        _style_cell(p.rank, style),
-                        _style_cell(p.account, style),
-                        _style_cell(p.raw_shares, style),
-                        _style_cell(p.norm_shares, style),
-                        _style_cell(p.raw_usage, style),
-                        _style_cell(p.effective_usage, style),
-                        _format_fs_cell(p.fair_share, colors),
-                        _format_status_cell(p.fair_share, colors),
-                    )
-                )
-            else:
-                rows.append(
-                    (
-                        p.rank,
-                        p.account,
-                        p.raw_shares,
-                        p.norm_shares,
-                        p.raw_usage,
-                        p.effective_usage,
-                        _format_fs_cell(p.fair_share, colors),
-                        _format_status_cell(p.fair_share, colors),
-                    )
-                )
-
-        filterable.set_data(rows)
-
-        # Also update my priority summary
-        self.update_my_priority_summary()
+        my_account = next(
+            (p.account for p in self.user_priorities if p.username == self._current_username),
+            "",
+        )
+        sorted_priorities, rows = build_account_priority_rows(priorities, my_account, colors)
+        self.account_priorities = sorted_priorities
+        self._apply_account_rows(rows)
 
     def update_job_priorities(self, priorities: list[JobPriority]) -> None:
-        """Update the job priority data table.
+        """Update the job priority data table (with on-main-thread computation).
+
+        This is a convenience method for update_from_sprio_data.
+        For the production refresh path, use apply_prebuilt_data instead.
 
         Args:
             priorities: List of job priority factors to display.
         """
         try:
-            filterable = self.query_one("#job-priority-filterable-table", FilterableDataTable)
-        except Exception:
+            self.query_one("#job-priority-filterable-table", FilterableDataTable)
+        except Exception as exc:
+            logger.debug(f"Job priority table not mounted yet, storing data: {exc}")
             self.job_priorities = priorities
             return
 
-        # Sort by priority descending (highest priority first)
-        def sort_key(p: JobPriority) -> float:
-            try:
-                return float(p.priority)
-            except ValueError:
-                return 0.0
-
-        sorted_priorities = sorted(priorities, key=sort_key, reverse=True)
-        self.job_priorities = sorted_priorities
-
-        # Build row data with current user highlighting
         colors = get_theme_colors(self.app)
-        rows: list[tuple[str, ...]] = []
-        for p in sorted_priorities:
-            is_me = p.user == self._current_username
-            if is_me:
-                style = f"bold {colors.accent}"
-                rows.append(
-                    (
-                        _style_cell(p.job_id, style),
-                        _style_cell(p.user, style),
-                        _style_cell(p.account, style),
-                        _style_cell(p.priority, style),
-                        _style_cell(p.age, style),
-                        _style_cell(p.fair_share, style),
-                        _style_cell(p.job_size, style),
-                        _style_cell(p.partition, style),
-                        _style_cell(p.qos, style),
-                    )
-                )
-            else:
-                rows.append(
-                    (
-                        p.job_id,
-                        p.user,
-                        p.account,
-                        p.priority,
-                        p.age,
-                        p.fair_share,
-                        p.job_size,
-                        p.partition,
-                        p.qos,
-                    )
-                )
-
-        filterable.set_data(rows)
-
-        # Also update my pending jobs
-        self.update_my_job_priorities()
+        sorted_priorities, rows = build_job_priority_rows(priorities, self._current_username, colors)
+        self.job_priorities = sorted_priorities
+        self._apply_job_rows(rows)
 
     def update_from_sshare_data(self, entries: list[tuple[str, ...]]) -> None:
         """Update user and account priorities from raw sshare data.
@@ -801,6 +918,22 @@ class PriorityOverviewTab(VerticalScroll):
         self.update_user_priorities(user_priorities)
         self.update_account_priorities(account_priorities)
 
+        # Update summary and my-jobs after both data sources are set
+        try:
+            colors = get_theme_colors(self.app)
+            summary_markup = build_my_priority_summary(
+                self._current_username,
+                self.user_priorities,
+                self.account_priorities,
+                self.job_priorities,
+                colors,
+            )
+            self._apply_summary_markup(summary_markup)
+            my_job_rows = build_my_job_priority_rows(self.job_priorities, self._current_username)
+            self._apply_my_job_rows(my_job_rows)
+        except Exception as exc:
+            logger.debug(f"Failed to update summary after sshare data: {exc}")
+
     def update_from_sprio_data(self, entries: list[tuple[str, ...]]) -> None:
         """Update job priorities from raw sprio data.
 
@@ -825,3 +958,10 @@ class PriorityOverviewTab(VerticalScroll):
         ]
 
         self.update_job_priorities(job_priorities)
+
+        # Update my-jobs after job data is set
+        try:
+            my_job_rows = build_my_job_priority_rows(self.job_priorities, self._current_username)
+            self._apply_my_job_rows(my_job_rows)
+        except Exception as exc:
+            logger.debug(f"Failed to update my-jobs after sprio data: {exc}")

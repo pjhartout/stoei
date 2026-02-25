@@ -65,8 +65,14 @@ from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 from stoei.widgets.priority_overview import (
     AccountPriority,
     JobPriority,
+    PrebuiltPriorityData,
     PriorityOverviewTab,
     UserPriority,
+    build_account_priority_rows,
+    build_job_priority_rows,
+    build_my_job_priority_rows,
+    build_my_priority_summary,
+    build_user_priority_rows,
 )
 from stoei.widgets.screens import (
     AccountInfoScreen,
@@ -209,6 +215,11 @@ class SlurmMonitor(App[None]):
         self._cached_user_priorities: list[UserPriority] = []
         self._cached_account_priorities: list[AccountPriority] = []
         self._cached_job_priorities: list[JobPriority] = []
+        self._cached_user_priority_rows: list[tuple[str, ...]] = []
+        self._cached_account_priority_rows: list[tuple[str, ...]] = []
+        self._cached_job_priority_rows: list[tuple[str, ...]] = []
+        self._cached_my_job_priority_rows: list[tuple[str, ...]] = []
+        self._cached_priority_summary_markup: str = ""
         # Pre-computed job rows from worker thread for fast initial UI population
         self._precomputed_job_rows: list[tuple[str, ...]] = []
         # Dirty flags: True when data has changed but the tab's table hasn't been refreshed
@@ -1566,13 +1577,18 @@ class SlurmMonitor(App[None]):
         )
 
     def _compute_priority_overview_cache(self) -> None:
-        """Pre-compute priority overview data from cached SLURM results.
+        """Pre-compute priority overview data and display rows from cached SLURM results.
+
+        Performs all heavy computation (parsing, sorting, ranking, row building)
+        so the main thread only needs to push pre-built rows into widgets.
 
         This method is safe to run in a background worker thread.
         """
+        colors = get_theme_colors(self)
+
         if self._fair_share_entries:
             user_data, account_data = parse_sshare_output(self._fair_share_entries)
-            self._cached_user_priorities = [
+            user_priorities = [
                 UserPriority(
                     username=d["User"],
                     account=d["Account"],
@@ -1585,7 +1601,7 @@ class SlurmMonitor(App[None]):
                 )
                 for d in user_data
             ]
-            self._cached_account_priorities = [
+            account_priorities = [
                 AccountPriority(
                     account=d["Account"],
                     raw_shares=d["RawShares"],
@@ -1598,12 +1614,12 @@ class SlurmMonitor(App[None]):
                 for d in account_data
             ]
         else:
-            self._cached_user_priorities = []
-            self._cached_account_priorities = []
+            user_priorities = []
+            account_priorities = []
 
         if self._job_priority_entries:
             job_data = parse_sprio_output(self._job_priority_entries)
-            self._cached_job_priorities = [
+            job_priorities = [
                 JobPriority(
                     job_id=d["JobID"],
                     user=d["User"],
@@ -1618,7 +1634,45 @@ class SlurmMonitor(App[None]):
                 for d in job_data
             ]
         else:
-            self._cached_job_priorities = []
+            job_priorities = []
+
+        # Sort, rank, and build display rows (all in background thread)
+        sorted_users, user_rows = build_user_priority_rows(
+            user_priorities,
+            self._current_username,
+            colors,
+        )
+        current_user_account = next(
+            (p.account for p in sorted_users if p.username == self._current_username),
+            "",
+        )
+        sorted_accounts, account_rows = build_account_priority_rows(
+            account_priorities,
+            current_user_account,
+            colors,
+        )
+        sorted_jobs, job_rows = build_job_priority_rows(
+            job_priorities,
+            self._current_username,
+            colors,
+        )
+        my_job_rows = build_my_job_priority_rows(sorted_jobs, self._current_username)
+        summary_markup = build_my_priority_summary(
+            self._current_username,
+            sorted_users,
+            sorted_accounts,
+            sorted_jobs,
+            colors,
+        )
+
+        self._cached_user_priorities = sorted_users
+        self._cached_account_priorities = sorted_accounts
+        self._cached_job_priorities = sorted_jobs
+        self._cached_user_priority_rows = user_rows
+        self._cached_account_priority_rows = account_rows
+        self._cached_job_priority_rows = job_rows
+        self._cached_my_job_priority_rows = my_job_rows
+        self._cached_priority_summary_markup = summary_markup
 
     def _apply_user_overview_from_cache(self) -> None:
         """Apply cached user overview data to the UI (main thread only)."""
@@ -1659,11 +1713,24 @@ class SlurmMonitor(App[None]):
         summary.update(f"My Usage: {' | '.join(parts)}")
 
     def _apply_priority_overview_from_cache(self) -> None:
-        """Apply cached priority overview data to the UI (main thread only)."""
+        """Apply cached priority overview data to the UI (main thread only).
+
+        All heavy computation (sorting, ranking, row building) was already done
+        in the background worker. This method only pushes pre-built data into widgets.
+        """
         priority_tab = self.query_one("#priority-overview", PriorityOverviewTab)
-        priority_tab.update_user_priorities(self._cached_user_priorities)
-        priority_tab.update_account_priorities(self._cached_account_priorities)
-        priority_tab.update_job_priorities(self._cached_job_priorities)
+        priority_tab.apply_prebuilt_data(
+            PrebuiltPriorityData(
+                user_priorities=self._cached_user_priorities,
+                account_priorities=self._cached_account_priorities,
+                job_priorities=self._cached_job_priorities,
+                user_rows=self._cached_user_priority_rows,
+                account_rows=self._cached_account_priority_rows,
+                job_rows=self._cached_job_priority_rows,
+                my_job_rows=self._cached_my_job_priority_rows,
+                summary_markup=self._cached_priority_summary_markup,
+            )
+        )
 
     def _update_user_overview(self) -> None:
         """Update the user overview tab without blocking the UI."""

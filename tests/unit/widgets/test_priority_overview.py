@@ -7,12 +7,36 @@ from stoei.widgets.filterable_table import FilterableDataTable
 from stoei.widgets.priority_overview import (
     AccountPriority,
     JobPriority,
+    PrebuiltPriorityData,
     PriorityOverviewTab,
     UserPriority,
+    build_account_priority_rows,
+    build_job_priority_rows,
+    build_my_job_priority_rows,
+    build_my_priority_summary,
+    build_user_priority_rows,
     compute_dense_ranks,
 )
 from textual.app import App
 from textual.widgets import Static
+
+
+def _fallback_colors() -> ThemeColors:
+    """Create a ThemeColors instance with fallback colors for testing."""
+    return ThemeColors(
+        success=FALLBACK_COLORS["success"],
+        warning=FALLBACK_COLORS["warning"],
+        error=FALLBACK_COLORS["error"],
+        primary=FALLBACK_COLORS["primary"],
+        accent=FALLBACK_COLORS["accent"],
+        secondary=FALLBACK_COLORS["secondary"],
+        foreground=FALLBACK_COLORS["foreground"],
+        text_muted=FALLBACK_COLORS["text_muted"],
+        background=FALLBACK_COLORS["background"],
+        surface=FALLBACK_COLORS["surface"],
+        panel=FALLBACK_COLORS["panel"],
+        border=FALLBACK_COLORS["border"],
+    )
 
 
 class TestUserPriority:
@@ -400,12 +424,33 @@ class TestPriorityOverviewTab:
         app = PriorityTestApp()
         async with app.run_test(size=(80, 24)):
             priority_tab = app.query_one("#priority-overview", PriorityOverviewTab)
-            # Update with data that doesn't include the current user
-            priorities = [
+            colors = _fallback_colors()
+            user_priorities = [
                 UserPriority("user1", "physics", "100", "0.125", "50000", "0.075", "0.15", "0.85"),
             ]
-            priority_tab.update_user_priorities(priorities)
-            # Summary should show "not found" message
+            sorted_users, user_rows = build_user_priority_rows(user_priorities, "unknown_user", colors)
+            sorted_accounts, account_rows = build_account_priority_rows([], "", colors)
+            sorted_jobs, job_rows = build_job_priority_rows([], "unknown_user", colors)
+            my_job_rows = build_my_job_priority_rows(sorted_jobs, "unknown_user")
+            summary_markup = build_my_priority_summary(
+                "unknown_user",
+                sorted_users,
+                sorted_accounts,
+                sorted_jobs,
+                colors,
+            )
+            priority_tab.apply_prebuilt_data(
+                PrebuiltPriorityData(
+                    user_priorities=sorted_users,
+                    account_priorities=sorted_accounts,
+                    job_priorities=sorted_jobs,
+                    user_rows=user_rows,
+                    account_rows=account_rows,
+                    job_rows=job_rows,
+                    my_job_rows=my_job_rows,
+                    summary_markup=summary_markup,
+                )
+            )
             summary = app.query_one("#my-priority-summary", Static)
             assert "No fair-share data found" in summary.content
 
@@ -419,11 +464,34 @@ class TestPriorityOverviewTab:
         app = PriorityTestApp()
         async with app.run_test(size=(80, 24)):
             priority_tab = app.query_one("#priority-overview", PriorityOverviewTab)
-            priorities = [
+            colors = _fallback_colors()
+            user_priorities = [
                 UserPriority("user1", "physics", "100", "0.125", "50000", "0.075", "0.15", "0.85"),
                 UserPriority("user2", "chemistry", "50", "0.0625", "100000", "0.15", "0.30", "0.70"),
             ]
-            priority_tab.update_user_priorities(priorities)
+            sorted_users, user_rows = build_user_priority_rows(user_priorities, "user1", colors)
+            sorted_accounts, account_rows = build_account_priority_rows([], "", colors)
+            sorted_jobs, job_rows = build_job_priority_rows([], "user1", colors)
+            my_job_rows = build_my_job_priority_rows(sorted_jobs, "user1")
+            summary_markup = build_my_priority_summary(
+                "user1",
+                sorted_users,
+                sorted_accounts,
+                sorted_jobs,
+                colors,
+            )
+            priority_tab.apply_prebuilt_data(
+                PrebuiltPriorityData(
+                    user_priorities=sorted_users,
+                    account_priorities=sorted_accounts,
+                    job_priorities=sorted_jobs,
+                    user_rows=user_rows,
+                    account_rows=account_rows,
+                    job_rows=job_rows,
+                    my_job_rows=my_job_rows,
+                    summary_markup=summary_markup,
+                )
+            )
             summary = app.query_one("#my-priority-summary", Static)
             content = summary.content
             assert "Your Priority" in content
