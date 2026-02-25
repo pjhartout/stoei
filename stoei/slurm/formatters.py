@@ -557,6 +557,45 @@ def _format_fair_share_value(
     return f"[{color}]{display}[/{color}]"
 
 
+def fair_share_color(fair_share: str, colors: ThemeColors) -> str:
+    """Get the appropriate color for a fair-share value.
+
+    Args:
+        fair_share: Fair-share factor as string.
+        colors: Theme colors.
+
+    Returns:
+        Hex color string based on the fair-share thresholds.
+    """
+    val = _safe_float(fair_share, default=float("nan"))
+    if math.isnan(val):
+        return colors.foreground
+    if val >= _FAIR_SHARE_SUCCESS_THRESHOLD:
+        return colors.success
+    if val >= _FAIR_SHARE_WARNING_THRESHOLD:
+        return colors.warning
+    return colors.error
+
+
+def fair_share_status(fair_share: str) -> str:
+    """Get a human-readable status label for a fair-share value.
+
+    Args:
+        fair_share: Fair-share factor as string.
+
+    Returns:
+        Status label: "Under-served", "Fair", or "Over-served".
+    """
+    val = _safe_float(fair_share, default=float("nan"))
+    if math.isnan(val):
+        return ""
+    if val >= _FAIR_SHARE_SUCCESS_THRESHOLD:
+        return "Under-served"
+    if val >= _FAIR_SHARE_WARNING_THRESHOLD:
+        return "Fair"
+    return "Over-served"
+
+
 def _format_energy_wh(wh: float) -> str:
     """Format an energy value in Wh as Wh/kWh/MWh.
 
