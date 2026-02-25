@@ -261,7 +261,7 @@ class SlurmMonitor(App[None]):
 
                 # Priority tab
                 with Container(id="tab-priority-content", classes="tab-content"):
-                    yield PriorityOverviewTab(id="priority-overview")
+                    yield PriorityOverviewTab(current_username=self._current_username, id="priority-overview")
 
                 # Logs tab
                 with Container(id="tab-logs-content", classes="tab-content"):
@@ -1761,9 +1761,17 @@ class SlurmMonitor(App[None]):
             self.call_later(self._update_priority_overview)
         try:
             priority_tab = self.query_one("#priority-overview", PriorityOverviewTab)
-            priority_table = priority_tab.query_one("#user_priority_table", DataTable)
+            # Focus the table in the currently active sub-tab
+            subtab_table_ids = {
+                "mine": "my_job_priority_table",
+                "users": "user_priority_table",
+                "accounts": "account_priority_table",
+                "jobs": "job_priority_table",
+            }
+            table_id = subtab_table_ids.get(priority_tab.active_subtab, "my_job_priority_table")
+            priority_table = priority_tab.query_one(f"#{table_id}", DataTable)
             priority_table.focus()
-            logger.debug("Focused priority table for arrow key navigation")
+            logger.debug(f"Focused priority table {table_id} for arrow key navigation")
         except Exception as exc:
             logger.debug(f"Failed to focus priority table: {exc}")
 
