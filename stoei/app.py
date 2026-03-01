@@ -1228,50 +1228,66 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.error(f"Failed to update cluster sidebar: {exc}", exc_info=True)
 
-    def _parse_node_state(self, state: str, stats: ClusterStats) -> None:
+    def _parse_node_state(self, state: str, stats: ClusterStats) -> bool:
         """Parse node state and update node counts.
+
+        Draining nodes are excluded from total_nodes but their allocated
+        resources are still counted. This prevents draining nodes from
+        inflating the denominator of utilization percentages.
 
         Args:
             state: Node state string (uppercase).
             stats: ClusterStats object to update.
-        """
-        stats.total_nodes += 1
-        if "IDLE" in state or "ALLOCATED" in state or "MIXED" in state:
-            if "IDLE" in state:
-                stats.free_nodes += 1
-            else:
-                stats.allocated_nodes += 1
 
-    def _parse_node_cpus(self, node_data: dict[str, str], stats: ClusterStats) -> None:
+        Returns:
+            True if the node is draining (excluded from totals).
+        """
+        if "DRAIN" in state:
+            stats.draining_nodes += 1
+            if "ALLOCATED" in state or "MIXED" in state:
+                stats.allocated_nodes += 1
+            return True
+        stats.total_nodes += 1
+        if "IDLE" in state:
+            stats.free_nodes += 1
+        elif "ALLOCATED" in state or "MIXED" in state:
+            stats.allocated_nodes += 1
+        return False
+
+    def _parse_node_cpus(self, node_data: dict[str, str], stats: ClusterStats, *, include_total: bool = True) -> None:
         """Parse CPU information from node data.
 
         Args:
             node_data: Node data dictionary.
             stats: ClusterStats object to update.
+            include_total: Whether to include in total_cpus (False for draining nodes).
         """
         cpus_total_str = node_data.get("CPUTot", "0")
         cpus_alloc_str = node_data.get("CPUAlloc", "0")
         try:
             cpus_total = int(cpus_total_str)
             cpus_alloc = int(cpus_alloc_str)
-            stats.total_cpus += cpus_total
+            if include_total:
+                stats.total_cpus += cpus_total
             stats.allocated_cpus += cpus_alloc
         except ValueError:
             pass
 
-    def _parse_node_memory(self, node_data: dict[str, str], stats: ClusterStats) -> None:
+    def _parse_node_memory(self, node_data: dict[str, str], stats: ClusterStats, *, include_total: bool = True) -> None:
         """Parse memory information from node data.
 
         Args:
             node_data: Node data dictionary.
             stats: ClusterStats object to update.
+            include_total: Whether to include in total_memory_gb (False for draining nodes).
         """
         mem_total_str = node_data.get("RealMemory", "0")
         mem_alloc_str = node_data.get("AllocMem", "0")
         try:
             mem_total_mb = int(mem_total_str)
             mem_alloc_mb = int(mem_alloc_str)
-            stats.total_memory_gb += mem_total_mb / 1024.0
+            if include_total:
+                stats.total_memory_gb += mem_total_mb / 1024.0
             stats.allocated_memory_gb += mem_alloc_mb / 1024.0
         except ValueError:
             pass
@@ -1299,21 +1315,25 @@ class SlurmMonitor(App[None]):
                 stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
                 stats.total_gpus += gpu_count
 
-    def _parse_gpus_from_gres(self, node_data: dict[str, str], state: str, stats: ClusterStats) -> None:
+    def _parse_gpus_from_gres(
+        self, node_data: dict[str, str], state: str, stats: ClusterStats, *, include_total: bool = True
+    ) -> None:
         """Parse GPUs from Gres field (fallback when TRES is not available).
 
         Args:
             node_data: Node data dictionary.
             state: Node state string (uppercase).
             stats: ClusterStats object to update.
+            include_total: Whether to include in total_gpus (False for draining nodes).
         """
         gres = node_data.get("Gres", "")
         gpu_entries = parse_gpu_from_gres(gres)
 
         for gpu_type, gpu_count in gpu_entries:
             current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
-            stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
-            stats.total_gpus += gpu_count
+            if include_total:
+                stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
+                stats.total_gpus += gpu_count
             # Estimate allocated GPUs based on node state
             if "ALLOCATED" in state or "MIXED" in state:
                 current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
@@ -1417,24 +1437,25 @@ class SlurmMonitor(App[None]):
             # Parse node information
             state = node_data.get("State", "").upper()
 
-            # Count nodes
-            self._parse_node_state(state, stats)
+            # Count nodes (draining nodes excluded from totals)
+            is_draining = self._parse_node_state(state, stats)
 
-            # Parse CPUs
-            self._parse_node_cpus(node_data, stats)
+            # Parse CPUs (draining nodes: allocated only, no totals)
+            self._parse_node_cpus(node_data, stats, include_total=not is_draining)
 
-            # Parse memory
-            self._parse_node_memory(node_data, stats)
+            # Parse memory (draining nodes: allocated only, no totals)
+            self._parse_node_memory(node_data, stats, include_total=not is_draining)
 
             # Parse GPUs by type from CfgTRES and AllocTRES
             cfg_tres = node_data.get("CfgTRES", "")
             alloc_tres = node_data.get("AllocTRES", "")
 
-            # Parse CfgTRES for total GPUs by type
+            # Parse CfgTRES for total GPUs by type (skip for draining nodes)
             # Note: If both generic (gres/gpu=8) and specific (gres/gpu:h200=8) exist,
             # they represent the same GPUs, so we only count specific types to avoid double-counting
-            gpu_entries = parse_gpu_entries(cfg_tres)
-            self._process_gpu_entries_for_stats(gpu_entries, stats, is_allocated=False)
+            if not is_draining:
+                gpu_entries = parse_gpu_entries(cfg_tres)
+                self._process_gpu_entries_for_stats(gpu_entries, stats, is_allocated=False)
 
             # Parse AllocTRES for allocated GPUs by type
             alloc_entries = parse_gpu_entries(alloc_tres)
@@ -1442,7 +1463,7 @@ class SlurmMonitor(App[None]):
 
             # Fallback: if no TRES data, try parsing Gres field
             if not cfg_tres and not alloc_tres:
-                self._parse_gpus_from_gres(node_data, state, stats)
+                self._parse_gpus_from_gres(node_data, state, stats, include_total=not is_draining)
 
         # Calculate pending job resources
         self._calculate_pending_resources(stats)

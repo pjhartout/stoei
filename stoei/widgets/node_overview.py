@@ -71,6 +71,7 @@ class NodeOverviewTab(VerticalScroll):
         ColumnConfig(name="GPU%", key="gpu_pct", sortable=True, filterable=False),
         ColumnConfig(name="GPU Types", key="gpu_types", sortable=True, filterable=True),
         ColumnConfig(name="Partitions", key="partitions", sortable=True, filterable=True),
+        ColumnConfig(name="Reason", key="reason", sortable=True, filterable=True),
     ]
 
     def __init__(
@@ -151,6 +152,8 @@ class NodeOverviewTab(VerticalScroll):
             node_name = node.name if node.name else "N/A"
             partitions_display = node.partitions if node.partitions else "N/A"
 
+            reason_display = node.reason if node.reason else ""
+
             rows.append(
                 (
                     node_name,
@@ -163,6 +166,7 @@ class NodeOverviewTab(VerticalScroll):
                     gpu_pct_str,
                     gpu_types_display,
                     partitions_display,
+                    reason_display,
                 )
             )
 

@@ -46,6 +46,12 @@ class TestClusterStats:
         assert stats.allocated_memory_gb == 0.0
         assert stats.total_gpus == 0
         assert stats.allocated_gpus == 0
+        assert stats.draining_nodes == 0
+
+    def test_draining_nodes_field(self) -> None:
+        """Test draining_nodes field initialization and assignment."""
+        stats = ClusterStats(draining_nodes=5)
+        assert stats.draining_nodes == 5
 
     def test_free_nodes_pct_zero_total(self) -> None:
         """Test free_nodes_pct when total_nodes is zero."""
@@ -270,6 +276,46 @@ class TestClusterSidebar:
         cluster_sidebar.update_stats(stats2)
         assert cluster_sidebar.stats.total_nodes == 20
         assert cluster_sidebar.stats.free_nodes == 15
+
+
+class TestClusterSidebarDraining:
+    """Tests for draining node display in ClusterSidebar."""
+
+    @pytest.fixture
+    def cluster_sidebar(self) -> ClusterSidebar:
+        """Create a ClusterSidebar widget for testing."""
+        return ClusterSidebar(id="test-sidebar")
+
+    def test_render_stats_no_draining_nodes(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that draining indicator is hidden when no draining nodes."""
+        stats = ClusterStats(total_nodes=10, free_nodes=5, draining_nodes=0)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "draining" not in rendered
+
+    def test_render_stats_with_draining_nodes(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that draining indicator is shown when draining nodes exist."""
+        stats = ClusterStats(total_nodes=10, free_nodes=5, draining_nodes=3)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "(3 draining)" in rendered
+        assert "bright_black" in rendered
+
+    def test_render_stats_draining_single_node(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test draining indicator with a single draining node."""
+        stats = ClusterStats(total_nodes=10, free_nodes=5, draining_nodes=1)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        assert "(1 draining)" in rendered
+
+    def test_render_stats_draining_after_available(self, cluster_sidebar: ClusterSidebar) -> None:
+        """Test that draining indicator appears after the available line."""
+        stats = ClusterStats(total_nodes=10, free_nodes=5, draining_nodes=2)
+        cluster_sidebar.update_stats(stats)
+        rendered = cluster_sidebar._render_stats()
+        available_pos = rendered.find("5/10 available")
+        draining_pos = rendered.find("(2 draining)")
+        assert available_pos < draining_pos, "Draining should appear after available"
 
 
 class TestClusterStatsPendingResources:

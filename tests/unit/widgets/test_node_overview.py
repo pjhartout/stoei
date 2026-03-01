@@ -221,3 +221,29 @@ class TestNodeOverviewTab:
         result = node_tab._format_state("UNKNOWN")
         # Unknown states still get a color (foreground color from theme)
         assert "UNKNOWN" in result
+
+    def test_reason_column_in_config(self) -> None:
+        """Test that Reason column is present in column configs."""
+        column_keys = [col.key for col in NodeOverviewTab.NODE_TABLE_COLUMN_CONFIGS]
+        assert "reason" in column_keys
+
+    async def test_update_nodes_with_reason(self, app: NodeOverviewTestApp) -> None:
+        """Test that reason field is included in node display."""
+        async with app.run_test(size=(120, 24)):
+            node_tab = app.query_one("#node-overview", NodeOverviewTab)
+            nodes = [
+                NodeInfo(
+                    name="node01",
+                    state="IDLE+DRAIN",
+                    cpus_alloc=0,
+                    cpus_total=16,
+                    memory_alloc_gb=0.0,
+                    memory_total_gb=64.0,
+                    gpus_alloc=0,
+                    gpus_total=0,
+                    partitions="cpu",
+                    reason="Maintenance scheduled",
+                ),
+            ]
+            node_tab.update_nodes(nodes)
+            assert node_tab.nodes[0].reason == "Maintenance scheduled"

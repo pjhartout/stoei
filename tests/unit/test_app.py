@@ -587,6 +587,196 @@ class TestCalculateClusterStats:
         assert stats.allocated_cpus == 16
 
 
+class TestParseNodeStateDraining:
+    """Tests for _parse_node_state handling of draining nodes."""
+
+    @pytest.fixture(autouse=True)
+    def reset_job_cache(self) -> None:
+        """Reset JobCache singleton before each test."""
+        JobCache.reset()
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Create a SlurmMonitor instance for testing."""
+        return SlurmMonitor()
+
+    def test_drain_state_returns_true(self, app: SlurmMonitor) -> None:
+        """Test that DRAIN states return True (is draining)."""
+        stats = ClusterStats()
+        assert app._parse_node_state("IDLE+DRAIN", stats) is True
+
+    def test_drained_state_returns_true(self, app: SlurmMonitor) -> None:
+        """Test that DRAINED state returns True."""
+        stats = ClusterStats()
+        assert app._parse_node_state("DRAINED", stats) is True
+
+    def test_idle_state_returns_false(self, app: SlurmMonitor) -> None:
+        """Test that IDLE state returns False."""
+        stats = ClusterStats()
+        assert app._parse_node_state("IDLE", stats) is False
+
+    def test_drain_excluded_from_total_nodes(self, app: SlurmMonitor) -> None:
+        """Test that draining nodes are not counted in total_nodes."""
+        stats = ClusterStats()
+        app._parse_node_state("IDLE+DRAIN", stats)
+        assert stats.total_nodes == 0
+        assert stats.draining_nodes == 1
+
+    def test_idle_drain_not_counted_as_free(self, app: SlurmMonitor) -> None:
+        """Test that IDLE+DRAIN is not counted as a free node."""
+        stats = ClusterStats()
+        app._parse_node_state("IDLE+DRAIN", stats)
+        assert stats.free_nodes == 0
+
+    def test_allocated_drain_counted_as_allocated(self, app: SlurmMonitor) -> None:
+        """Test that ALLOCATED+DRAIN is counted as allocated."""
+        stats = ClusterStats()
+        app._parse_node_state("ALLOCATED+DRAIN", stats)
+        assert stats.allocated_nodes == 1
+        assert stats.draining_nodes == 1
+        assert stats.total_nodes == 0
+
+    def test_mixed_drain_counted_as_allocated(self, app: SlurmMonitor) -> None:
+        """Test that MIXED+DRAIN is counted as allocated."""
+        stats = ClusterStats()
+        app._parse_node_state("MIXED+DRAIN", stats)
+        assert stats.allocated_nodes == 1
+        assert stats.draining_nodes == 1
+
+
+class TestCalculateClusterStatsDraining:
+    """Tests for _calculate_cluster_stats with draining nodes."""
+
+    @pytest.fixture(autouse=True)
+    def reset_job_cache(self) -> None:
+        """Reset JobCache singleton before each test."""
+        JobCache.reset()
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Create a SlurmMonitor instance for testing."""
+        return SlurmMonitor()
+
+    def test_draining_node_excluded_from_totals(self, app: SlurmMonitor) -> None:
+        """Test that draining node CPUs/memory are excluded from totals."""
+        app._cluster_nodes = [
+            {
+                "NodeName": "node01",
+                "State": "IDLE",
+                "CPUTot": "16",
+                "CPUAlloc": "0",
+                "RealMemory": "65536",
+                "AllocMem": "0",
+            },
+            {
+                "NodeName": "node02",
+                "State": "IDLE+DRAIN",
+                "CPUTot": "16",
+                "CPUAlloc": "0",
+                "RealMemory": "65536",
+                "AllocMem": "0",
+            },
+        ]
+        stats = app._calculate_cluster_stats()
+        assert stats.total_nodes == 1
+        assert stats.draining_nodes == 1
+        assert stats.total_cpus == 16  # Only node01
+        assert stats.total_memory_gb == 64.0  # Only node01
+
+    def test_draining_allocated_resources_counted(self, app: SlurmMonitor) -> None:
+        """Test that allocated resources on draining nodes are still counted."""
+        app._cluster_nodes = [
+            {
+                "NodeName": "node01",
+                "State": "IDLE",
+                "CPUTot": "16",
+                "CPUAlloc": "0",
+                "RealMemory": "65536",
+                "AllocMem": "0",
+            },
+            {
+                "NodeName": "node02",
+                "State": "ALLOCATED+DRAIN",
+                "CPUTot": "16",
+                "CPUAlloc": "8",
+                "RealMemory": "65536",
+                "AllocMem": "32768",
+            },
+        ]
+        stats = app._calculate_cluster_stats()
+        assert stats.total_nodes == 1
+        assert stats.draining_nodes == 1
+        assert stats.total_cpus == 16  # Only node01
+        assert stats.allocated_cpus == 8  # From draining node02
+        assert stats.total_memory_gb == 64.0  # Only node01
+        assert stats.allocated_memory_gb == 32.0  # From draining node02
+
+    def test_draining_gpus_excluded_from_totals(self, app: SlurmMonitor) -> None:
+        """Test that draining node GPUs are excluded from totals."""
+        app._cluster_nodes = [
+            {
+                "NodeName": "node01",
+                "State": "ALLOCATED",
+                "CPUTot": "192",
+                "CPUAlloc": "96",
+                "RealMemory": "2000000",
+                "AllocMem": "1000000",
+                "CfgTRES": "cpu=192,mem=2000000M,gres/gpu=8,gres/gpu:h200=8",
+                "AllocTRES": "cpu=96,mem=1000000M,gres/gpu=4,gres/gpu:h200=4",
+            },
+            {
+                "NodeName": "node02",
+                "State": "MIXED+DRAIN",
+                "CPUTot": "192",
+                "CPUAlloc": "48",
+                "RealMemory": "2000000",
+                "AllocMem": "500000",
+                "CfgTRES": "cpu=192,mem=2000000M,gres/gpu=8,gres/gpu:h200=8",
+                "AllocTRES": "cpu=48,mem=500000M,gres/gpu=2,gres/gpu:h200=2",
+            },
+        ]
+        stats = app._calculate_cluster_stats()
+        # Only node01 in totals
+        assert stats.total_gpus == 8
+        # Both nodes in allocated
+        assert stats.allocated_gpus == 6  # 4 from node01 + 2 from draining node02
+
+    def test_mixed_cluster_percentages_valid(self, app: SlurmMonitor) -> None:
+        """Test that percentages remain 0-100% with draining nodes."""
+        app._cluster_nodes = [
+            {
+                "NodeName": "node01",
+                "State": "IDLE",
+                "CPUTot": "16",
+                "CPUAlloc": "0",
+                "RealMemory": "65536",
+                "AllocMem": "0",
+            },
+            {
+                "NodeName": "node02",
+                "State": "ALLOCATED",
+                "CPUTot": "16",
+                "CPUAlloc": "16",
+                "RealMemory": "65536",
+                "AllocMem": "65536",
+            },
+            {
+                "NodeName": "node03",
+                "State": "IDLE+DRAIN",
+                "CPUTot": "16",
+                "CPUAlloc": "0",
+                "RealMemory": "65536",
+                "AllocMem": "0",
+            },
+        ]
+        stats = app._calculate_cluster_stats()
+        assert stats.total_nodes == 2
+        assert stats.draining_nodes == 1
+        assert 0.0 <= stats.free_nodes_pct <= 100.0
+        assert 0.0 <= stats.free_cpus_pct <= 100.0
+        assert 0.0 <= stats.free_memory_pct <= 100.0
+
+
 class TestUpdateClusterSidebar:
     """Tests for the _update_cluster_sidebar method."""
 
