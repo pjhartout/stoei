@@ -53,6 +53,8 @@ class ClusterStats:
     total_gpus: int = 0
     allocated_gpus: int = 0
     gpus_by_type: dict[str, tuple[int, int]] = field(default_factory=dict)
+    # Draining nodes (excluded from totals, tracked separately)
+    draining_nodes: int = 0
     # Pending job resources
     pending_jobs_count: int = 0
     pending_cpus: int = 0
@@ -301,15 +303,21 @@ class ClusterSidebar(VerticalScroll):
             "[bold]Nodes:[/bold]",
             f"  Free: {self._color_pct(nodes_pct)}",
             f"  {stats.free_nodes}/{stats.total_nodes} available",
-            "",
-            "[bold]CPUs:[/bold]",
-            f"  Free: {self._color_pct(cpus_pct)}",
-            f"  {stats.total_cpus - stats.allocated_cpus}/{stats.total_cpus} available",
-            "",
-            "[bold]Memory:[/bold]",
-            f"  Free: {self._color_pct(memory_pct)}",
-            f"  {stats.total_memory_gb - stats.allocated_memory_gb:.1f}/{stats.total_memory_gb:.1f} GB",
         ]
+        if stats.draining_nodes > 0:
+            lines.append(f"  [bright_black]({stats.draining_nodes} draining)[/bright_black]")
+        lines.extend(
+            [
+                "",
+                "[bold]CPUs:[/bold]",
+                f"  Free: {self._color_pct(cpus_pct)}",
+                f"  {stats.total_cpus - stats.allocated_cpus}/{stats.total_cpus} available",
+                "",
+                "[bold]Memory:[/bold]",
+                f"  Free: {self._color_pct(memory_pct)}",
+                f"  {stats.total_memory_gb - stats.allocated_memory_gb:.1f}/{stats.total_memory_gb:.1f} GB",
+            ]
+        )
 
         self._append_gpu_section(lines, stats, gpus_pct=gpus_pct)
         self._append_wait_time_section(lines, stats)

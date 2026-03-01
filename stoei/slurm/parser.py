@@ -160,14 +160,17 @@ def parse_scontrol_nodes_output(raw_output: str) -> list[dict[str, str]]:
     nodes: list[dict[str, str]] = []
     current_node: dict[str, str] = {}
 
-    # Split by double newlines (node separator) or single newline with NodeName
+    # Split by newlines and parse key=value pairs.
+    # SLURM scontrol output can have blank lines *within* a single node's
+    # output (e.g., between AllocTRES and Reason), so we only treat a blank
+    # line as a node boundary when followed by a new NodeName= line. Instead,
+    # we use NodeName= as the definitive node separator.
     lines = raw_output.split("\n")
     for line in lines:
         stripped_line = line.strip()
         if not stripped_line:
-            if current_node:
-                nodes.append(current_node)
-                current_node = {}
+            # Skip blank lines; do NOT finalize the node here since SLURM
+            # can insert blank lines within a single node's output.
             continue
 
         # Check if this is a new node entry (starts with NodeName=)
