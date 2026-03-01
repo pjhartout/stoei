@@ -86,3 +86,42 @@ NodeName=node02
         assert len(nodes) == 1
         assert nodes[0]["State"] == "DOWN"
         assert nodes[0]["Reason"] == "Not responding"
+
+    def test_parse_node_with_reason_after_blank_line(self) -> None:
+        """Test parsing node where Reason appears after a blank line.
+
+        SLURM can insert blank lines within a single node's output,
+        e.g., between AllocTRES and Reason. The parser must not treat
+        this as a node boundary.
+        """
+        output = """NodeName=hpcl8010 Arch=x86_64 CoresPerSocket=12
+   CPUAlloc=0 CPUTot=24
+   State=IDLE+DRAIN
+   AllocTRES=
+   CurrentWatts=0 AveWatts=0
+
+   Reason=bbusch [root@2026-02-19T05:04:42]"""
+        nodes = parse_scontrol_nodes_output(output)
+        assert len(nodes) == 1
+        assert nodes[0]["NodeName"] == "hpcl8010"
+        assert nodes[0]["State"] == "IDLE+DRAIN"
+        assert "Reason" in nodes[0]
+        assert "bbusch" in nodes[0]["Reason"]
+
+    def test_parse_multiple_nodes_with_internal_blank_lines(self) -> None:
+        """Test parsing multiple nodes where each has internal blank lines."""
+        output = """NodeName=node01
+   State=IDLE+DRAIN
+   AllocTRES=
+
+   Reason=maintenance [admin@2026-01-01T00:00:00]
+
+NodeName=node02
+   State=ALLOCATED
+   CPUTot=16 CPUAlloc=8"""
+        nodes = parse_scontrol_nodes_output(output)
+        assert len(nodes) == 2
+        assert nodes[0]["NodeName"] == "node01"
+        assert "maintenance" in nodes[0]["Reason"]
+        assert nodes[1]["NodeName"] == "node02"
+        assert nodes[1]["CPUAlloc"] == "8"
