@@ -1,8 +1,10 @@
 """Tests for SLURM command execution with mock executables."""
 
+from collections.abc import Generator
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+import pytest
 from stoei.slurm.commands import _parse_fixed_width_squeue_line, _validate_username
 
 
@@ -467,6 +469,12 @@ class TestRunSacctForJob:
 class TestCommandErrorPaths:
     """Tests for error handling in commands."""
 
+    @pytest.fixture(autouse=True)
+    def no_retry_sleep(self) -> Generator[None, None, None]:
+        """Eliminate retry backoff sleeps so error-path tests run instantly."""
+        with patch("stoei.slurm.commands.time.sleep"):
+            yield
+
     def test_get_running_jobs_handles_missing_squeue(self) -> None:
         from stoei.slurm.commands import get_running_jobs
 
@@ -630,6 +638,12 @@ class TestCommandErrorPaths:
 
 class TestGetWaitTimeJobHistory:
     """Tests for get_wait_time_job_history function."""
+
+    @pytest.fixture(autouse=True)
+    def no_retry_sleep(self) -> Generator[None, None, None]:
+        """Eliminate retry backoff sleeps so error-path tests run instantly."""
+        with patch("stoei.slurm.commands.time.sleep"):
+            yield
 
     def test_returns_jobs_list(self, mock_slurm_path: Path) -> None:
         from stoei.slurm.commands import get_wait_time_job_history

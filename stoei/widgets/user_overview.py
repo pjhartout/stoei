@@ -46,6 +46,8 @@ class UserStats:
     total_nodes: int
     gpu_types: str = ""
     node_names: str = ""
+    array_count: int = 0
+    plain_job_count: int = 0
 
 
 class _UserDataDict(TypedDict):
@@ -57,6 +59,8 @@ class _UserDataDict(TypedDict):
     total_gpus: int
     gpu_types: dict[str, int]
     node_names: set[str]
+    array_base_ids: set[str]
+    plain_job_count: int
 
 
 @dataclass
@@ -541,6 +545,15 @@ class UserOverviewTab(VerticalScroll):
         """
         user_data["job_count"] += 1
 
+        # Classify job as array task or plain regular job
+        job_id = job[0].strip() if job else ""
+        if "_[" in job_id:
+            pass  # pending array leaking in — ignore for running counts
+        elif "_" in job_id:
+            user_data["array_base_ids"].add(job_id.split("_")[0])
+        else:
+            user_data["plain_job_count"] += 1
+
         # Parse nodes (format: "4" or "4-8") — used as CPU fallback only
         nodes_str = job[nodes_index].strip() if len(job) > nodes_index else "0"
         node_count = UserOverviewTab._parse_node_count(nodes_str)
@@ -602,6 +615,8 @@ class UserOverviewTab(VerticalScroll):
                     total_nodes=len(data["node_names"]),
                     gpu_types=gpu_types_str,
                     node_names=node_names_str,
+                    array_count=len(data["array_base_ids"]),
+                    plain_job_count=data["plain_job_count"],
                 )
             )
         return user_stats
@@ -634,6 +649,8 @@ class UserOverviewTab(VerticalScroll):
                 "total_gpus": 0,
                 "gpu_types": defaultdict(int),
                 "node_names": set(),
+                "array_base_ids": set(),
+                "plain_job_count": 0,
             }
 
         user_data: dict[str, _UserDataDict] = defaultdict(_default_user_data)

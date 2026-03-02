@@ -1,5 +1,6 @@
 """Tests for the main SlurmMonitor app."""
 
+from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -199,6 +200,12 @@ class TestRefreshDataAsync:
     def reset_job_cache(self) -> None:
         """Reset JobCache singleton before each test."""
         JobCache.reset()
+
+    @pytest.fixture(autouse=True)
+    def mock_energy_fetch(self) -> Generator[None, None, None]:
+        """Prevent _fetch_energy from calling real SLURM commands regardless of user settings."""
+        with patch("stoei.app.get_energy_job_history", return_value=([], None)):
+            yield
 
     def test_refresh_data_is_sync_function(self) -> None:
         """Verify that _refresh_data_async is a regular sync function (not async).
