@@ -121,14 +121,59 @@ class TestUserOverviewTab:
         assert result[0].total_nodes == 5
 
     def test_aggregate_user_stats_invalid_node_count(self) -> None:
-        """Test aggregating stats with invalid node count."""
+        """Test aggregating stats with invalid node count string.
+
+        The NumNodes field "invalid" cannot be parsed, but the NodeList field
+        "node01" is valid. total_nodes now comes from unique NodeList hostnames,
+        so the result is 1 unique node.
+        """
         jobs = [
             ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "invalid", "node01"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
-        # Should default to 0 when parsing fails
+        assert result[0].total_nodes == 1
+
+    def test_aggregate_user_stats_shared_node_deduplication(self) -> None:
+        """Multiple jobs on the same node count as 1 unique node."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01"),
+            ("12346", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "node01"),
+            ("12347", "job3", "user1", "gpu", "RUNNING", "0:15:00", "1", "node01"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].total_nodes == 1
+
+    def test_aggregate_user_stats_overlapping_ranges(self) -> None:
+        """Overlapping NodeList ranges are deduplicated correctly."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "2", "node[01-02]"),
+            ("12346", "job2", "user1", "gpu", "RUNNING", "0:30:00", "2", "node[01-02]"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].total_nodes == 2  # node01, node02 — not 4
+
+    def test_aggregate_user_stats_pending_only(self) -> None:
+        """PENDING-only users have 0 unique nodes (no nodes allocated)."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "PENDING", "0:00:00", "1", "(Resources)"),
+            ("12346", "job2", "user1", "gpu", "PENDING", "0:00:00", "2", "(Priority)"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
         assert result[0].total_nodes == 0
+
+    def test_aggregate_user_stats_mixed_running_and_pending(self) -> None:
+        """Only running jobs with real NodeList contribute to unique node count."""
+        jobs = [
+            ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01"),
+            ("12346", "job2", "user1", "gpu", "PENDING", "0:00:00", "1", "(None)"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].total_nodes == 1
 
     def test_aggregate_user_stats_missing_fields(self) -> None:
         """Test aggregating stats with jobs missing fields."""
@@ -502,14 +547,15 @@ class TestUserOverviewTab:
         assert result[0].gpu_types == "8x H200"
 
     def test_aggregate_user_stats_collects_node_names(self) -> None:
-        """Test that node names are collected from NodeList field."""
+        """Test that node names are collected and expanded from NodeList field."""
         jobs = [
             ("12345", "job1", "user1", "gpu", "RUNNING", "1:00:00", "2", "gpu[01-02]"),
             ("12346", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "cpu10"),
         ]
         result = UserOverviewTab.aggregate_user_stats(jobs)
         assert len(result) == 1
-        assert result[0].node_names == "cpu10,gpu[01-02]"
+        # Bracket notation is expanded: gpu[01-02] → gpu01, gpu02
+        assert result[0].node_names == "cpu10,gpu01,gpu02"
 
     def test_aggregate_user_stats_deduplicates_nodes(self) -> None:
         """Test that duplicate NodeList values are deduplicated."""
@@ -554,7 +600,8 @@ class TestUserOverviewTab:
         user1 = next(u for u in result if u.username == "user1")
         user2 = next(u for u in result if u.username == "user2")
         assert user1.node_names == "cpu01,gpu01"
-        assert user2.node_names == "gpu[02-03]"
+        # Bracket notation is expanded: gpu[02-03] → gpu02, gpu03
+        assert user2.node_names == "gpu02,gpu03"
 
     def test_user_stats_node_names_default(self) -> None:
         """Test that UserStats has empty node_names by default."""

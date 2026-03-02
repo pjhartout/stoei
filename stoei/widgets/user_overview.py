@@ -26,6 +26,7 @@ from stoei.slurm.gpu_parser import (
     format_gpu_types,
     has_specific_gpu_types,
 )
+from stoei.slurm.nodelist import expand_nodelist
 from stoei.slurm.parser import parse_tres_resources
 from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
 from stoei.widgets.screens import EnergyEnableModal
@@ -54,7 +55,6 @@ class _UserDataDict(TypedDict):
     total_cpus: int
     total_memory_gb: float
     total_gpus: int
-    total_nodes: int
     gpu_types: dict[str, int]
     node_names: set[str]
 
@@ -541,15 +541,13 @@ class UserOverviewTab(VerticalScroll):
         """
         user_data["job_count"] += 1
 
-        # Parse nodes (format: "4" or "4-8")
+        # Parse nodes (format: "4" or "4-8") — used as CPU fallback only
         nodes_str = job[nodes_index].strip() if len(job) > nodes_index else "0"
         node_count = UserOverviewTab._parse_node_count(nodes_str)
-        user_data["total_nodes"] += node_count
 
-        # Collect actual node names from NodeList field
+        # Expand NodeList to individual hostnames and collect unique nodes
         nodelist_str = job[nodelist_index].strip() if len(job) > nodelist_index else ""
-        if nodelist_str and not nodelist_str.startswith("("):
-            user_data["node_names"].add(nodelist_str)
+        user_data["node_names"].update(expand_nodelist(nodelist_str))
 
         # Parse TRES for CPU, memory, and GPU information
         tres_str = job[tres_index].strip() if len(job) > tres_index else ""
@@ -601,7 +599,7 @@ class UserOverviewTab(VerticalScroll):
                     total_cpus=int(data["total_cpus"]),
                     total_memory_gb=data["total_memory_gb"],
                     total_gpus=int(data["total_gpus"]),
-                    total_nodes=int(data["total_nodes"]),
+                    total_nodes=len(data["node_names"]),
                     gpu_types=gpu_types_str,
                     node_names=node_names_str,
                 )
@@ -634,7 +632,6 @@ class UserOverviewTab(VerticalScroll):
                 "total_cpus": 0,
                 "total_memory_gb": 0.0,
                 "total_gpus": 0,
-                "total_nodes": 0,
                 "gpu_types": defaultdict(int),
                 "node_names": set(),
             }
