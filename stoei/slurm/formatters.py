@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 from stoei.colors import FALLBACK_COLORS, ThemeColors
 from stoei.slurm.energy import ENERGY_KWH_THRESHOLD, ENERGY_MWH_THRESHOLD
 from stoei.slurm.gpu_parser import calculate_total_gpus
+from stoei.slurm.nodelist import expand_nodelist
 from stoei.slurm.parser import parse_scontrol_output, parse_tres_resources
 
 if TYPE_CHECKING:
@@ -612,28 +613,6 @@ def _format_energy_wh(wh: float) -> str:
     return f"{wh:.1f} Wh"
 
 
-def _parse_node_count(nodes_str: str) -> int:
-    """Parse node count from a node count string.
-
-    Args:
-        nodes_str: Node string in format "4" or "4-8".
-
-    Returns:
-        Parsed number of nodes, or 0 if parsing fails.
-    """
-    try:
-        if "-" in nodes_str:
-            parts = nodes_str.split("-")
-            range_parts_count = 2
-            if len(parts) == range_parts_count:
-                start = int(parts[0])
-                end = int(parts[1])
-                return end - start + 1
-        return int(nodes_str)
-    except ValueError:
-        return 0
-
-
 @dataclass(frozen=True, slots=True)
 class AccountResourceUsage:
     """Aggregate resource usage across a set of running jobs."""
@@ -687,7 +666,7 @@ def format_user_info(  # noqa: PLR0913, PLR0912, PLR0915
         lines.append(
             f"  [bold {c.primary}]{'GPU Types':.<24}[/bold {c.primary}] [{c.accent}]{user_stats.gpu_types}[/{c.accent}]"
         )
-    lines.append(f"  [bold {c.primary}]{'Total Nodes':.<24}[/bold {c.primary}] {user_stats.total_nodes}")
+    lines.append(f"  [bold {c.primary}]{'Unique Nodes':.<24}[/bold {c.primary}] {user_stats.total_nodes}")
     if user_stats.node_names:
         lines.append(
             f"  [bold {c.primary}]{'NodeList':.<24}[/bold {c.primary}] [{c.accent}]{user_stats.node_names}[/{c.accent}]"
@@ -911,13 +890,13 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
 
     # Calculate aggregate resource usage from running jobs
     min_running_job_fields = 9
-    nodes_index = 6
+    nodelist_index = 7
     tres_index = 8
 
     total_cpus = 0
     total_memory_gb = 0.0
     total_gpus = 0
-    total_nodes = 0
+    unique_node_names: set[str] = set()
 
     for job in running_jobs:
         if len(job) < min_running_job_fields:
@@ -929,15 +908,15 @@ def format_account_info(  # noqa: PLR0913, PLR0912, PLR0915
         total_memory_gb += memory_gb
         total_gpus += calculate_total_gpus(gpu_entries)
 
-        nodes_str = job[nodes_index].strip()
-        total_nodes += _parse_node_count(nodes_str)
+        nodelist_str = job[nodelist_index].strip()
+        unique_node_names.update(expand_nodelist(nodelist_str))
 
     # Resource Usage section
     lines.append("\n[bold reverse] Current Resource Usage [/bold reverse]")
     lines.append(f"  [bold {c.primary}]{'Total CPUs':.<24}[/bold {c.primary}] {total_cpus}")
     lines.append(f"  [bold {c.primary}]{'Total Memory (GB)':.<24}[/bold {c.primary}] {total_memory_gb:.1f}")
     lines.append(f"  [bold {c.primary}]{'Total GPUs':.<24}[/bold {c.primary}] {total_gpus}")
-    lines.append(f"  [bold {c.primary}]{'Total Nodes':.<24}[/bold {c.primary}] {total_nodes}")
+    lines.append(f"  [bold {c.primary}]{'Unique Nodes':.<24}[/bold {c.primary}] {len(unique_node_names)}")
 
     # Users in Account section
     if users_in_account:
