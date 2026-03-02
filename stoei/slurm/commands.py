@@ -1070,12 +1070,17 @@ def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], st
     return jobs, None
 
 
-def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
+def get_fair_share_priority(
+    max_retries: int = DEFAULT_MAX_RETRIES,
+) -> tuple[list[tuple[str, ...]], str | None]:
     """Get fair-share priority information for all users and accounts.
 
     Uses sshare to fetch fair-share data including raw shares, normalized shares,
     usage, and fair-share factor.
     Uses retry logic with exponential backoff for transient failures.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: DEFAULT_MAX_RETRIES).
 
     Returns:
         Tuple of (list of priority tuples, optional error message).
@@ -1098,7 +1103,7 @@ def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
     ]
     logger.debug("Running sshare command for fair-share priority")
 
-    result, error = _run_with_retry(command, timeout=30, command_name="sshare")
+    result, error = _run_with_retry(command, timeout=30, command_name="sshare", max_retries=max_retries)
     if error or result is None:
         return [], error or "Unknown error"
 
@@ -1123,12 +1128,17 @@ def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
     return entries, None
 
 
-def get_pending_job_priority() -> tuple[list[tuple[str, ...]], str | None]:
+def get_pending_job_priority(
+    max_retries: int = DEFAULT_MAX_RETRIES,
+) -> tuple[list[tuple[str, ...]], str | None]:
     """Get priority factors for all pending jobs.
 
     Uses sprio to fetch priority breakdown including age, fair-share,
     job size, partition, and QOS factors.
     Uses retry logic with exponential backoff for transient failures.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: DEFAULT_MAX_RETRIES).
 
     Returns:
         Tuple of (list of job priority tuples, optional error message).
@@ -1151,7 +1161,7 @@ def get_pending_job_priority() -> tuple[list[tuple[str, ...]], str | None]:
     ]
     logger.debug("Running sprio command for pending job priority")
 
-    result, error = _run_with_retry(command, timeout=30, command_name="sprio")
+    result, error = _run_with_retry(command, timeout=30, command_name="sprio", max_retries=max_retries)
     if error or result is None:
         return [], error or "Unknown error"
 
