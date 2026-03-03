@@ -738,8 +738,8 @@ class TestCalculateClusterStatsDraining:
         stats = app._calculate_cluster_stats()
         # Only node01 in totals
         assert stats.total_gpus == 8
-        # Both nodes in allocated
-        assert stats.allocated_gpus == 6  # 4 from node01 + 2 from draining node02
+        # Only node01 in allocated (draining nodes excluded from both totals and allocated)
+        assert stats.allocated_gpus == 4  # only from node01
 
     def test_mixed_cluster_percentages_valid(self, app: SlurmMonitor) -> None:
         """Test that percentages remain 0-100% with draining nodes."""

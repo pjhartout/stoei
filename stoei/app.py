@@ -1426,8 +1426,8 @@ class SlurmMonitor(App[None]):
             if include_total:
                 stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
                 stats.total_gpus += gpu_count
-            # Estimate allocated GPUs based on node state
-            if "ALLOCATED" in state or "MIXED" in state:
+            # Estimate allocated GPUs based on node state (skip for draining nodes)
+            if include_total and ("ALLOCATED" in state or "MIXED" in state):
                 current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
                 stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
                 stats.allocated_gpus += gpu_count
@@ -1549,9 +1549,10 @@ class SlurmMonitor(App[None]):
                 gpu_entries = parse_gpu_entries(cfg_tres)
                 self._process_gpu_entries_for_stats(gpu_entries, stats, is_allocated=False)
 
-            # Parse AllocTRES for allocated GPUs by type
-            alloc_entries = parse_gpu_entries(alloc_tres)
-            self._process_gpu_entries_for_stats(alloc_entries, stats, is_allocated=True)
+            # Parse AllocTRES for allocated GPUs by type (skip for draining nodes)
+            if not is_draining:
+                alloc_entries = parse_gpu_entries(alloc_tres)
+                self._process_gpu_entries_for_stats(alloc_entries, stats, is_allocated=True)
 
             # Fallback: if no TRES data, try parsing Gres field
             if not cfg_tres and not alloc_tres:
