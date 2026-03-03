@@ -815,3 +815,215 @@ class TestRunWithRetry:
             assert result is None
             assert error is not None
             assert "not found" in error.lower()
+
+
+class TestSacctAvailability:
+    """Tests for sacct availability tracking (_sacct_is_available, _sacct_mark_failure, _sacct_mark_success)."""
+
+    def _reset_state(self) -> None:
+        from stoei.slurm import commands
+
+        commands._sacct_failure_ts[0] = None
+
+    def test_initially_available(self) -> None:
+        """Sacct is available when no failure has been recorded."""
+        self._reset_state()
+        from stoei.slurm.commands import _sacct_is_available
+
+        assert _sacct_is_available() is True
+
+    def test_unavailable_after_mark_failure(self) -> None:
+        """Sacct becomes unavailable after a failure is recorded."""
+        self._reset_state()
+        from stoei.slurm.commands import _sacct_is_available, _sacct_mark_failure
+
+        _sacct_mark_failure()
+        assert _sacct_is_available() is False
+
+    def test_available_again_after_mark_success(self) -> None:
+        """Sacct becomes available again after a successful call clears the failure."""
+        self._reset_state()
+        from stoei.slurm.commands import _sacct_is_available, _sacct_mark_failure, _sacct_mark_success
+
+        _sacct_mark_failure()
+        assert _sacct_is_available() is False
+        _sacct_mark_success()
+        assert _sacct_is_available() is True
+
+    def test_mark_success_noop_when_already_available(self) -> None:
+        """_sacct_mark_success is a no-op when sacct was never marked as failed."""
+        self._reset_state()
+        from stoei.slurm.commands import _sacct_is_available, _sacct_mark_success
+
+        _sacct_mark_success()
+        assert _sacct_is_available() is True
+
+    def test_cooldown_expires(self) -> None:
+        """Sacct becomes available again after the cooldown period elapses."""
+        self._reset_state()
+        from stoei.slurm import commands
+        from stoei.slurm.commands import _sacct_is_available, _sacct_mark_failure
+
+        _sacct_mark_failure()
+        assert _sacct_is_available() is False
+        # Manually set failure timestamp to simulate cooldown elapsed
+        commands._sacct_failure_ts[0] = 0.0  # Unix timestamp 0 is definitely past cooldown
+        assert _sacct_is_available() is True
+
+    def teardown_method(self) -> None:
+        """Reset sacct state after each test to avoid leakage."""
+        self._reset_state()
+
+
+class TestRunWithRetryConnectionRefused:
+    """Tests for _run_with_retry fast-fail behavior on connection refused errors."""
+
+    def test_no_retry_on_connection_refused_stderr(self) -> None:
+        """Commands with 'connection refused' in stderr are not retried."""
+        from stoei.slurm.commands import _run_with_retry
+
+        refused_result = MagicMock()
+        refused_result.returncode = 1
+        refused_result.stdout = ""
+        refused_result.stderr = "sacct: error: Connection refused"
+
+        call_count = 0
+
+        def mock_run(*_args: object, **_kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            return refused_result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            result, error = _run_with_retry(
+                ["sacct", "--allusers"],
+                timeout=5,
+                command_name="sacct",
+                max_retries=3,
+                initial_delay=0.01,
+            )
+        # Should have called subprocess.run exactly once (no retries)
+        assert call_count == 1
+        assert result is not None
+        assert error is not None
+        assert "connection refused" in error.lower()
+
+    def test_retry_still_happens_on_generic_error(self) -> None:
+        """Generic errors (not connection refused) are still retried."""
+        from stoei.slurm.commands import _run_with_retry
+
+        fail_result = MagicMock()
+        fail_result.returncode = 1
+        fail_result.stdout = ""
+        fail_result.stderr = "some transient error"
+
+        call_count = 0
+
+        def mock_run(*_args: object, **_kwargs: object) -> MagicMock:
+            nonlocal call_count
+            call_count += 1
+            return fail_result
+
+        with patch("subprocess.run", side_effect=mock_run):
+            _run_with_retry(
+                ["sacct"],
+                timeout=5,
+                command_name="sacct",
+                max_retries=2,
+                initial_delay=0.001,
+                backoff_factor=1.0,
+            )
+        # Should have called subprocess.run 3 times (initial + 2 retries)
+        assert call_count == 3
+
+
+class TestGetJobHistoryAvailabilityGuard:
+    """Tests that get_job_history respects the sacct availability state."""
+
+    def _reset_state(self) -> None:
+        from stoei.slurm import commands
+
+        commands._sacct_failure_ts[0] = None
+
+    def teardown_method(self) -> None:
+        self._reset_state()
+
+    def test_returns_early_when_sacct_in_cooldown(self) -> None:
+        """get_job_history returns an error immediately when sacct is in cooldown."""
+        from stoei.slurm.commands import _sacct_mark_failure, get_job_history
+
+        _sacct_mark_failure()
+        with patch("subprocess.run") as mock_run:
+            jobs, total, _requeues, _max_req, error = get_job_history()
+            mock_run.assert_not_called()
+        assert jobs == []
+        assert total == 0
+        assert error is not None
+        assert "connection refused" in error.lower()
+
+    def test_marks_failure_on_connection_refused_error(self, mock_slurm_path: Path) -> None:
+        """get_job_history marks sacct as unavailable when connection refused."""
+        self._reset_state()
+        from stoei.slurm import commands
+        from stoei.slurm.commands import _sacct_is_available, get_job_history
+
+        refused_result = MagicMock()
+        refused_result.returncode = 1
+        refused_result.stdout = ""
+        refused_result.stderr = "Connection refused"
+
+        with patch("subprocess.run", return_value=refused_result):
+            jobs, _, _, _, error = get_job_history()
+
+        assert jobs == []
+        assert error is not None
+        assert _sacct_is_available() is False
+        assert commands._sacct_failure_ts[0] is not None
+
+
+class TestGetWaitTimeJobHistoryAvailabilityGuard:
+    """Tests that get_wait_time_job_history respects the sacct availability state."""
+
+    def _reset_state(self) -> None:
+        from stoei.slurm import commands
+
+        commands._sacct_failure_ts[0] = None
+
+    def teardown_method(self) -> None:
+        self._reset_state()
+
+    def test_returns_early_when_sacct_in_cooldown(self) -> None:
+        """get_wait_time_job_history returns an error immediately when sacct is in cooldown."""
+        from stoei.slurm.commands import _sacct_mark_failure, get_wait_time_job_history
+
+        _sacct_mark_failure()
+        with patch("subprocess.run") as mock_run:
+            jobs, error = get_wait_time_job_history()
+            mock_run.assert_not_called()
+        assert jobs == []
+        assert error is not None
+        assert "connection refused" in error.lower()
+
+
+class TestGetEnergyJobHistoryAvailabilityGuard:
+    """Tests that get_energy_job_history respects the sacct availability state."""
+
+    def _reset_state(self) -> None:
+        from stoei.slurm import commands
+
+        commands._sacct_failure_ts[0] = None
+
+    def teardown_method(self) -> None:
+        self._reset_state()
+
+    def test_returns_early_when_sacct_in_cooldown(self) -> None:
+        """get_energy_job_history returns an error immediately when sacct is in cooldown."""
+        from stoei.slurm.commands import _sacct_mark_failure, get_energy_job_history
+
+        _sacct_mark_failure()
+        with patch("subprocess.run") as mock_run:
+            jobs, error = get_energy_job_history()
+            mock_run.assert_not_called()
+        assert jobs == []
+        assert error is not None
+        assert "connection refused" in error.lower()

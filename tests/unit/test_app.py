@@ -256,8 +256,8 @@ class TestRefreshDataAsync:
 
         assert app._cluster_nodes == [{"NodeName": "n1"}]
 
-    def test_refresh_data_calls_apply_refresh_to_ui(self) -> None:
-        """Verify that _refresh_data_async calls _apply_refresh_to_ui via call_from_thread."""
+    def test_refresh_data_calls_multiple_call_from_thread(self) -> None:
+        """Verify that _refresh_data_async calls call_from_thread for each data source."""
         app = SlurmMonitor()
         call_from_thread_calls: list[object] = []
 
@@ -274,8 +274,8 @@ class TestRefreshDataAsync:
         ):
             app._refresh_data_async()
 
-        # Should have at least 2 calls: loading indicator + apply_refresh_to_ui
-        assert len(call_from_thread_calls) >= 2
+        # Progressive rendering: loading indicator + one call per data source + completion call
+        assert len(call_from_thread_calls) >= 6
 
     def test_refresh_data_handles_cluster_nodes_error(self) -> None:
         """Verify that _refresh_data_async stores empty nodes on fetch error."""
@@ -738,8 +738,8 @@ class TestCalculateClusterStatsDraining:
         stats = app._calculate_cluster_stats()
         # Only node01 in totals
         assert stats.total_gpus == 8
-        # Both nodes in allocated
-        assert stats.allocated_gpus == 6  # 4 from node01 + 2 from draining node02
+        # Only node01 in allocated (draining nodes excluded from both totals and allocated)
+        assert stats.allocated_gpus == 4  # only from node01
 
     def test_mixed_cluster_percentages_valid(self, app: SlurmMonitor) -> None:
         """Test that percentages remain 0-100% with draining nodes."""

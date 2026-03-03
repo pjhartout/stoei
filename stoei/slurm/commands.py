@@ -1,6 +1,7 @@
 """SLURM command execution."""
 
 import subprocess
+import threading
 import time
 from datetime import datetime, timedelta
 
@@ -26,6 +27,54 @@ DEFAULT_BACKOFF_FACTOR = 1.5
 DEFAULT_INITIAL_DELAY = 0.5
 
 logger = get_logger(__name__)
+
+# Sacct / slurmdbd availability tracking
+# When sacct fails with a non-transient error (e.g. "connection refused"), we suppress
+# further calls for a cooldown period to avoid wasting time on retries every refresh cycle.
+# Using a list as a mutable container so inner functions can update state without `global`.
+_sacct_lock = threading.Lock()
+_sacct_failure_ts: list[float | None] = [None]  # [last_failure_timestamp]
+_SACCT_RETRY_COOLDOWN: float = 300.0  # seconds before retrying after a connection failure
+
+
+def _sacct_is_available() -> bool:
+    """Return True if sacct calls should proceed (not in cooldown after connection failure).
+
+    Returns:
+        True if sacct is available or cooldown has expired, False if still in cooldown.
+    """
+    with _sacct_lock:
+        last = _sacct_failure_ts[0]
+        if last is None:
+            return True
+        return (time.time() - last) >= _SACCT_RETRY_COOLDOWN
+
+
+def _sacct_mark_failure() -> None:
+    """Record a non-transient sacct failure and start the retry cooldown.
+
+    Only logs a warning the first time (when transitioning from available to unavailable).
+    """
+    newly_unavailable: bool
+    with _sacct_lock:
+        newly_unavailable = _sacct_failure_ts[0] is None
+        _sacct_failure_ts[0] = time.time()
+    if newly_unavailable:
+        logger.warning(f"sacct: slurmdbd connection refused; suppressing retries for {int(_SACCT_RETRY_COOLDOWN)}s")
+
+
+def _sacct_mark_success() -> None:
+    """Clear the sacct failure state after a successful call.
+
+    Logs a recovery message if sacct was previously marked unavailable.
+    """
+    recovered: bool
+    with _sacct_lock:
+        recovered = _sacct_failure_ts[0] is not None
+        _sacct_failure_ts[0] = None
+    if recovered:
+        logger.info("sacct: slurmdbd connection restored")
+
 
 # Fields to request from sacct for detailed job info
 SACCT_JOB_FIELDS = [
@@ -122,10 +171,18 @@ def _run_with_retry(  # noqa: PLR0913
                 logger.debug(f"{command_name} succeeded on attempt {attempt + 1}")
             return result, None
 
-        # Check if error is retryable
+        # Check if error is retryable (from _run_subprocess_command)
         if error and ("not found" in error.lower()):
             # File not found is not retryable
             return result, error
+
+        # Check if the process ran but stderr indicates a non-transient failure
+        if result is not None and result.returncode != 0:
+            stderr_lower = (result.stderr or "").lower()
+            if "connection refused" in stderr_lower:
+                msg = f"{command_name} failed: connection refused"
+                logger.debug(f"{command_name}: non-retryable stderr error, skipping retries")
+                return result, msg
 
         last_error = (
             error if error else f"{command_name} failed with return code {result.returncode if result else 'unknown'}"
@@ -477,6 +534,7 @@ def get_job_history(
     """Return job history for the last N days (sacct).
 
     Uses retry logic with exponential backoff for transient failures.
+    Skips the call entirely if sacct is in cooldown after a connection failure.
 
     Args:
         days: Number of days to look back for job history (default: 7).
@@ -485,6 +543,10 @@ def get_job_history(
     Returns:
         Tuple of (jobs list, total jobs count, total requeues, max requeues, optional error message).
     """
+    if not _sacct_is_available():
+        logger.debug("get_job_history: skipped (sacct in cooldown after connection failure)")
+        return [], 0, 0, 0, "sacct unavailable: connection refused (will retry automatically)"
+
     try:
         username = get_current_username()
         sacct = resolve_executable("sacct")
@@ -506,12 +568,15 @@ def get_job_history(
 
     result, error = _run_with_retry(command, timeout=10, command_name="sacct", max_retries=max_retries)
     if error or result is None:
+        if error and "connection refused" in error.lower():
+            _sacct_mark_failure()
         return [], 0, 0, 0, error or "Unknown error"
 
     if result.returncode != 0:
         logger.warning(f"sacct returned non-zero exit code: {result.returncode}")
         return [], 0, 0, 0, f"sacct error: {result.stderr}"
 
+    _sacct_mark_success()
     jobs, total_jobs, total_requeues, max_requeues = parse_sacct_output(result.stdout)
     logger.debug(f"Found {total_jobs} jobs in history (last {days} days) with {total_requeues} total requeues")
     return jobs, total_jobs, total_requeues, max_requeues, None
@@ -931,6 +996,10 @@ def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str 
         Tuple of (jobs list, optional error message).
         Each job tuple contains: (JobID, User, Elapsed, NCPUS, AllocTRES, State).
     """
+    if not _sacct_is_available():
+        logger.debug("get_energy_job_history: skipped (sacct in cooldown after connection failure)")
+        return [], "sacct unavailable: connection refused (will retry automatically)"
+
     try:
         sacct = resolve_executable("sacct")
     except FileNotFoundError:
@@ -961,6 +1030,8 @@ def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str 
     # Use longer timeout for potentially large query, with retry
     result, error = _run_with_retry(command, timeout=60, command_name="sacct energy")
     if error or result is None:
+        if error and "connection refused" in error.lower():
+            _sacct_mark_failure()
         return [], error or "Unknown error"
 
     if result.returncode != 0:
@@ -987,6 +1058,7 @@ def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str 
                 continue
             jobs.append(tuple(parts[: len(ENERGY_HISTORY_FIELDS)]))
 
+    _sacct_mark_success()
     logger.info(
         f"Fetched {len(jobs)} jobs from {months}-month history "
         f"for energy calculation (skipped {skipped_states} with invalid states)"
@@ -1018,6 +1090,10 @@ def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], st
         Tuple of (jobs list, optional error message).
         Each job tuple: (JobID, Partition, State, Submit, Start).
     """
+    if not _sacct_is_available():
+        logger.debug("get_wait_time_job_history: skipped (sacct in cooldown after connection failure)")
+        return [], "sacct unavailable: connection refused (will retry automatically)"
+
     try:
         sacct = resolve_executable("sacct")
     except FileNotFoundError:
@@ -1040,6 +1116,8 @@ def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], st
 
     result, error = _run_with_retry(command, timeout=30, command_name="sacct wait-time")
     if error or result is None:
+        if error and "connection refused" in error.lower():
+            _sacct_mark_failure()
         return [], error or "Unknown error"
 
     if result.returncode != 0:
@@ -1066,16 +1144,22 @@ def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], st
             if start_time and start_time.lower() not in ("unknown", "none", "n/a", ""):
                 jobs.append(tuple(parts[: len(WAIT_TIME_FIELDS)]))
 
+    _sacct_mark_success()
     logger.info(f"Fetched {len(jobs)} jobs from {hours}-hour history for wait time calculation")
     return jobs, None
 
 
-def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
+def get_fair_share_priority(
+    max_retries: int = DEFAULT_MAX_RETRIES,
+) -> tuple[list[tuple[str, ...]], str | None]:
     """Get fair-share priority information for all users and accounts.
 
     Uses sshare to fetch fair-share data including raw shares, normalized shares,
     usage, and fair-share factor.
     Uses retry logic with exponential backoff for transient failures.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: DEFAULT_MAX_RETRIES).
 
     Returns:
         Tuple of (list of priority tuples, optional error message).
@@ -1098,7 +1182,7 @@ def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
     ]
     logger.debug("Running sshare command for fair-share priority")
 
-    result, error = _run_with_retry(command, timeout=30, command_name="sshare")
+    result, error = _run_with_retry(command, timeout=30, command_name="sshare", max_retries=max_retries)
     if error or result is None:
         return [], error or "Unknown error"
 
@@ -1123,12 +1207,17 @@ def get_fair_share_priority() -> tuple[list[tuple[str, ...]], str | None]:
     return entries, None
 
 
-def get_pending_job_priority() -> tuple[list[tuple[str, ...]], str | None]:
+def get_pending_job_priority(
+    max_retries: int = DEFAULT_MAX_RETRIES,
+) -> tuple[list[tuple[str, ...]], str | None]:
     """Get priority factors for all pending jobs.
 
     Uses sprio to fetch priority breakdown including age, fair-share,
     job size, partition, and QOS factors.
     Uses retry logic with exponential backoff for transient failures.
+
+    Args:
+        max_retries: Maximum number of retry attempts (default: DEFAULT_MAX_RETRIES).
 
     Returns:
         Tuple of (list of job priority tuples, optional error message).
@@ -1151,7 +1240,7 @@ def get_pending_job_priority() -> tuple[list[tuple[str, ...]], str | None]:
     ]
     logger.debug("Running sprio command for pending job priority")
 
-    result, error = _run_with_retry(command, timeout=30, command_name="sprio")
+    result, error = _run_with_retry(command, timeout=30, command_name="sprio", max_retries=max_retries)
     if error or result is None:
         return [], error or "Unknown error"
 
