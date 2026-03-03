@@ -1,6 +1,6 @@
 """Tests for the refresh fallback and error deduplication logic in app.py."""
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from stoei.app import SlurmMonitor
@@ -271,3 +271,350 @@ class TestErrorNotificationDeduplication:
             app._process_refresh_results(results)
             # No notifications when the key is simply missing
             assert mock_call.call_count == 0
+
+
+class TestApplyFetchResult:
+    """Tests for _apply_fetch_result — one test per label."""
+
+    @pytest.fixture(autouse=True)
+    def reset_job_cache(self) -> None:
+        """Reset JobCache singleton before each test."""
+        JobCache.reset()
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Return a bare SlurmMonitor instance with heavy side-effects stubbed out."""
+        instance = SlurmMonitor()
+        # Stub out methods that walk the widget tree so they don't raise outside
+        # a running Textual event loop.
+        instance._parse_node_infos = MagicMock(return_value=[])  # type: ignore[method-assign]
+        instance._compute_user_overview_cache = MagicMock()  # type: ignore[method-assign]
+        instance._calculate_cluster_stats = MagicMock(return_value=None)  # type: ignore[method-assign]
+        instance._compute_priority_overview_cache = MagicMock()  # type: ignore[method-assign]
+        return instance
+
+    # ------------------------------------------------------------------
+    # user_jobs — running jobs fail path
+    # ------------------------------------------------------------------
+
+    def test_user_jobs_running_fail_notifies_and_updates_table(self, app: SlurmMonitor) -> None:
+        """Failing running-jobs fetch notifies once and always schedules table update."""
+        with (
+            patch.object(app._job_cache, "_build_from_data"),
+            patch.object(app, "call_from_thread") as mock_call,
+        ):
+            app._apply_fetch_result("user_jobs", (None, None, 0, 0, 0))
+
+            # Error flag must be set
+            assert app._error_notified.get("running_jobs") is True
+            # call_from_thread called once: the warning notification lambda
+            # (the table update is also scheduled — two calls total; first is
+            # the notify lambda, second is _update_jobs_table)
+            assert mock_call.call_count == 2
+            # Second positional arg of the last call is _update_jobs_table (lambda)
+            # We just verify it was called — we don't invoke it (needs event loop).
+            assert mock_call.call_count >= 1
+
+    def test_user_jobs_running_fail_second_time_no_extra_notification(self, app: SlurmMonitor) -> None:
+        """Second consecutive running-jobs failure does not emit a second notification."""
+        with (
+            patch.object(app._job_cache, "_build_from_data"),
+            patch.object(app, "call_from_thread") as mock_call,
+        ):
+            app._apply_fetch_result("user_jobs", (None, None, 0, 0, 0))
+            first_count = mock_call.call_count
+
+            mock_call.reset_mock()
+            app._apply_fetch_result("user_jobs", (None, None, 0, 0, 0))
+            second_count = mock_call.call_count
+
+            # First run: 2 calls (notify + table update)
+            # Second run: only 1 call (table update, NO notify because flag already set)
+            assert second_count < first_count
+
+    # ------------------------------------------------------------------
+    # nodes
+    # ------------------------------------------------------------------
+
+    def test_nodes_updates_cluster_nodes_and_schedules_tab_update(self, app: SlurmMonitor) -> None:
+        """Nodes result updates _cluster_nodes and schedules _update_nodes_tab_only."""
+        node_data: list[dict[str, str]] = [{"NodeName": "node1", "State": "IDLE"}]
+
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("nodes", node_data)
+
+        assert app._cluster_nodes == node_data
+        mock_call.assert_called_once_with(app._update_nodes_tab_only)
+
+    # ------------------------------------------------------------------
+    # all_jobs
+    # ------------------------------------------------------------------
+
+    def test_all_jobs_updates_state_and_schedules_widget_update(self, app: SlurmMonitor) -> None:
+        """all_jobs result stores data and schedules _update_all_jobs_widgets."""
+        jobs: list[tuple[str, ...]] = [("1001", "jobA", "RUNNING", "2:00", "1", "nodeA")]
+
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("all_jobs", jobs)
+
+        assert app._all_users_jobs == jobs
+        mock_call.assert_called_once_with(app._update_all_jobs_widgets)
+
+    # ------------------------------------------------------------------
+    # wait_time
+    # ------------------------------------------------------------------
+
+    def test_wait_time_updates_state_and_schedules_sidebar(self, app: SlurmMonitor) -> None:
+        """wait_time result stores data and schedules a sidebar stats update."""
+        wait_jobs: list[tuple[str, ...]] = [("1002", "jobB", "PENDING", "0:00", "1", "nodeB")]
+
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("wait_time", wait_jobs)
+
+        assert app._wait_time_jobs == wait_jobs
+        assert mock_call.call_count == 1
+
+    # ------------------------------------------------------------------
+    # fair_share
+    # ------------------------------------------------------------------
+
+    def test_fair_share_first_half_does_not_update_priority_tab(self, app: SlurmMonitor) -> None:
+        """First fair_share arrival increments counter but does not call update yet."""
+        assert app._priority_halves_received == 0
+
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("fair_share", ([], None))
+
+        assert app._priority_halves_received == 1
+        mock_call.assert_not_called()
+
+    def test_fair_share_second_half_triggers_priority_tab_update(self, app: SlurmMonitor) -> None:
+        """Second priority half (either label) triggers _update_priority_tab once."""
+        # Simulate first half already received
+        app._priority_halves_received = 1
+
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("fair_share", ([], None))
+
+        assert app._priority_halves_received == 0
+        mock_call.assert_called_once_with(app._update_priority_tab)
+
+    def test_fair_share_stores_entries_on_success(self, app: SlurmMonitor) -> None:
+        """fair_share result without error stores entries in _fair_share_entries."""
+        entries: list[tuple[str, ...]] = [("user1", "acct", "0.5")]
+
+        with patch.object(app, "call_from_thread"):
+            app._apply_fetch_result("fair_share", (entries, None))
+
+        assert app._fair_share_entries == entries
+
+    def test_fair_share_with_error_does_not_store_entries(self, app: SlurmMonitor) -> None:
+        """fair_share result with an error string does not overwrite _fair_share_entries."""
+        original: list[tuple[str, ...]] = [("user1", "acct", "0.5")]
+        app._fair_share_entries = list(original)
+
+        with (
+            patch("stoei.app.logger") as mock_logger,
+            patch.object(app, "call_from_thread"),
+        ):
+            app._apply_fetch_result("fair_share", ([], "sshare failed"))
+
+        mock_logger.warning.assert_called_once()
+        # Original entries unchanged
+        assert app._fair_share_entries == original
+
+    # ------------------------------------------------------------------
+    # job_priority
+    # ------------------------------------------------------------------
+
+    def test_job_priority_first_half_does_not_update_priority_tab(self, app: SlurmMonitor) -> None:
+        """First job_priority arrival increments counter but does not call update yet."""
+        assert app._priority_halves_received == 0
+
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("job_priority", ([], None))
+
+        assert app._priority_halves_received == 1
+        mock_call.assert_not_called()
+
+    def test_job_priority_second_half_triggers_priority_tab_update(self, app: SlurmMonitor) -> None:
+        """Second job_priority half triggers _update_priority_tab once."""
+        app._priority_halves_received = 1
+
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("job_priority", ([], None))
+
+        assert app._priority_halves_received == 0
+        mock_call.assert_called_once_with(app._update_priority_tab)
+
+    def test_job_priority_stores_entries_on_success(self, app: SlurmMonitor) -> None:
+        """job_priority result without error stores entries in _job_priority_entries."""
+        entries: list[tuple[str, ...]] = [("999", "jobX", "0.75")]
+
+        with patch.object(app, "call_from_thread"):
+            app._apply_fetch_result("job_priority", (entries, None))
+
+        assert app._job_priority_entries == entries
+
+    def test_job_priority_with_error_does_not_store_entries(self, app: SlurmMonitor) -> None:
+        """job_priority result with an error string does not overwrite existing entries."""
+        original: list[tuple[str, ...]] = [("999", "jobX", "0.75")]
+        app._job_priority_entries = list(original)
+
+        with (
+            patch("stoei.app.logger") as mock_logger,
+            patch.object(app, "call_from_thread"),
+        ):
+            app._apply_fetch_result("job_priority", ([], "sprio failed"))
+
+        mock_logger.warning.assert_called_once()
+        assert app._job_priority_entries == original
+
+    # ------------------------------------------------------------------
+    # fair_share + job_priority coordination across two labels
+    # ------------------------------------------------------------------
+
+    def test_both_priority_halves_across_different_labels_trigger_one_update(self, app: SlurmMonitor) -> None:
+        """One fair_share + one job_priority call triggers exactly one priority update."""
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("fair_share", ([], None))
+            app._apply_fetch_result("job_priority", ([], None))
+
+        # Only the second call should have triggered _update_priority_tab
+        assert mock_call.call_count == 1
+        mock_call.assert_called_once_with(app._update_priority_tab)
+
+    # ------------------------------------------------------------------
+    # energy
+    # ------------------------------------------------------------------
+
+    def test_energy_loaded_true_schedules_energy_tab_update(self, app: SlurmMonitor) -> None:
+        """Energy result with loaded=True stores data and schedules _update_energy_tab."""
+        energy_jobs: list[tuple[str, ...]] = [("2001", "gpuJob", "COMPLETED")]
+
+        with (
+            patch(
+                "stoei.widgets.user_overview.UserOverviewTab.aggregate_energy_stats",
+                return_value=[],
+            ),
+            patch.object(app, "call_from_thread") as mock_call,
+        ):
+            app._apply_fetch_result("energy", (energy_jobs, True))
+
+        assert app._energy_history_jobs == energy_jobs
+        assert app._energy_data_loaded is True
+        mock_call.assert_called_once_with(app._update_energy_tab)
+
+    def test_energy_loaded_false_does_not_schedule_energy_tab_update(self, app: SlurmMonitor) -> None:
+        """Energy result with loaded=False stores data but does NOT schedule tab update."""
+        energy_jobs: list[tuple[str, ...]] = []
+
+        with patch.object(app, "call_from_thread") as mock_call:
+            app._apply_fetch_result("energy", (energy_jobs, False))
+
+        assert app._energy_data_loaded is False
+        mock_call.assert_not_called()
+
+    # ------------------------------------------------------------------
+    # unknown label
+    # ------------------------------------------------------------------
+
+    def test_unknown_label_logs_warning(self, app: SlurmMonitor) -> None:
+        """An unrecognised label triggers a logger.warning call."""
+        with patch("stoei.app.logger") as mock_logger:
+            app._apply_fetch_result("totally_unknown_label", [])
+
+        mock_logger.warning.assert_called_once()
+        warning_message: str = mock_logger.warning.call_args[0][0]
+        assert "totally_unknown_label" in warning_message
+
+
+class TestOnRefreshComplete:
+    """Tests for _on_refresh_complete — first-cycle and subsequent-cycle behaviour."""
+
+    @pytest.fixture(autouse=True)
+    def reset_job_cache(self) -> None:
+        """Reset JobCache singleton before each test."""
+        JobCache.reset()
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Return a SlurmMonitor instance with a pre-populated job info cache."""
+        instance = SlurmMonitor()
+        instance._job_info_cache["123"] = ("formatted", None, None, None)
+        return instance
+
+    def test_first_cycle_sets_initial_background_complete(self, app: SlurmMonitor) -> None:
+        """First cycle sets _initial_background_complete = True."""
+        app._initial_background_complete = False
+
+        with (
+            patch.object(app, "set_interval", return_value=MagicMock()),
+            patch.object(app, "notify"),
+        ):
+            app._on_refresh_complete(is_first_cycle=True)
+
+        assert app._initial_background_complete is True
+
+    def test_first_cycle_starts_auto_refresh_timer(self, app: SlurmMonitor) -> None:
+        """First cycle calls set_interval to set up the auto-refresh timer."""
+        app._initial_background_complete = False
+
+        with (
+            patch.object(app, "set_interval", return_value=MagicMock()) as mock_set_interval,
+            patch.object(app, "notify"),
+        ):
+            app._on_refresh_complete(is_first_cycle=True)
+
+        mock_set_interval.assert_called_once_with(app.refresh_interval, app._start_refresh_worker)
+
+    def test_first_cycle_notifies_user(self, app: SlurmMonitor) -> None:
+        """First cycle calls notify to inform the user that data has loaded."""
+        app._initial_background_complete = False
+
+        with (
+            patch.object(app, "set_interval", return_value=MagicMock()),
+            patch.object(app, "notify") as mock_notify,
+        ):
+            app._on_refresh_complete(is_first_cycle=True)
+
+        mock_notify.assert_called_once()
+        notify_args, _ = mock_notify.call_args
+        # The message should mention loaded/cluster data
+        message: str = notify_args[0] if notify_args else ""
+        assert "loaded" in message.lower() or "data" in message.lower()
+
+    def test_first_cycle_clears_job_info_cache(self, app: SlurmMonitor) -> None:
+        """_on_refresh_complete always clears the job info cache."""
+        with (
+            patch.object(app, "set_interval", return_value=MagicMock()),
+            patch.object(app, "notify"),
+        ):
+            app._on_refresh_complete(is_first_cycle=True)
+
+        assert app._job_info_cache == {}
+
+    def test_subsequent_cycle_does_not_call_set_interval(self, app: SlurmMonitor) -> None:
+        """Subsequent refresh cycles must not re-register the auto-refresh timer."""
+        app._initial_background_complete = True
+
+        with (
+            patch.object(app, "set_interval") as mock_set_interval,
+            patch.object(app, "notify") as mock_notify,
+        ):
+            app._on_refresh_complete(is_first_cycle=False)
+
+        mock_set_interval.assert_not_called()
+        mock_notify.assert_not_called()
+
+    def test_subsequent_cycle_clears_job_info_cache(self, app: SlurmMonitor) -> None:
+        """Subsequent refresh cycles still clear the job info cache."""
+        app._initial_background_complete = True
+
+        with (
+            patch.object(app, "set_interval"),
+            patch.object(app, "notify"),
+        ):
+            app._on_refresh_complete(is_first_cycle=False)
+
+        assert app._job_info_cache == {}
