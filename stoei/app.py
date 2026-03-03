@@ -4,7 +4,7 @@ import re
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, TypeAlias, cast
 
 from textual._path import CSSPathType
 from textual.app import App, ComposeResult
@@ -94,8 +94,20 @@ from stoei.widgets.user_overview import (
 
 logger = get_logger(__name__)
 
+# Type aliases for fetch result types used in _apply_fetch_result.
+_UserJobsResult: TypeAlias = tuple[list[tuple[str, ...]] | None, list[tuple[str, ...]] | None, int, int, int]
+_PriorityHalfResult: TypeAlias = tuple[list[tuple[str, ...]], str | None]
+_EnergyResult: TypeAlias = tuple[list[tuple[str, ...]], bool]
+_FetchResult: TypeAlias = (
+    _UserJobsResult | list[dict[str, str]] | list[tuple[str, ...]] | _PriorityHalfResult | _EnergyResult
+)
+
 # Path to styles directory
 STYLES_DIR = Path(__file__).parent / "styles"
+
+# Number of independent priority fetch futures (fair_share + job_priority).
+# The priority tab is updated once both halves have arrived in the same cycle.
+_PRIORITY_FETCH_COUNT = 2
 
 # Minimum window width to show sidebar (sidebar is 30 wide, need space for content)
 MIN_WIDTH_FOR_SIDEBAR = 100
@@ -226,6 +238,10 @@ class SlurmMonitor(App[None]):
         self._dirty_nodes_tab: bool = False
         self._dirty_users_tab: bool = False
         self._dirty_priority_tab: bool = False
+        # Counts how many of the two priority halves (fair_share + job_priority)
+        # have arrived so far in the current refresh cycle.  When both arrive the
+        # priority tab is recomputed and updated once, avoiding double renders.
+        self._priority_halves_received: int = 0
         # Error deduplication: tracks which error types have already been notified
         # so repeated refresh failures don't spam the user with the same message.
         self._error_notified: dict[str, bool] = {}
@@ -825,35 +841,6 @@ class SlurmMonitor(App[None]):
         logger.debug(f"Fetched {len(wait_time_jobs)} jobs for wait time calculation")
         return wait_time_jobs
 
-    def _fetch_priority(self) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]]]:
-        """Fetch fair-share and pending job priority data concurrently.
-
-        Runs sshare and sprio in parallel using a nested ThreadPoolExecutor
-        with max_retries=1 to reduce worst-case blocking time.
-
-        Returns:
-            Tuple of (fair_share_entries, job_priority_entries).
-        """
-        fs_entries: list[tuple[str, ...]] = []
-        jp_entries: list[tuple[str, ...]] = []
-
-        with ThreadPoolExecutor(max_workers=2) as pool:
-            fs_fut = pool.submit(get_fair_share_priority, max_retries=1)
-            jp_fut = pool.submit(get_pending_job_priority, max_retries=1)
-            for fut, name in ((fs_fut, "sshare"), (jp_fut, "sprio")):
-                try:
-                    entries, error = fut.result()
-                    if error:
-                        logger.warning(f"{name} failed: {error}")
-                    elif name == "sshare":
-                        fs_entries = entries
-                    else:
-                        jp_entries = entries
-                except Exception:
-                    logger.exception(f"Failed to fetch {name} priority")
-
-        return fs_entries, jp_entries
-
     def _fetch_energy(self) -> tuple[list[tuple[str, ...]], bool]:
         """Fetch energy history data (only used during first background cycle).
 
@@ -887,14 +874,15 @@ class SlurmMonitor(App[None]):
         worker = get_current_worker()
 
         try:
-            max_workers = 6 if is_first_cycle else 5
+            max_workers = 7 if is_first_cycle else 6
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
                 futures = {
                     pool.submit(self._fetch_user_jobs): "user_jobs",
                     pool.submit(self._fetch_nodes): "nodes",
                     pool.submit(self._fetch_all_jobs): "all_jobs",
                     pool.submit(self._fetch_wait_time): "wait_time",
-                    pool.submit(self._fetch_priority): "priority",
+                    pool.submit(get_fair_share_priority, max_retries=1): "fair_share",
+                    pool.submit(get_pending_job_priority, max_retries=1): "job_priority",
                 }
                 if is_first_cycle:
                     futures[pool.submit(self._fetch_energy)] = "energy"
@@ -919,7 +907,38 @@ class SlurmMonitor(App[None]):
         finally:
             self.call_from_thread(lambda: self._set_loading_indicator(False))
 
-    def _apply_fetch_result(self, label: str, result: object) -> None:
+    def _process_refresh_results(self, results: dict[str, object]) -> None:
+        """Process a batch of fetch results, updating error-notification state (worker thread).
+
+        Handles the ``user_jobs`` label: tracks running-jobs failure notifications
+        and delegates to :meth:`_handle_refresh_fallback` for history fallback.
+        Unlike :meth:`_apply_fetch_result`, this method does **not** schedule a
+        job-table UI update so it can be used in contexts where the table refresh
+        is driven separately.
+
+        Args:
+            results: Mapping of fetch label to its result value.
+        """
+        if "user_jobs" not in results:
+            return
+        running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = cast(
+            _UserJobsResult, results["user_jobs"]
+        )
+        if running_jobs is not None:
+            self._error_notified["running_jobs"] = False
+            self._handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+        else:
+            if not self._error_notified.get("running_jobs"):
+                self._error_notified["running_jobs"] = True
+                self.call_from_thread(
+                    lambda: self.notify("Running jobs refresh failed - keeping old data", severity="warning")
+                )
+            if history_jobs is not None:
+                self._error_notified["history_jobs"] = False
+                self._last_history_jobs = history_jobs
+                self._last_history_stats = (total_jobs, total_requeues, max_requeues)
+
+    def _apply_fetch_result(self, label: str, result: _FetchResult) -> None:  # noqa: PLR0912, PLR0915
         """Process one completed fetch and push a partial UI update (worker thread).
 
         Called in the background worker thread as each data source completes.
@@ -930,7 +949,7 @@ class SlurmMonitor(App[None]):
             result: The data returned by the fetch function.
         """
         if label == "user_jobs":
-            running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = result  # type: ignore[misc]
+            running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = cast(_UserJobsResult, result)
             if running_jobs is not None:
                 self._error_notified["running_jobs"] = False
                 self._handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
@@ -945,39 +964,59 @@ class SlurmMonitor(App[None]):
                     self._last_history_jobs = history_jobs
                     self._last_history_stats = (total_jobs, total_requeues, max_requeues)
             job_rows = [tuple(self._job_row_values(j)) for j in self._sorted_jobs_for_display(self._job_cache.jobs)]
-            self.call_from_thread(lambda rows=job_rows: self._update_jobs_table(rows))
+            self.call_from_thread(lambda: self._update_jobs_table(job_rows))
 
         elif label == "nodes":
-            self._cluster_nodes = result  # type: ignore[assignment]
+            self._cluster_nodes = cast(list[dict[str, str]], result)
             self._cached_node_infos = self._parse_node_infos()
-            self._cached_cluster_stats = self._calculate_cluster_stats()
-            self.call_from_thread(self._update_nodes_and_sidebar)
+            self.call_from_thread(self._update_nodes_tab_only)
 
         elif label == "all_jobs":
-            self._all_users_jobs = result  # type: ignore[assignment]
+            self._all_users_jobs = cast(list[tuple[str, ...]], result)
             self._compute_user_overview_cache()
-            self._cached_cluster_stats = self._calculate_cluster_stats()
             self.call_from_thread(self._update_all_jobs_widgets)
 
         elif label == "wait_time":
-            self._wait_time_jobs = result  # type: ignore[assignment]
-            self._cached_cluster_stats = self._calculate_cluster_stats()
-            self.call_from_thread(self._update_cluster_sidebar)
+            self._wait_time_jobs = cast(list[tuple[str, ...]], result)
+            stats = self._calculate_cluster_stats()
+            self._cached_cluster_stats = stats
+            self.call_from_thread(lambda s=stats: self._update_cluster_sidebar_with_stats(s))
 
-        elif label == "priority":
-            fair_share_entries, job_priority_entries = result  # type: ignore[misc]
-            self._fair_share_entries = fair_share_entries
-            self._job_priority_entries = job_priority_entries
-            self._compute_priority_overview_cache()
-            self.call_from_thread(self._update_priority_tab)
+        elif label == "fair_share":
+            entries, error = cast(_PriorityHalfResult, result)
+            if error:
+                logger.warning(f"sshare failed: {error}")
+            else:
+                self._fair_share_entries = entries
+            # Only trigger priority tab update once both halves have arrived
+            self._priority_halves_received += 1
+            if self._priority_halves_received >= _PRIORITY_FETCH_COUNT:
+                self._priority_halves_received = 0
+                self._compute_priority_overview_cache()
+                self.call_from_thread(self._update_priority_tab)
+
+        elif label == "job_priority":
+            entries, error = cast(_PriorityHalfResult, result)
+            if error:
+                logger.warning(f"sprio failed: {error}")
+            else:
+                self._job_priority_entries = entries
+            self._priority_halves_received += 1
+            if self._priority_halves_received >= _PRIORITY_FETCH_COUNT:
+                self._priority_halves_received = 0
+                self._compute_priority_overview_cache()
+                self.call_from_thread(self._update_priority_tab)
 
         elif label == "energy":
-            energy_jobs, energy_loaded = result  # type: ignore[misc]
+            energy_jobs, energy_loaded = cast(_EnergyResult, result)
             self._energy_history_jobs = energy_jobs
             self._energy_data_loaded = energy_loaded
             if energy_loaded:
                 self._cached_energy_user_stats = UserOverviewTab.aggregate_energy_stats(energy_jobs)
                 self.call_from_thread(self._update_energy_tab)
+
+        else:
+            logger.warning(f"_apply_fetch_result: unknown label {label!r}")
 
     def _update_nodes_and_sidebar(self) -> None:
         """Update cluster sidebar and node overview tab (main thread only)."""
@@ -991,9 +1030,35 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.debug(f"Failed to update node tab: {exc}")
 
+    def _update_nodes_and_sidebar_with_stats(self, stats: ClusterStats) -> None:
+        """Update cluster sidebar (with pre-computed stats) and node overview tab (main thread only).
+
+        Args:
+            stats: Pre-computed cluster stats to pass directly to the sidebar.
+        """
+        self._update_cluster_sidebar_with_stats(stats)
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            if tab_container.active_tab == "nodes":
+                self._update_node_overview()
+            else:
+                self._dirty_nodes_tab = True
+        except Exception:
+            logger.exception("Failed to update node tab")
+
+    def _update_nodes_tab_only(self) -> None:
+        """Update node overview tab without touching the sidebar (main thread only)."""
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            if tab_container.active_tab == "nodes":
+                self._update_node_overview()
+            else:
+                self._dirty_nodes_tab = True
+        except Exception:
+            logger.exception("Failed to update node tab")
+
     def _update_all_jobs_widgets(self) -> None:
-        """Update user overview, sidebar, and My Usage banner (main thread only)."""
-        self._update_cluster_sidebar()
+        """Update user overview and My Usage banner without touching the sidebar (main thread only)."""
         self._update_my_usage_summary(self._cached_running_user_stats)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
@@ -1001,8 +1066,25 @@ class SlurmMonitor(App[None]):
                 self._apply_user_overview_from_cache()
             else:
                 self._dirty_users_tab = True
-        except Exception as exc:
-            logger.debug(f"Failed to update users tab: {exc}")
+        except Exception:
+            logger.exception("Failed to update users tab")
+
+    def _update_all_jobs_widgets_with_stats(self, stats: ClusterStats) -> None:
+        """Update user overview, sidebar (with pre-computed stats), and My Usage banner (main thread only).
+
+        Args:
+            stats: Pre-computed cluster stats to pass directly to the sidebar.
+        """
+        self._update_cluster_sidebar_with_stats(stats)
+        self._update_my_usage_summary(self._cached_running_user_stats)
+        try:
+            tab_container = self.query_one("#tab-container", TabContainer)
+            if tab_container.active_tab == "users":
+                self._apply_user_overview_from_cache()
+            else:
+                self._dirty_users_tab = True
+        except Exception:
+            logger.exception("Failed to update users tab")
 
     def _update_priority_tab(self) -> None:
         """Update priority overview if active, else mark dirty (main thread only)."""
@@ -1012,16 +1094,16 @@ class SlurmMonitor(App[None]):
                 self._apply_priority_overview_from_cache()
             else:
                 self._dirty_priority_tab = True
-        except Exception as exc:
-            logger.debug(f"Failed to update priority tab: {exc}")
+        except Exception:
+            logger.exception("Failed to update priority tab")
 
     def _update_energy_tab(self) -> None:
         """Update energy subtab in user overview (main thread only)."""
         try:
             user_tab = self.query_one("#user-overview", UserOverviewTab)
             user_tab.update_energy_users(self._cached_energy_user_stats)
-        except Exception as exc:
-            logger.debug(f"Failed to update energy tab: {exc}")
+        except Exception:
+            logger.exception("Failed to update energy tab")
 
     def _on_refresh_complete(self, is_first_cycle: bool) -> None:
         """Handle post-refresh bookkeeping (main thread only).
@@ -1033,7 +1115,7 @@ class SlurmMonitor(App[None]):
             is_first_cycle: Whether this was the first background refresh cycle.
         """
         self._job_info_cache.clear()
-        if is_first_cycle and not self._initial_background_complete:
+        if is_first_cycle:
             self._initial_background_complete = True
             self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
             self.notify("All cluster data loaded", timeout=3, severity="information")
@@ -1219,6 +1301,22 @@ class SlurmMonitor(App[None]):
             logger.debug(
                 f"Updated cluster sidebar: {stats.total_nodes} nodes, {stats.total_cpus} CPUs (cached={is_cached})"
             )
+        except Exception as exc:
+            logger.error(f"Failed to update cluster sidebar: {exc}", exc_info=True)
+
+    def _update_cluster_sidebar_with_stats(self, stats: ClusterStats) -> None:
+        """Update the cluster sidebar using pre-computed stats (main thread only).
+
+        Avoids reading the shared ``_cached_cluster_stats`` field, which may be
+        overwritten by another worker-thread branch before the callback runs.
+
+        Args:
+            stats: Pre-computed cluster stats captured by the calling branch.
+        """
+        try:
+            sidebar = self.query_one("#cluster-sidebar", ClusterSidebar)
+            sidebar.update_stats(stats)
+            logger.debug(f"Updated cluster sidebar: {stats.total_nodes} nodes, {stats.total_cpus} CPUs (pre-computed)")
         except Exception as exc:
             logger.error(f"Failed to update cluster sidebar: {exc}", exc_info=True)
 
