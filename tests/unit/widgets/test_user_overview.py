@@ -193,6 +193,81 @@ class TestUserOverviewTab:
         # Should skip jobs with empty username
         assert len(result) == 0
 
+    def test_aggregate_job_classification_all_plain(self) -> None:
+        """All plain (non-array) jobs yield array_count=0, plain_job_count=N."""
+        jobs = [
+            ("47441", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01"),
+            ("47442", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "node02"),
+            ("47443", "job3", "user1", "gpu", "RUNNING", "0:15:00", "1", "node03"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].array_count == 0
+        assert result[0].plain_job_count == 3
+
+    def test_aggregate_job_classification_all_array_one_group(self) -> None:
+        """Multiple tasks from a single array count as 1 distinct array."""
+        jobs = [
+            ("12345_0", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01"),
+            ("12345_1", "job1", "user1", "gpu", "RUNNING", "0:30:00", "1", "node02"),
+            ("12345_2", "job1", "user1", "gpu", "RUNNING", "0:15:00", "1", "node03"),
+            ("12345_3", "job1", "user1", "gpu", "RUNNING", "0:10:00", "1", "node04"),
+            ("12345_4", "job1", "user1", "gpu", "RUNNING", "0:05:00", "1", "node05"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].array_count == 1
+        assert result[0].plain_job_count == 0
+        assert result[0].job_count == 5
+
+    def test_aggregate_job_classification_two_distinct_arrays(self) -> None:
+        """Tasks from two different arrays count as 2 distinct arrays."""
+        jobs = [
+            ("12345_0", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01"),
+            ("12345_1", "job1", "user1", "gpu", "RUNNING", "0:30:00", "1", "node02"),
+            ("99999_0", "job2", "user1", "gpu", "RUNNING", "0:15:00", "1", "node03"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].array_count == 2
+        assert result[0].plain_job_count == 0
+
+    def test_aggregate_job_classification_mixed(self) -> None:
+        """Mix of array tasks and plain jobs is classified correctly."""
+        jobs = [
+            ("12345_0", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01"),
+            ("99999_0", "job2", "user1", "gpu", "RUNNING", "0:30:00", "1", "node02"),
+            ("47441", "job3", "user1", "gpu", "RUNNING", "0:15:00", "1", "node03"),
+            ("47442", "job4", "user1", "gpu", "RUNNING", "0:10:00", "1", "node04"),
+            ("47443", "job5", "user1", "gpu", "RUNNING", "0:05:00", "1", "node05"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].array_count == 2
+        assert result[0].plain_job_count == 3
+        assert result[0].job_count == 5
+
+    def test_aggregate_job_classification_pending_array_ignored(self) -> None:
+        """Pending array job IDs (containing '_[') do not count as arrays or plain jobs."""
+        jobs = [
+            ("12345_[0-49]", "job1", "user1", "gpu", "PENDING", "0:00:00", "50", "(Resources)"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].array_count == 0
+        assert result[0].plain_job_count == 0
+        assert result[0].job_count == 1  # job_count still increments
+
+    def test_aggregate_job_classification_single_array_task(self) -> None:
+        """Single running array task: array_count=1, plain_job_count=0."""
+        jobs = [
+            ("12345_0", "job1", "user1", "gpu", "RUNNING", "1:00:00", "1", "node01"),
+        ]
+        result = UserOverviewTab.aggregate_user_stats(jobs)
+        assert len(result) == 1
+        assert result[0].array_count == 1
+        assert result[0].plain_job_count == 0
+
     async def test_update_users_sorts_by_cpus(self) -> None:
         """Test that users are sorted by CPU usage (descending)."""
         from textual.app import App
@@ -1170,3 +1245,90 @@ class TestUpdateMyUsageSummary:
                 app._update_my_usage_summary([])
                 summary = app.query_one("#my-usage-summary", Static)
                 assert "No running jobs" in summary.content
+
+    async def test_my_usage_shows_task_count_mixed(self) -> None:
+        """Banner shows task count with array and plain job breakdown."""
+        from unittest.mock import patch
+
+        from stoei.app import SlurmMonitor
+
+        app = SlurmMonitor()
+        app._current_username = "alice"
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                users = [
+                    UserStats(
+                        username="alice",
+                        job_count=15,
+                        total_cpus=48,
+                        total_memory_gb=192.0,
+                        total_gpus=0,
+                        total_nodes=3,
+                        array_count=2,
+                        plain_job_count=3,
+                    ),
+                ]
+                app._update_my_usage_summary(users)
+                text = app.query_one("#my-usage-summary", Static).content
+                assert "15 tasks (2 arrays, 3 jobs)" in text
+
+    async def test_my_usage_shows_task_count_all_array(self) -> None:
+        """Banner shows correct count when all tasks belong to one array."""
+        from unittest.mock import patch
+
+        from stoei.app import SlurmMonitor
+
+        app = SlurmMonitor()
+        app._current_username = "alice"
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                users = [
+                    UserStats(
+                        username="alice",
+                        job_count=10,
+                        total_cpus=40,
+                        total_memory_gb=160.0,
+                        total_gpus=0,
+                        total_nodes=2,
+                        array_count=1,
+                        plain_job_count=0,
+                    ),
+                ]
+                app._update_my_usage_summary(users)
+                text = app.query_one("#my-usage-summary", Static).content
+                assert "10 tasks (1 array, 0 jobs)" in text
+
+    async def test_my_usage_shows_task_count_singular(self) -> None:
+        """Banner uses singular forms correctly for counts of 1."""
+        from unittest.mock import patch
+
+        from stoei.app import SlurmMonitor
+
+        app = SlurmMonitor()
+        app._current_username = "alice"
+        with (
+            patch("stoei.app.check_slurm_available", return_value=(True, None)),
+            patch.object(app, "_start_refresh_worker"),
+        ):
+            async with app.run_test(size=(80, 24)):
+                users = [
+                    UserStats(
+                        username="alice",
+                        job_count=1,
+                        total_cpus=4,
+                        total_memory_gb=16.0,
+                        total_gpus=0,
+                        total_nodes=1,
+                        array_count=0,
+                        plain_job_count=1,
+                    ),
+                ]
+                app._update_my_usage_summary(users)
+                text = app.query_one("#my-usage-summary", Static).content
+                assert "1 task (0 arrays, 1 job)" in text

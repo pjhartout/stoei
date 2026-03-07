@@ -1824,6 +1824,14 @@ class SlurmMonitor(App[None]):
             parts.append(gpu_label)
         parts.append(f"{my_stats.total_nodes} Nodes")
 
+        x = my_stats.job_count
+        y = my_stats.array_count
+        z = my_stats.plain_job_count
+        task_word = "task" if x == 1 else "tasks"
+        array_word = "array" if y == 1 else "arrays"
+        job_word = "job" if z == 1 else "jobs"
+        parts.append(f"{x} {task_word} ({y} {array_word}, {z} {job_word})")
+
         summary.update(f"My Usage: {' | '.join(parts)}")
 
     def _apply_priority_overview_from_cache(self) -> None:
