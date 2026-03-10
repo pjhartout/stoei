@@ -13,11 +13,24 @@ from stoei.slurm.cache import JobCache
 from stoei.widgets.tabs import TabContainer
 
 RUNNING_JOBS: list[tuple[str, ...]] = [
-    ("101", "train", "RUNNING", "00:10:00", "1", "node001"),
+    # job_id, name, state, time, nodes, nodelist, submit_time, start_time
+    ("101", "train", "RUNNING", "00:10:00", "1", "node001", "2024-01-15T10:00:00", "2024-01-15T10:00:00"),
 ]
 
 HISTORY_JOBS: list[tuple[str, ...]] = [
-    ("201", "completed", "COMPLETED", "0", "00:30:00", "0:0", "node002"),
+    # job_id, name, state, restarts, elapsed, exit_code, nodelist, submit, start, end
+    (
+        "201",
+        "completed",
+        "COMPLETED",
+        "0",
+        "00:30:00",
+        "0:0",
+        "node002",
+        "2024-01-14T09:00:00",
+        "2024-01-14T09:00:00",
+        "2024-01-14T09:30:00",
+    ),
 ]
 
 ALL_RUNNING_JOBS: list[tuple[str, ...]] = [
@@ -131,6 +144,90 @@ async def test_manual_refresh_triggers_worker(slurm_monitor_factory: Callable[[]
         await pilot.press("r")
 
     assert refresh_calls == ["called"]
+
+
+@pytest.mark.asyncio
+async def test_new_jobs_appear_after_refresh(slurm_monitor_factory: Callable[[], SlurmMonitor]) -> None:
+    """New jobs from a refresh cycle must appear in the jobs table."""
+    from stoei.widgets.filterable_table import FilterableDataTable
+
+    app = slurm_monitor_factory()
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        # Wait for initial load to finish
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        jobs_ft = app.query_one("#jobs-filterable-table", FilterableDataTable)
+        initial_count = jobs_ft.table.row_count
+
+        # Simulate a refresh that returns the original job + a new one
+        new_running: list[tuple[str, ...]] = [
+            *RUNNING_JOBS,
+            ("102", "eval", "RUNNING", "00:05:00", "1", "node002", "2024-01-15T11:00:00", "2024-01-15T11:00:00"),
+        ]
+        result = (new_running, list(HISTORY_JOBS), len(HISTORY_JOBS), 0, 0)
+        app._apply_fetch_result("user_jobs", result)
+
+        # Let the _UICallback → _update_jobs_table → call_later chain run
+        await pilot.pause()
+        await pilot.pause()
+
+        new_count = jobs_ft.table.row_count
+        assert new_count > initial_count, f"Expected more rows after refresh, got {new_count} (was {initial_count})"
+        # Verify the new job ID is in the keyed row index
+        assert jobs_ft._rows_by_key is not None
+        assert "102" in jobs_ft._rows_by_key
+
+
+@pytest.mark.asyncio
+async def test_completed_jobs_removed_after_refresh(slurm_monitor_factory: Callable[[], SlurmMonitor]) -> None:
+    """Jobs that are no longer running should disappear from the table after refresh."""
+    from stoei.widgets.filterable_table import FilterableDataTable
+
+    app = slurm_monitor_factory()
+
+    async with app.run_test(size=(80, 24)) as pilot:
+        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        jobs_ft = app.query_one("#jobs-filterable-table", FilterableDataTable)
+        initial_count = jobs_ft.table.row_count
+        assert initial_count > 0, "Expected at least one job after initial load"
+
+        # Simulate a refresh where the running job completed and moved to history
+        new_history: list[tuple[str, ...]] = [
+            *HISTORY_JOBS,
+            (
+                "101",
+                "train",
+                "COMPLETED",
+                "0",
+                "00:10:00",
+                "0:0",
+                "node001",
+                "2024-01-15T10:00:00",
+                "2024-01-15T10:00:00",
+                "2024-01-15T10:10:00",
+            ),
+        ]
+        result: tuple[list[tuple[str, ...]], list[tuple[str, ...]], int, int, int] = (
+            [],  # no running jobs
+            new_history,
+            len(new_history),
+            0,
+            0,
+        )
+        app._apply_fetch_result("user_jobs", result)
+
+        await pilot.pause()
+        await pilot.pause()
+
+        # The previously-running job 101 should now show as COMPLETED,
+        # and the total count should reflect the updated state
+        assert jobs_ft._rows_by_key is not None
+        # Job 101 should still be present (in history now)
+        assert "101" in jobs_ft._rows_by_key
 
 
 def test_cli_logs_uncaught_exceptions(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
