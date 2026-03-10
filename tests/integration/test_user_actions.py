@@ -69,11 +69,13 @@ def slurm_monitor_factory(monkeypatch: pytest.MonkeyPatch) -> Callable[[], Slurm
     def factory() -> SlurmMonitor:
         JobCache.reset()
         app = SlurmMonitor()
+        app._initial_load_complete = True
 
-        def _noop_interval(*_args, **_kwargs) -> None:
+        def _noop(*_args, **_kwargs) -> None:
             return None
 
-        app.set_interval = _noop_interval  # type: ignore[assignment]
+        app.set_interval = _noop  # type: ignore[assignment]
+        app._start_refresh_worker = _noop  # type: ignore[assignment]
         return app
 
     return factory
@@ -90,18 +92,23 @@ async def test_tab_shortcuts_cycle_views(slurm_monitor_factory: Callable[[], Slu
         assert tab_container.active_tab == "jobs"
 
         await pilot.press("2")
+        await pilot.pause()
         assert tab_container.active_tab == "nodes"
 
         await pilot.press("3")
+        await pilot.pause()
         assert tab_container.active_tab == "users"
 
         await pilot.press("4")
+        await pilot.pause()
         assert tab_container.active_tab == "priority"
 
         await pilot.press("5")
+        await pilot.pause()
         assert tab_container.active_tab == "logs"
 
         await pilot.press("1")
+        await pilot.pause()
         assert tab_container.active_tab == "jobs"
 
 

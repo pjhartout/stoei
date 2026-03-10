@@ -40,7 +40,7 @@ class TestRefreshFallback:
 
         with (
             patch.object(app._job_cache, "_build_from_data") as mock_build,
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._handle_refresh_fallback(running_jobs, None, 0, 0, 0)
 
@@ -61,7 +61,7 @@ class TestRefreshFallback:
 
         with (
             patch.object(app._job_cache, "_build_from_data") as mock_build,
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._handle_refresh_fallback(running_jobs, None, 0, 0, 0)
 
@@ -84,7 +84,7 @@ class TestRefreshFallback:
 
         with (
             patch.object(app._job_cache, "_build_from_data") as mock_build,
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._handle_refresh_fallback(running_jobs, None, 0, 0, 0)
 
@@ -114,7 +114,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             # First failure - should notify
             app._handle_refresh_fallback(running_jobs, None, 0, 0, 0)
@@ -132,7 +132,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             # First failure - notifies
             app._handle_refresh_fallback(running_jobs, None, 0, 0, 0)
@@ -152,7 +152,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             # First failure
             results: dict[str, object] = {"user_jobs": (None, None, 0, 0, 0)}
@@ -173,7 +173,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             # First failure
             results_fail: dict[str, object] = {"user_jobs": (None, None, 0, 0, 0)}
@@ -197,7 +197,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             # Running OK, history fails - should notify once for history
             results: dict[str, object] = {"user_jobs": (running_jobs, None, 0, 0, 0)}
@@ -212,7 +212,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             # Both fail
             results: dict[str, object] = {"user_jobs": (None, None, 0, 0, 0)}
@@ -249,7 +249,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             results: dict[str, object] = {"user_jobs": (None, history_jobs, 5, 1, 2)}
             app._process_refresh_results(results)
@@ -265,7 +265,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             results: dict[str, object] = {}
             app._process_refresh_results(results)
@@ -301,13 +301,13 @@ class TestApplyFetchResult:
         """Failing running-jobs fetch notifies once and always schedules table update."""
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             app._apply_fetch_result("user_jobs", (None, None, 0, 0, 0))
 
             # Error flag must be set
             assert app._error_notified.get("running_jobs") is True
-            # call_from_thread called once: the warning notification lambda
+            # _post_ui_callback called once: the warning notification lambda
             # (the table update is also scheduled — two calls total; first is
             # the notify lambda, second is _update_jobs_table)
             assert mock_call.call_count == 2
@@ -319,7 +319,7 @@ class TestApplyFetchResult:
         """Second consecutive running-jobs failure does not emit a second notification."""
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             app._apply_fetch_result("user_jobs", (None, None, 0, 0, 0))
             first_count = mock_call.call_count
@@ -340,7 +340,7 @@ class TestApplyFetchResult:
         """Nodes result updates _cluster_nodes and schedules _update_nodes_tab_only."""
         node_data: list[dict[str, str]] = [{"NodeName": "node1", "State": "IDLE"}]
 
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("nodes", node_data)
 
         assert app._cluster_nodes == node_data
@@ -354,7 +354,7 @@ class TestApplyFetchResult:
         """all_jobs result stores data and schedules _update_all_jobs_widgets."""
         jobs: list[tuple[str, ...]] = [("1001", "jobA", "RUNNING", "2:00", "1", "nodeA")]
 
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("all_jobs", jobs)
 
         assert app._all_users_jobs == jobs
@@ -368,7 +368,7 @@ class TestApplyFetchResult:
         """wait_time result stores data and schedules a sidebar stats update."""
         wait_jobs: list[tuple[str, ...]] = [("1002", "jobB", "PENDING", "0:00", "1", "nodeB")]
 
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("wait_time", wait_jobs)
 
         assert app._wait_time_jobs == wait_jobs
@@ -382,7 +382,7 @@ class TestApplyFetchResult:
         """First fair_share arrival increments counter but does not call update yet."""
         assert app._priority_halves_received == 0
 
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("fair_share", ([], None))
 
         assert app._priority_halves_received == 1
@@ -393,7 +393,7 @@ class TestApplyFetchResult:
         # Simulate first half already received
         app._priority_halves_received = 1
 
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("fair_share", ([], None))
 
         assert app._priority_halves_received == 0
@@ -403,7 +403,7 @@ class TestApplyFetchResult:
         """fair_share result without error stores entries in _fair_share_entries."""
         entries: list[tuple[str, ...]] = [("user1", "acct", "0.5")]
 
-        with patch.object(app, "call_from_thread"):
+        with patch.object(app, "_post_ui_callback"):
             app._apply_fetch_result("fair_share", (entries, None))
 
         assert app._fair_share_entries == entries
@@ -415,7 +415,7 @@ class TestApplyFetchResult:
 
         with (
             patch("stoei.app.logger") as mock_logger,
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._apply_fetch_result("fair_share", ([], "sshare failed"))
 
@@ -431,7 +431,7 @@ class TestApplyFetchResult:
         """First job_priority arrival increments counter but does not call update yet."""
         assert app._priority_halves_received == 0
 
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("job_priority", ([], None))
 
         assert app._priority_halves_received == 1
@@ -441,7 +441,7 @@ class TestApplyFetchResult:
         """Second job_priority half triggers _update_priority_tab once."""
         app._priority_halves_received = 1
 
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("job_priority", ([], None))
 
         assert app._priority_halves_received == 0
@@ -451,7 +451,7 @@ class TestApplyFetchResult:
         """job_priority result without error stores entries in _job_priority_entries."""
         entries: list[tuple[str, ...]] = [("999", "jobX", "0.75")]
 
-        with patch.object(app, "call_from_thread"):
+        with patch.object(app, "_post_ui_callback"):
             app._apply_fetch_result("job_priority", (entries, None))
 
         assert app._job_priority_entries == entries
@@ -463,7 +463,7 @@ class TestApplyFetchResult:
 
         with (
             patch("stoei.app.logger") as mock_logger,
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._apply_fetch_result("job_priority", ([], "sprio failed"))
 
@@ -476,7 +476,7 @@ class TestApplyFetchResult:
 
     def test_both_priority_halves_across_different_labels_trigger_one_update(self, app: SlurmMonitor) -> None:
         """One fair_share + one job_priority call triggers exactly one priority update."""
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("fair_share", ([], None))
             app._apply_fetch_result("job_priority", ([], None))
 
@@ -497,7 +497,7 @@ class TestApplyFetchResult:
                 "stoei.widgets.user_overview.UserOverviewTab.aggregate_energy_stats",
                 return_value=[],
             ),
-            patch.object(app, "call_from_thread") as mock_call,
+            patch.object(app, "_post_ui_callback") as mock_call,
         ):
             app._apply_fetch_result("energy", (energy_jobs, True))
 
@@ -509,7 +509,7 @@ class TestApplyFetchResult:
         """Energy result with loaded=False stores data but does NOT schedule tab update."""
         energy_jobs: list[tuple[str, ...]] = []
 
-        with patch.object(app, "call_from_thread") as mock_call:
+        with patch.object(app, "_post_ui_callback") as mock_call:
             app._apply_fetch_result("energy", (energy_jobs, False))
 
         assert app._energy_data_loaded is False
@@ -568,28 +568,19 @@ class TestOnRefreshComplete:
 
         mock_set_interval.assert_called_once_with(app.refresh_interval, app._start_refresh_worker)
 
-    def test_first_cycle_notifies_user(self, app: SlurmMonitor) -> None:
-        """First cycle calls notify to inform the user that data has loaded."""
+    def test_first_cycle_starts_auto_refresh(self, app: SlurmMonitor) -> None:
+        """First cycle starts the auto-refresh timer."""
         app._initial_background_complete = False
 
-        with (
-            patch.object(app, "set_interval", return_value=MagicMock()),
-            patch.object(app, "notify") as mock_notify,
-        ):
+        with patch.object(app, "set_interval", return_value=MagicMock()) as mock_interval:
             app._on_refresh_complete(is_first_cycle=True)
 
-        mock_notify.assert_called_once()
-        notify_args, _ = mock_notify.call_args
-        # The message should mention loaded/cluster data
-        message: str = notify_args[0] if notify_args else ""
-        assert "loaded" in message.lower() or "data" in message.lower()
+        assert app._initial_background_complete is True
+        mock_interval.assert_called_once()
 
     def test_first_cycle_clears_job_info_cache(self, app: SlurmMonitor) -> None:
         """_on_refresh_complete always clears the job info cache."""
-        with (
-            patch.object(app, "set_interval", return_value=MagicMock()),
-            patch.object(app, "notify"),
-        ):
+        with patch.object(app, "set_interval", return_value=MagicMock()):
             app._on_refresh_complete(is_first_cycle=True)
 
         assert app._job_info_cache == {}

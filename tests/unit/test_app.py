@@ -238,7 +238,7 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_pending_job_priority", return_value=([], None)),
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._refresh_data_async()
 
@@ -257,16 +257,16 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_pending_job_priority", return_value=([], None)),
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._refresh_data_async()
 
         assert app._cluster_nodes == [{"NodeName": "n1"}]
 
-    def test_refresh_data_calls_multiple_call_from_thread(self) -> None:
-        """Verify that _refresh_data_async calls call_from_thread for each data source."""
+    def test_refresh_data_posts_multiple_ui_callbacks(self) -> None:
+        """Verify that _refresh_data_async posts UI callbacks for each data source."""
         app = SlurmMonitor()
-        call_from_thread_calls: list[object] = []
+        ui_callback_calls: list[object] = []
 
         with (
             patch("stoei.app.get_running_jobs", return_value=([], None)),
@@ -277,12 +277,12 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_pending_job_priority", return_value=([], None)),
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
-            patch.object(app, "call_from_thread", side_effect=call_from_thread_calls.append),
+            patch.object(app, "_post_ui_callback", side_effect=ui_callback_calls.append),
         ):
             app._refresh_data_async()
 
         # Progressive rendering: loading indicator + one call per data source + completion call
-        assert len(call_from_thread_calls) >= 6
+        assert len(ui_callback_calls) >= 6
 
     def test_refresh_data_handles_cluster_nodes_error(self) -> None:
         """Verify that _refresh_data_async stores empty nodes on fetch error."""
@@ -297,7 +297,7 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_pending_job_priority", return_value=([], None)),
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._refresh_data_async()
 
@@ -868,8 +868,9 @@ class TestUpdateUIFromCache:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
             patch.object(app, "_prefetch_job_info"),
+            patch.object(app, "_start_initial_load_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 # Add jobs directly to the cache
                 app._job_cache._jobs = [
                     Job(
@@ -893,6 +894,7 @@ class TestUpdateUIFromCache:
                 ]
 
                 app._update_ui_from_cache()
+                await pilot.pause()
                 jobs_table = app.query_one("#jobs_table", DataTable)
                 assert jobs_table.row_count == 2
 
@@ -905,8 +907,9 @@ class TestUpdateUIFromCache:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
             patch.object(app, "_prefetch_job_info"),
+            patch.object(app, "_start_initial_load_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 # Add mix of active and completed jobs
                 app._job_cache._jobs = [
                     Job(
@@ -957,6 +960,7 @@ class TestUpdateUIFromCache:
                 ]
 
                 app._update_ui_from_cache()
+                await pilot.pause()
                 jobs_table = app.query_one("#jobs_table", DataTable)
                 assert jobs_table.row_count == 5
 
@@ -969,8 +973,9 @@ class TestUpdateUIFromCache:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
             patch.object(app, "_prefetch_job_info"),
+            patch.object(app, "_start_initial_load_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 # Add initial jobs
                 app._job_cache._jobs = [
                     Job(
@@ -1003,12 +1008,14 @@ class TestUpdateUIFromCache:
                 ]
 
                 app._update_ui_from_cache()
+                await pilot.pause()
                 jobs_table = app.query_one("#jobs_table", DataTable)
                 # Move cursor to row 1
                 jobs_table.move_cursor(row=1)
 
                 # Update again
                 app._update_ui_from_cache()
+                await pilot.pause()
 
                 # Cursor should still be at row 1
                 assert jobs_table.cursor_row == 1
@@ -1022,8 +1029,9 @@ class TestUpdateUIFromCache:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
             patch.object(app, "_prefetch_job_info"),
+            patch.object(app, "_start_initial_load_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 # Initial cached job
                 app._job_cache._jobs = [
                     Job(
@@ -1037,6 +1045,7 @@ class TestUpdateUIFromCache:
                     )
                 ]
                 app._update_ui_from_cache()
+                await pilot.pause()
 
                 jobs_table = app.query_one("#jobs_table", DataTable)
                 assert jobs_table.row_count == 1
@@ -1055,6 +1064,7 @@ class TestUpdateUIFromCache:
                     )
                 ]
                 app._update_ui_from_cache()
+                await pilot.pause()
 
                 # The existing row should be updated (not duplicated)
                 assert jobs_table.row_count == 1
@@ -1069,8 +1079,9 @@ class TestUpdateUIFromCache:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
             patch.object(app, "_prefetch_job_info"),
+            patch.object(app, "_start_initial_load_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 app._job_cache._jobs = [
                     Job(
                         job_id="100",
@@ -1093,6 +1104,7 @@ class TestUpdateUIFromCache:
                 ]
 
                 app._update_ui_from_cache()
+                await pilot.pause()
                 jobs_table = app.query_one("#jobs_table", DataTable)
                 assert jobs_table.row_count == 2
                 assert str(jobs_table.get_row_at(0)[0]) == "101"

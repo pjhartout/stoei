@@ -422,7 +422,7 @@ class TestPriorityOverviewTab:
                 yield PriorityOverviewTab(current_username="unknown_user", id="priority-overview")
 
         app = PriorityTestApp()
-        async with app.run_test(size=(80, 24)):
+        async with app.run_test(size=(80, 24)) as pilot:
             priority_tab = app.query_one("#priority-overview", PriorityOverviewTab)
             colors = _fallback_colors()
             user_priorities = [
@@ -451,6 +451,7 @@ class TestPriorityOverviewTab:
                     summary_markup=summary_markup,
                 )
             )
+            await pilot.pause()
             summary = app.query_one("#my-priority-summary", Static)
             assert "No fair-share data found" in summary.content
 
@@ -462,7 +463,7 @@ class TestPriorityOverviewTab:
                 yield PriorityOverviewTab(current_username="user1", id="priority-overview")
 
         app = PriorityTestApp()
-        async with app.run_test(size=(80, 24)):
+        async with app.run_test(size=(80, 24)) as pilot:
             priority_tab = app.query_one("#priority-overview", PriorityOverviewTab)
             colors = _fallback_colors()
             user_priorities = [
@@ -492,6 +493,7 @@ class TestPriorityOverviewTab:
                     summary_markup=summary_markup,
                 )
             )
+            await pilot.pause()
             summary = app.query_one("#my-priority-summary", Static)
             content = summary.content
             assert "Your Priority" in content
