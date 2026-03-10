@@ -1,7 +1,9 @@
 """Main Textual TUI application for stoei."""
 
+import contextlib
 import re
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from collections.abc import Callable
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, TypeAlias, cast
@@ -11,6 +13,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
 from textual.containers import Container, Horizontal
 from textual.events import Key
+from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
@@ -116,8 +119,16 @@ MIN_WIDTH_FOR_SIDEBAR = 100
 LOADING_STEPS = [
     LoadingStep("slurm_check", "Checking SLURM availability...", weight=0.5),
     LoadingStep("user_jobs", "Fetching your jobs...", weight=3.0),
-    LoadingStep("finalize", "Finalizing...", weight=0.5),
+    LoadingStep("finalize", "Building job table...", weight=0.5),
 ]
+
+
+class _UICallback(Message, bubble=False):
+    """Non-blocking callback message posted from worker threads."""
+
+    def __init__(self, callback: Callable[[], object]) -> None:
+        super().__init__()
+        self.callback = callback
 
 
 class SlurmMonitor(App[None]):
@@ -245,6 +256,24 @@ class SlurmMonitor(App[None]):
         # Error deduplication: tracks which error types have already been notified
         # so repeated refresh failures don't spam the user with the same message.
         self._error_notified: dict[str, bool] = {}
+        # Tab switch debouncing: rapid key presses within the same event-loop
+        # frame are batched so only the final tab is actually switched to.
+        self._pending_tab_switch: str | None = None
+        self._tab_switch_scheduled: bool = False
+        self._init_update_generation_counters()
+
+    def _init_update_generation_counters(self) -> None:
+        """Initialise generation counters for deferred UI updates.
+
+        Each deferred callback captures the counter at schedule time.
+        If a newer update arrives before the callback runs (e.g. after
+        returning from another tmux tab), the stale callback is skipped.
+        """
+        self._jobs_update_gen: int = 0
+        self._nodes_update_gen: int = 0
+        self._users_update_gen: int = 0
+        self._priority_update_gen: int = 0
+        self._energy_update_gen: int = 0
 
     @property
     def keybindings(self) -> KeybindingConfig:
@@ -299,6 +328,19 @@ class SlurmMonitor(App[None]):
 
         yield Footer()
 
+    def on__uicallback(self, message: _UICallback) -> None:
+        """Execute a callback posted from a worker thread."""
+        message.callback()
+
+    def _post_ui_callback(self, callback: Callable[[], object]) -> None:
+        """Schedule *callback* on the main thread without blocking the caller.
+
+        Unlike ``call_from_thread``, this does not wait for the callback to
+        complete, so worker threads never stall on a slow or blocked event
+        loop (e.g. when terminal I/O is congested over SSH).
+        """
+        self.post_message(_UICallback(callback))
+
     def on_mount(self) -> None:
         """Initialize table and start data loading."""
         logger.info("Mounting application")
@@ -345,25 +387,25 @@ class SlurmMonitor(App[None]):
         """Update loading screen to show step starting."""
         screen = self._loading_screen
         if screen:
-            self.call_from_thread(lambda: screen.start_step(idx))
+            self._post_ui_callback(lambda: screen.start_step(idx))
 
     def _loading_complete_step(self, idx: int, msg: str | None = None) -> None:
         """Update loading screen to show step completed."""
         screen = self._loading_screen
         if screen:
-            self.call_from_thread(lambda: screen.complete_step(idx, msg))
+            self._post_ui_callback(lambda: screen.complete_step(idx, msg))
 
     def _loading_fail_step(self, idx: int, error: str) -> None:
         """Update loading screen to show step failed."""
         screen = self._loading_screen
         if screen:
-            self.call_from_thread(lambda: screen.fail_step(idx, error))
+            self._post_ui_callback(lambda: screen.fail_step(idx, error))
 
     def _loading_skip_step(self, idx: int, reason: str) -> None:
         """Update loading screen to show step skipped."""
         screen = self._loading_screen
         if screen:
-            self.call_from_thread(lambda: screen.skip_step(idx, reason))
+            self._post_ui_callback(lambda: screen.skip_step(idx, reason))
 
     def _initial_load_async(self) -> None:
         """Perform initial data load with step-by-step progress (runs in worker thread)."""
@@ -391,10 +433,9 @@ class SlurmMonitor(App[None]):
 
         self._loading_complete_step(2, "Ready")
 
-        # Mark loading complete and transition to main UI.
-        if self._loading_screen:
-            self.call_from_thread(self._loading_screen.set_complete)
-        self.call_from_thread(self._finish_initial_load)
+        # Transition to main UI — the loading screen stays up until the
+        # first background refresh (cluster data) completes.
+        self._post_ui_callback(self._finish_initial_load)
 
     def _execute_loading_steps(
         self,
@@ -426,7 +467,7 @@ class SlurmMonitor(App[None]):
         if not is_available:
             self._loading_fail_step(0, error_msg or "SLURM not available")
             logger.error(f"SLURM not available: {error_msg}")
-            self.call_from_thread(self._show_slurm_error)
+            self._post_ui_callback(self._show_slurm_error)
             return False
         self._loading_complete_step(0, "SLURM available")
         return True
@@ -476,18 +517,24 @@ class SlurmMonitor(App[None]):
     def _show_slurm_error(self) -> None:
         """Show SLURM unavailable error screen."""
         if self._loading_screen:
-            self.pop_screen()
+            with contextlib.suppress(Exception):
+                self.pop_screen()
         self.push_screen(SlurmUnavailableScreen())
 
     def _finish_initial_load(self) -> None:
-        """Finish initial load and transition to main UI.
+        """Populate the jobs table, dismiss the loading screen, and start background data loading.
 
-        Uses pre-computed row data from the worker thread so the main thread
-        only does the unavoidable DataTable DOM work (add_rows).
+        The jobs table is shown immediately. Cluster data (nodes, users,
+        priority, etc.) loads asynchronously with a loading indicator visible
+        in the UI. Tabs are usable right away — tabs without data yet show
+        empty tables until the background refresh completes.
         """
         # Set up log pane as a loguru sink
-        log_pane = self.query_one("#log_pane", LogPane)
-        self._log_sink_id = add_tui_sink(log_pane.sink, level=self._settings.log_level)
+        try:
+            log_pane = self.query_one("#log_pane", LogPane)
+            self._log_sink_id = add_tui_sink(log_pane.sink, level=self._settings.log_level)
+        except Exception:
+            logger.debug("LogPane not mounted yet, skipping sink setup")
 
         logger.info("Initial load complete, populating UI")
 
@@ -507,34 +554,36 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.debug(f"Failed to populate jobs table: {exc}")
 
-        # Now dismiss the loading screen — TUI is fully populated
+        # Dismiss loading screen — jobs are ready
         if self._loading_screen:
-            self.pop_screen()
+            with contextlib.suppress(Exception):
+                self.pop_screen()
             self._loading_screen = None
 
-        # Mark initial load as complete
+        # Allow tab switching immediately
         self._initial_load_complete = True
+
+        # Focus the jobs table
+        try:
+            jobs_table = self.query_one("#jobs_table", DataTable)
+            jobs_table.focus()
+        except Exception as exc:
+            logger.warning(f"Failed to focus jobs table: {exc}")
+
+        self._check_window_size()
+
+        # Show loading indicator while cluster data loads in background
+        self._set_loading_indicator(True)
+        self.notify("Loading cluster data...", timeout=3, severity="information")
 
         # Clear the initial-load worker reference so _start_refresh_worker
         # doesn't skip because it still sees the (finishing) initial worker.
         self._refresh_worker = None
 
         # Kick off background refresh to load non-critical data (nodes, all-users
-        # jobs, energy, wait times, priority). The auto-refresh timer will start
-        # after this first background cycle completes (in on_slurm_monitor_refresh_cycle_complete).
-        logger.info("Starting background load for non-critical data sources")
+        # jobs, energy, wait times, priority).
+        logger.info("Starting background load for cluster data sources")
         self._start_refresh_worker()
-
-        # Focus the jobs table
-        try:
-            jobs_table = self.query_one("#jobs_table", DataTable)
-            jobs_table.focus()
-            logger.debug("Focused jobs table")
-        except Exception as exc:
-            logger.warning(f"Failed to focus jobs table: {exc}")
-
-        # Check window size
-        self._check_window_size()
 
     def _register_custom_themes(self) -> None:
         """Register custom themes for the app."""
@@ -556,13 +605,19 @@ class SlurmMonitor(App[None]):
         """Apply log settings to the active log sink."""
         if self._log_sink_id is None:
             return
-        log_pane = self.query_one("#log_pane", LogPane)
+        try:
+            log_pane = self.query_one("#log_pane", LogPane)
+        except Exception:
+            return
         remove_tui_sink(self._log_sink_id)
         self._log_sink_id = add_tui_sink(log_pane.sink, level=self._settings.log_level)
 
     def _apply_log_pane_settings(self) -> None:
         """Apply log pane settings."""
-        log_pane = self.query_one("#log_pane", LogPane)
+        try:
+            log_pane = self.query_one("#log_pane", LogPane)
+        except Exception:
+            return
         log_pane.max_lines = self._settings.max_log_lines
 
     def _apply_refresh_interval(self, old_interval: float, new_interval: float) -> None:
@@ -613,7 +668,7 @@ class SlurmMonitor(App[None]):
             return
         old_settings = self._settings
         self._settings = settings
-        save_settings(settings)
+        self.run_worker(lambda s=settings: save_settings(s), thread=True, exclusive=True, group="save_settings")
         self._apply_theme(settings.theme)
         self._apply_log_pane_settings()
         self._apply_log_settings()
@@ -697,7 +752,7 @@ class SlurmMonitor(App[None]):
         new_percent = min(MAX_SIDEBAR_WIDTH_PERCENT, current_percent + 5)
         if new_percent != current_percent:
             self._settings = replace(self._settings, sidebar_width_percent=new_percent)
-            save_settings(self._settings)
+            self.run_worker(lambda: save_settings(self._settings), thread=True, exclusive=True, group="save_settings")
             self._apply_sidebar_width()
             self.notify(f"Sidebar: {new_percent}%", timeout=1)
 
@@ -707,7 +762,7 @@ class SlurmMonitor(App[None]):
         new_percent = max(MIN_SIDEBAR_WIDTH_PERCENT, current_percent - 5)
         if new_percent != current_percent:
             self._settings = replace(self._settings, sidebar_width_percent=new_percent)
-            save_settings(self._settings)
+            self.run_worker(lambda: save_settings(self._settings), thread=True, exclusive=True, group="save_settings")
             self._apply_sidebar_width()
             self.notify(f"Sidebar: {new_percent}%", timeout=1)
 
@@ -731,7 +786,7 @@ class SlurmMonitor(App[None]):
 
             # Create new settings with updated column_widths using replace()
             self._settings = replace(self._settings, column_widths=tuple(existing_widths.items()))
-            save_settings(self._settings)
+            self.run_worker(lambda: save_settings(self._settings), thread=True, exclusive=True, group="save_settings")
             logger.debug(f"Saved column widths for {active_tab}: {widths}")
 
         except Exception as exc:
@@ -870,13 +925,13 @@ class SlurmMonitor(App[None]):
         """
         is_first_cycle = not self._initial_background_complete
         logger.debug(f"Background refresh starting (parallel, first_cycle={is_first_cycle})")
-        self.call_from_thread(lambda: self._set_loading_indicator(True))
+        self._post_ui_callback(lambda: self._set_loading_indicator(True))
         worker = get_current_worker()
 
         try:
             max_workers = 7 if is_first_cycle else 6
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {
+                futures: dict[Future[object], str] = {
                     pool.submit(self._fetch_user_jobs): "user_jobs",
                     pool.submit(self._fetch_nodes): "nodes",
                     pool.submit(self._fetch_all_jobs): "all_jobs",
@@ -900,12 +955,12 @@ class SlurmMonitor(App[None]):
 
             if worker.is_cancelled:
                 return
-            self.call_from_thread(lambda: self._on_refresh_complete(is_first_cycle))
+            self._post_ui_callback(lambda: self._on_refresh_complete(is_first_cycle))
 
         except Exception:
             logger.exception("Error during parallel refresh")
         finally:
-            self.call_from_thread(lambda: self._set_loading_indicator(False))
+            self._post_ui_callback(lambda: self._set_loading_indicator(False))
 
     def _process_refresh_results(self, results: dict[str, object]) -> None:
         """Process a batch of fetch results, updating error-notification state (worker thread).
@@ -930,7 +985,7 @@ class SlurmMonitor(App[None]):
         else:
             if not self._error_notified.get("running_jobs"):
                 self._error_notified["running_jobs"] = True
-                self.call_from_thread(
+                self._post_ui_callback(
                     lambda: self.notify("Running jobs refresh failed - keeping old data", severity="warning")
                 )
             if history_jobs is not None:
@@ -956,7 +1011,7 @@ class SlurmMonitor(App[None]):
             else:
                 if not self._error_notified.get("running_jobs"):
                     self._error_notified["running_jobs"] = True
-                    self.call_from_thread(
+                    self._post_ui_callback(
                         lambda: self.notify("Running jobs refresh failed - keeping old data", severity="warning")
                     )
                 if history_jobs is not None:
@@ -964,23 +1019,23 @@ class SlurmMonitor(App[None]):
                     self._last_history_jobs = history_jobs
                     self._last_history_stats = (total_jobs, total_requeues, max_requeues)
             job_rows = [tuple(self._job_row_values(j)) for j in self._sorted_jobs_for_display(self._job_cache.jobs)]
-            self.call_from_thread(lambda: self._update_jobs_table(job_rows))
+            self._post_ui_callback(lambda: self._update_jobs_table(job_rows))
 
         elif label == "nodes":
             self._cluster_nodes = cast(list[dict[str, str]], result)
             self._cached_node_infos = self._parse_node_infos()
-            self.call_from_thread(self._update_nodes_tab_only)
+            self._post_ui_callback(self._update_nodes_tab_only)
 
         elif label == "all_jobs":
             self._all_users_jobs = cast(list[tuple[str, ...]], result)
             self._compute_user_overview_cache()
-            self.call_from_thread(self._update_all_jobs_widgets)
+            self._post_ui_callback(self._update_all_jobs_widgets)
 
         elif label == "wait_time":
             self._wait_time_jobs = cast(list[tuple[str, ...]], result)
             stats = self._calculate_cluster_stats()
             self._cached_cluster_stats = stats
-            self.call_from_thread(lambda s=stats: self._update_cluster_sidebar_with_stats(s))
+            self._post_ui_callback(lambda s=stats: self._update_cluster_sidebar_with_stats(s))
 
         elif label == "fair_share":
             entries, error = cast(_PriorityHalfResult, result)
@@ -993,7 +1048,7 @@ class SlurmMonitor(App[None]):
             if self._priority_halves_received >= _PRIORITY_FETCH_COUNT:
                 self._priority_halves_received = 0
                 self._compute_priority_overview_cache()
-                self.call_from_thread(self._update_priority_tab)
+                self._post_ui_callback(self._update_priority_tab)
 
         elif label == "job_priority":
             entries, error = cast(_PriorityHalfResult, result)
@@ -1005,7 +1060,7 @@ class SlurmMonitor(App[None]):
             if self._priority_halves_received >= _PRIORITY_FETCH_COUNT:
                 self._priority_halves_received = 0
                 self._compute_priority_overview_cache()
-                self.call_from_thread(self._update_priority_tab)
+                self._post_ui_callback(self._update_priority_tab)
 
         elif label == "energy":
             energy_jobs, energy_loaded = cast(_EnergyResult, result)
@@ -1013,18 +1068,18 @@ class SlurmMonitor(App[None]):
             self._energy_data_loaded = energy_loaded
             if energy_loaded:
                 self._cached_energy_user_stats = UserOverviewTab.aggregate_energy_stats(energy_jobs)
-                self.call_from_thread(self._update_energy_tab)
+                self._post_ui_callback(self._update_energy_tab)
 
         else:
             logger.warning(f"_apply_fetch_result: unknown label {label!r}")
 
     def _update_nodes_and_sidebar(self) -> None:
         """Update cluster sidebar and node overview tab (main thread only)."""
-        self._update_cluster_sidebar()
+        self.call_later(self._update_cluster_sidebar)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "nodes":
-                self._update_node_overview()
+                self.call_later(self._update_node_overview)
             else:
                 self._dirty_nodes_tab = True
         except Exception as exc:
@@ -1036,11 +1091,11 @@ class SlurmMonitor(App[None]):
         Args:
             stats: Pre-computed cluster stats to pass directly to the sidebar.
         """
-        self._update_cluster_sidebar_with_stats(stats)
+        self.call_later(self._update_cluster_sidebar_with_stats, stats)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "nodes":
-                self._update_node_overview()
+                self.call_later(self._update_node_overview)
             else:
                 self._dirty_nodes_tab = True
         except Exception:
@@ -1059,11 +1114,11 @@ class SlurmMonitor(App[None]):
 
     def _update_all_jobs_widgets(self) -> None:
         """Update user overview and My Usage banner without touching the sidebar (main thread only)."""
-        self._update_my_usage_summary(self._cached_running_user_stats)
+        self.call_later(self._update_my_usage_summary, self._cached_running_user_stats)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "users":
-                self._apply_user_overview_from_cache()
+                self.call_later(self._apply_user_overview_from_cache)
             else:
                 self._dirty_users_tab = True
         except Exception:
@@ -1075,12 +1130,12 @@ class SlurmMonitor(App[None]):
         Args:
             stats: Pre-computed cluster stats to pass directly to the sidebar.
         """
-        self._update_cluster_sidebar_with_stats(stats)
-        self._update_my_usage_summary(self._cached_running_user_stats)
+        self.call_later(self._update_cluster_sidebar_with_stats, stats)
+        self.call_later(self._update_my_usage_summary, self._cached_running_user_stats)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "users":
-                self._apply_user_overview_from_cache()
+                self.call_later(self._apply_user_overview_from_cache)
             else:
                 self._dirty_users_tab = True
         except Exception:
@@ -1098,18 +1153,37 @@ class SlurmMonitor(App[None]):
             logger.exception("Failed to update priority tab")
 
     def _update_energy_tab(self) -> None:
-        """Update energy subtab in user overview (main thread only)."""
-        try:
-            user_tab = self.query_one("#user-overview", UserOverviewTab)
-            user_tab.update_energy_users(self._cached_energy_user_stats)
-        except Exception:
-            logger.exception("Failed to update energy tab")
+        """Update energy subtab in user overview (main thread only).
+
+        Uses a generation counter to skip stale updates.
+        """
+        self._energy_update_gen += 1
+        gen = self._energy_update_gen
+        energy = self._cached_energy_user_stats
+
+        def _guarded() -> None:
+            if gen != self._energy_update_gen:
+                return
+            try:
+                tc = self.query_one("#tab-container", TabContainer)
+                if tc.active_tab != "users":
+                    self._dirty_users_tab = True
+                    return
+            except Exception:
+                return
+            try:
+                user_tab = self.query_one("#user-overview", UserOverviewTab)
+                user_tab.update_energy_users(energy)
+            except Exception:
+                logger.exception("Failed to update energy tab")
+
+        self.call_later(_guarded)
 
     def _on_refresh_complete(self, is_first_cycle: bool) -> None:
         """Handle post-refresh bookkeeping (main thread only).
 
-        Clears the job info cache, starts the auto-refresh timer on the first
-        cycle, and logs/notifies accordingly.
+        On the first cycle this starts the auto-refresh timer and notifies
+        the user that all cluster data has been loaded.
 
         Args:
             is_first_cycle: Whether this was the first background refresh cycle.
@@ -1118,7 +1192,7 @@ class SlurmMonitor(App[None]):
         if is_first_cycle:
             self._initial_background_complete = True
             self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
-            self.notify("All cluster data loaded", timeout=3, severity="information")
+            self.notify("Cluster data ready", timeout=3, severity="information")
             logger.info(
                 f"Background initial load complete. Auto-refresh started with interval {self.refresh_interval}s"
             )
@@ -1148,7 +1222,7 @@ class SlurmMonitor(App[None]):
             total_jobs, total_requeues, max_requeues = self._last_history_stats
             if not self._error_notified.get("history_jobs"):
                 self._error_notified["history_jobs"] = True
-                self.call_from_thread(
+                self._post_ui_callback(
                     lambda: self.notify("History refresh failed - using cached history", severity="warning")
                 )
         else:
@@ -1170,14 +1244,26 @@ class SlurmMonitor(App[None]):
     def _update_jobs_table(self, job_rows: list[tuple[str, ...]]) -> None:
         """Push pre-computed job rows into the jobs table widget (main thread only).
 
+        Uses a generation counter so that if multiple updates are queued
+        (e.g. after returning from another tmux tab), only the latest one
+        actually rebuilds the table.
+
         Args:
             job_rows: Pre-computed job table rows ready for display.
         """
+        self._jobs_update_gen += 1
+        gen = self._jobs_update_gen
         try:
             jobs_filterable = self.query_one("#jobs-filterable-table", FilterableDataTable)
-            jobs_filterable.set_data(job_rows)
-            jobs_filterable.display = len(job_rows) > 0
-            logger.debug(f"Jobs table updated: {len(job_rows)} jobs")
+
+            def _apply_jobs() -> None:
+                if gen != self._jobs_update_gen:
+                    return
+                jobs_filterable.set_data(job_rows)
+                jobs_filterable.display = len(job_rows) > 0
+                logger.debug(f"Jobs table updated: {len(job_rows)} jobs")
+
+            self.call_later(_apply_jobs)
         except Exception:
             logger.exception("Failed to update jobs table")
 
@@ -1572,18 +1658,28 @@ class SlurmMonitor(App[None]):
     def _update_node_overview(self) -> None:
         """Update the node overview tab using cached node infos.
 
-        Uses pre-computed node infos from background worker to avoid blocking UI.
-        Falls back to computing on-demand if cache is empty (initial load).
+        Uses a generation counter to skip stale updates and a staleness
+        guard to skip work when the user has already switched away.
         """
+        self._nodes_update_gen += 1
+        gen = self._nodes_update_gen
         try:
             node_tab = self.query_one("#node-overview", NodeOverviewTab)
-            # Use cached node infos (computed in background worker)
-            # Fall back to computing if cache is empty (shouldn't happen after initial load)
             node_infos = self._cached_node_infos if self._cached_node_infos else self._parse_node_infos()
-            logger.debug(
-                f"Updating node overview with {len(node_infos)} nodes (cached={bool(self._cached_node_infos)})"
-            )
-            node_tab.update_nodes(node_infos)
+
+            def _guarded() -> None:
+                if gen != self._nodes_update_gen:
+                    return
+                try:
+                    tc = self.query_one("#tab-container", TabContainer)
+                    if tc.active_tab != "nodes":
+                        self._dirty_nodes_tab = True
+                        return
+                except Exception:
+                    return
+                node_tab.update_nodes(node_infos)
+
+            self.call_later(_guarded)
         except Exception as exc:
             logger.error(f"Failed to update node overview: {exc}", exc_info=True)
 
@@ -1789,13 +1885,40 @@ class SlurmMonitor(App[None]):
         self._cached_priority_summary_markup = summary_markup
 
     def _apply_user_overview_from_cache(self) -> None:
-        """Apply cached user overview data to the UI (main thread only)."""
-        user_tab = self.query_one("#user-overview", UserOverviewTab)
-        user_tab.update_users(self._cached_running_user_stats)
-        user_tab.update_pending_users(self._cached_pending_user_stats)
-        if self._cached_energy_user_stats:
-            user_tab.update_energy_users(self._cached_energy_user_stats)
-        self._update_my_usage_summary(self._cached_running_user_stats)
+        """Apply cached user overview data to the UI (main thread only).
+
+        Uses a generation counter to skip stale updates and a staleness
+        guard to skip work when the user has already switched away.
+        """
+        self._users_update_gen += 1
+        gen = self._users_update_gen
+        try:
+            user_tab = self.query_one("#user-overview", UserOverviewTab)
+        except Exception as exc:
+            logger.debug(f"Failed to apply user overview from cache: {exc}")
+            return
+
+        running = self._cached_running_user_stats
+        pending = self._cached_pending_user_stats
+        energy = self._cached_energy_user_stats
+
+        def _guarded_users() -> None:
+            if gen != self._users_update_gen:
+                return
+            try:
+                tc = self.query_one("#tab-container", TabContainer)
+                if tc.active_tab != "users":
+                    self._dirty_users_tab = True
+                    return
+            except Exception:
+                return
+            user_tab.update_users(running)
+            user_tab.update_pending_users(pending)
+            if energy:
+                user_tab.update_energy_users(energy)
+
+        self.call_later(_guarded_users)
+        self.call_later(self._update_my_usage_summary, running)
 
     def _update_my_usage_summary(self, users: list[UserStats]) -> None:
         """Update the 'My Usage' banner on the Jobs tab.
@@ -1837,22 +1960,41 @@ class SlurmMonitor(App[None]):
     def _apply_priority_overview_from_cache(self) -> None:
         """Apply cached priority overview data to the UI (main thread only).
 
-        All heavy computation (sorting, ranking, row building) was already done
-        in the background worker. This method only pushes pre-built data into widgets.
+        Uses a generation counter to skip stale updates and a staleness
+        guard to skip work when the user has already switched away.
         """
-        priority_tab = self.query_one("#priority-overview", PriorityOverviewTab)
-        priority_tab.apply_prebuilt_data(
-            PrebuiltPriorityData(
-                user_priorities=self._cached_user_priorities,
-                account_priorities=self._cached_account_priorities,
-                job_priorities=self._cached_job_priorities,
-                user_rows=self._cached_user_priority_rows,
-                account_rows=self._cached_account_priority_rows,
-                job_rows=self._cached_job_priority_rows,
-                my_job_rows=self._cached_my_job_priority_rows,
-                summary_markup=self._cached_priority_summary_markup,
-            )
-        )
+        self._priority_update_gen += 1
+        gen = self._priority_update_gen
+        try:
+            tc = self.query_one("#tab-container", TabContainer)
+            if tc.active_tab != "priority":
+                self._dirty_priority_tab = True
+                return
+        except Exception:
+            return
+
+        try:
+            priority_tab = self.query_one("#priority-overview", PriorityOverviewTab)
+
+            def _guarded() -> None:
+                if gen != self._priority_update_gen:
+                    return
+                priority_tab.apply_prebuilt_data(
+                    PrebuiltPriorityData(
+                        user_priorities=self._cached_user_priorities,
+                        account_priorities=self._cached_account_priorities,
+                        job_priorities=self._cached_job_priorities,
+                        user_rows=self._cached_user_priority_rows,
+                        account_rows=self._cached_account_priority_rows,
+                        job_rows=self._cached_job_priority_rows,
+                        my_job_rows=self._cached_my_job_priority_rows,
+                        summary_markup=self._cached_priority_summary_markup,
+                    )
+                )
+
+            self.call_later(_guarded)
+        except Exception as exc:
+            logger.debug(f"Failed to apply priority overview from cache: {exc}")
 
     def _update_user_overview(self) -> None:
         """Update the user overview tab without blocking the UI."""
@@ -1868,7 +2010,7 @@ class SlurmMonitor(App[None]):
                 # Compute in background (never block the UI on tab switch)
                 def compute_and_apply() -> None:
                     self._compute_user_overview_cache()
-                    self.call_from_thread(self._apply_user_overview_from_cache)
+                    self._post_ui_callback(self._apply_user_overview_from_cache)
 
                 self.run_worker(
                     compute_and_apply, name="compute_user_overview", group="compute_user", exclusive=True, thread=True
@@ -1893,7 +2035,7 @@ class SlurmMonitor(App[None]):
                 # Compute in background (never block the UI on tab switch)
                 def compute_and_apply() -> None:
                     self._compute_priority_overview_cache()
-                    self.call_from_thread(self._apply_priority_overview_from_cache)
+                    self._post_ui_callback(self._apply_priority_overview_from_cache)
 
                 self.run_worker(
                     compute_and_apply,
@@ -1979,40 +2121,31 @@ class SlurmMonitor(App[None]):
         Args:
             event: The TabSwitched event.
         """
-        # Hide all tab contents
-        tab_content_ids = [
-            "tab-jobs-content",
-            "tab-nodes-content",
-            "tab-users-content",
-            "tab-priority-content",
-            "tab-logs-content",
-        ]
-        for tab_id in tab_content_ids:
-            try:
-                tab_content = self.query_one(f"#{tab_id}", Container)
-                tab_content.display = False
-            except Exception as exc:
-                logger.debug(f"Failed to hide tab {tab_id}: {exc}")
-
-        # Show the active tab content
-        active_tab_id = f"tab-{event.tab_name}-content"
+        # Ignore stale events from rapid tab switching — TabContainer already
+        # updated visibility, so we only need to run the tab-specific handler
+        # for the tab that is *currently* active.
         try:
-            active_tab = self.query_one(f"#{active_tab_id}", Container)
-            active_tab.display = True
+            tab_container = self.query_one("TabContainer", TabContainer)
+            if tab_container.active_tab != event.tab_name:
+                logger.debug(f"Ignoring stale tab event for {event.tab_name} (active: {tab_container.active_tab})")
+                return
+        except Exception:
+            return
 
-            # Dispatch to tab-specific handler
-            tab_handlers = {
-                "jobs": self._handle_tab_jobs_switched,
-                "nodes": self._handle_tab_nodes_switched,
-                "users": self._handle_tab_users_switched,
-                "priority": self._handle_tab_priority_switched,
-                "logs": self._handle_tab_logs_switched,
-            }
-            handler = tab_handlers.get(event.tab_name)
-            if handler:
+        # Dispatch to tab-specific handler (focus, lazy data load, etc.)
+        tab_handlers = {
+            "jobs": self._handle_tab_jobs_switched,
+            "nodes": self._handle_tab_nodes_switched,
+            "users": self._handle_tab_users_switched,
+            "priority": self._handle_tab_priority_switched,
+            "logs": self._handle_tab_logs_switched,
+        }
+        handler = tab_handlers.get(event.tab_name)
+        if handler:
+            try:
                 handler()
-        except Exception as exc:
-            logger.warning(f"Failed to switch to tab {event.tab_name}: {exc}")
+            except Exception as exc:
+                logger.warning(f"Failed to handle tab switch to {event.tab_name}: {exc}")
 
     def action_refresh(self) -> None:
         """Manual refresh action."""
@@ -2044,7 +2177,7 @@ class SlurmMonitor(App[None]):
         energy_jobs, error = get_energy_job_history(months)
         if error:
             logger.warning(f"Failed to load energy data: {error}")
-            self.call_from_thread(lambda: self.notify(f"Failed to load energy data: {error}", severity="error"))
+            self._post_ui_callback(lambda: self.notify(f"Failed to load energy data: {error}", severity="error"))
             self._energy_data_loaded = False
             self._energy_history_jobs = []
             self._cached_energy_user_stats = []
@@ -2056,85 +2189,104 @@ class SlurmMonitor(App[None]):
         logger.info(f"Loaded {len(energy_jobs)} energy history jobs")
 
         # Update the UI
-        self.call_from_thread(self._update_energy_ui)
+        self._post_ui_callback(self._update_energy_ui)
 
     def _update_energy_ui(self) -> None:
         """Update the energy UI after data reload."""
         try:
             user_tab = self.query_one("#user-overview", UserOverviewTab)
             if self._cached_energy_user_stats:
-                user_tab.update_energy_users(self._cached_energy_user_stats)
-                # Update the period label
-                user_tab.update_energy_period_label(self._settings.energy_history_months)
+                self.call_later(user_tab.update_energy_users, self._cached_energy_user_stats)
+                self.call_later(user_tab.update_energy_period_label, self._settings.energy_history_months)
                 self.notify(f"Loaded {len(self._energy_history_jobs)} energy history jobs", severity="information")
             else:
                 self.notify("No energy data loaded", severity="warning")
         except Exception as exc:
             logger.error(f"Failed to update energy UI: {exc}", exc_info=True)
 
-    def action_switch_tab_jobs(self) -> None:
-        """Switch to the Jobs tab."""
+    def _switch_tab(self, tab_name: str) -> None:
+        """Debounced tab switch.
+
+        Multiple calls within the same event-loop frame are batched: only
+        one ``call_later`` callback is scheduled, and it always switches to
+        the *last* requested tab.  This means rapid key-presses that arrive
+        in the same frame only trigger a single ``switch_tab()`` call.
+
+        Args:
+            tab_name: Name of the tab to switch to.
+        """
+        if not self._initial_load_complete:
+            return
+        self._pending_tab_switch = tab_name
+        if not self._tab_switch_scheduled:
+            self._tab_switch_scheduled = True
+            self.call_later(self._execute_tab_switch)
+
+    def _execute_tab_switch(self) -> None:
+        """Execute the pending debounced tab switch."""
+        self._tab_switch_scheduled = False
+        tab_name = self._pending_tab_switch
+        self._pending_tab_switch = None
+        if tab_name is None:
+            return
         try:
             tab_container = self.query_one("TabContainer", TabContainer)
-            tab_container.switch_tab("jobs")
+            tab_container.switch_tab(tab_name)
         except Exception as exc:
-            logger.debug(f"Failed to switch to jobs tab: {exc}")
+            logger.debug(f"Failed to switch to {tab_name} tab: {exc}")
+
+    def action_switch_tab_jobs(self) -> None:
+        """Switch to the Jobs tab."""
+        self._switch_tab("jobs")
 
     def action_switch_tab_nodes(self) -> None:
         """Switch to the Nodes tab."""
-        try:
-            tab_container = self.query_one("TabContainer", TabContainer)
-            tab_container.switch_tab("nodes")
-        except Exception as exc:
-            logger.debug(f"Failed to switch to nodes tab: {exc}")
+        self._switch_tab("nodes")
 
     def action_switch_tab_users(self) -> None:
         """Switch to the Users tab."""
-        try:
-            tab_container = self.query_one("TabContainer", TabContainer)
-            tab_container.switch_tab("users")
-        except Exception as exc:
-            logger.debug(f"Failed to switch to users tab: {exc}")
+        self._switch_tab("users")
 
     def action_switch_tab_priority(self) -> None:
         """Switch to the Priority tab."""
-        try:
-            tab_container = self.query_one("TabContainer", TabContainer)
-            tab_container.switch_tab("priority")
-        except Exception as exc:
-            logger.debug(f"Failed to switch to priority tab: {exc}")
+        self._switch_tab("priority")
 
     def action_switch_tab_logs(self) -> None:
         """Switch to the Logs tab."""
+        self._switch_tab("logs")
+
+    def _resolve_base_tab(self) -> str:
+        """Return the tab name to use as base for next/previous cycling.
+
+        If a debounced switch is pending, use that so rapid Tab presses
+        advance correctly. Otherwise use the currently active tab.
+        """
+        if self._pending_tab_switch is not None:
+            return self._pending_tab_switch
         try:
             tab_container = self.query_one("TabContainer", TabContainer)
-            tab_container.switch_tab("logs")
-        except Exception as exc:
-            logger.debug(f"Failed to switch to logs tab: {exc}")
+        except Exception:
+            return "jobs"
+        else:
+            return tab_container.active_tab
 
     def action_next_tab(self) -> None:
         """Switch to the next tab (cycling)."""
-        try:
-            tab_container = self.query_one("TabContainer", TabContainer)
-            current_tab = tab_container.active_tab
-            tab_order = ["jobs", "nodes", "users", "priority", "logs"]
-            current_index = tab_order.index(current_tab)
-            next_index = (current_index + 1) % len(tab_order)
-            tab_container.switch_tab(tab_order[next_index])
-        except Exception as exc:
-            logger.debug(f"Failed to switch to next tab: {exc}")
+        if not self._initial_load_complete:
+            return
+        tab_order = ["jobs", "nodes", "users", "priority", "logs"]
+        base = self._resolve_base_tab()
+        current_index = tab_order.index(base) if base in tab_order else 0
+        self._switch_tab(tab_order[(current_index + 1) % len(tab_order)])
 
     def action_previous_tab(self) -> None:
         """Switch to the previous tab (cycling)."""
-        try:
-            tab_container = self.query_one("TabContainer", TabContainer)
-            current_tab = tab_container.active_tab
-            tab_order = ["jobs", "nodes", "users", "priority", "logs"]
-            current_index = tab_order.index(current_tab)
-            previous_index = (current_index - 1) % len(tab_order)
-            tab_container.switch_tab(tab_order[previous_index])
-        except Exception as exc:
-            logger.debug(f"Failed to switch to previous tab: {exc}")
+        if not self._initial_load_complete:
+            return
+        tab_order = ["jobs", "nodes", "users", "priority", "logs"]
+        base = self._resolve_base_tab()
+        current_index = tab_order.index(base) if base in tab_order else 0
+        self._switch_tab(tab_order[(current_index - 1) % len(tab_order)])
 
     def on_key(self, event: Key) -> None:
         """Handle key events, intercepting Tab for tab navigation.
@@ -2208,7 +2360,7 @@ class SlurmMonitor(App[None]):
             self._job_info_cache[query_id] = (job_info, error, stdout_path, stderr_path)
 
         # Schedule UI update on main thread
-        self.call_from_thread(
+        self._post_ui_callback(
             lambda: self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
         )
 
@@ -2316,7 +2468,7 @@ class SlurmMonitor(App[None]):
         # Get node info in a worker to avoid blocking
         def fetch_node_info() -> None:
             node_info, error = get_node_info(node_name)
-            self.call_from_thread(lambda: self._display_node_info(node_name, node_info, error))
+            self._post_ui_callback(lambda: self._display_node_info(node_name, node_info, error))
 
         self.run_worker(fetch_node_info, name="fetch_node_info", thread=True)
 
@@ -2375,7 +2527,7 @@ class SlurmMonitor(App[None]):
         def fetch_user_info() -> None:  # noqa: PLR0912
             jobs, error = get_user_jobs(username)
             if error:
-                self.call_from_thread(lambda: self._display_user_info(username, "", error))
+                self._post_ui_callback(lambda: self._display_user_info(username, "", error))
                 return
 
             # Aggregate user stats from the jobs
@@ -2475,7 +2627,7 @@ class SlurmMonitor(App[None]):
                 priority_info=priority_info,
                 job_priorities=job_priorities if job_priorities else None,
             )
-            self.call_from_thread(lambda: self._display_user_info(username, formatted_info, None))
+            self._post_ui_callback(lambda: self._display_user_info(username, formatted_info, None))
 
         self.run_worker(fetch_user_info, name="fetch_user_info", thread=True)
 
@@ -2617,7 +2769,7 @@ class SlurmMonitor(App[None]):
                 pending_jobs,
                 job_priorities=job_priorities if job_priorities else None,
             )
-            self.call_from_thread(lambda: self._display_account_info(account_name, formatted_info, None))
+            self._post_ui_callback(lambda: self._display_account_info(account_name, formatted_info, None))
 
         self.run_worker(fetch_account_info, name="fetch_account_info", thread=True)
 

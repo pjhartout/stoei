@@ -766,18 +766,25 @@ class LogViewerScreen(Screen[None]):
         self.dismiss(None)
 
     def action_copy_path(self) -> None:
-        """Copy the file path to clipboard."""
-        if _copy_to_clipboard(self.filepath):
-            self.app.notify(f"Copied: {self.filepath}", timeout=3)
-            logger.debug(f"Copied filepath to clipboard: {self.filepath}")
-        else:
-            # Fallback: show the path in a notification that can be manually copied
-            self.app.notify(
-                f"Path: {self.filepath}\n(Clipboard unavailable - select from terminal)",
-                severity="warning",
-                timeout=10,
-            )
-            logger.warning("Clipboard not available, showing path in notification")
+        """Copy the file path to clipboard (runs in background to avoid blocking)."""
+        filepath = self.filepath
+
+        def _do_copy() -> None:
+            success = _copy_to_clipboard(filepath)
+            if success:
+                self.app.call_from_thread(lambda: self.app.notify(f"Copied: {filepath}", timeout=3))
+                logger.debug(f"Copied filepath to clipboard: {filepath}")
+            else:
+                self.app.call_from_thread(
+                    lambda: self.app.notify(
+                        f"Path: {filepath}\n(Clipboard unavailable - select from terminal)",
+                        severity="warning",
+                        timeout=10,
+                    )
+                )
+                logger.warning("Clipboard not available, showing path in notification")
+
+        self.app.run_worker(_do_copy, thread=True, group="clipboard")
 
     def action_close_or_cancel_search(self) -> None:
         """Close the search bar if active, otherwise close the modal."""

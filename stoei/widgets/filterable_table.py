@@ -110,6 +110,9 @@ class FilterableDataTable(Vertical):
     - Click column headers or use keyboard to sort
     """
 
+    _INCREMENTAL_DELTA_FLOOR: ClassVar[int] = 10
+    """Minimum row delta before considering a full rebuild over incremental ops."""
+
     DEFAULT_CSS: ClassVar[str] = """
     FilterableDataTable {
         height: 100%;
@@ -701,11 +704,13 @@ class FilterableDataTable(Vertical):
             self._refresh_table_data()
 
     def _apply_incremental_update(self, new_rows_by_key: dict[str, tuple[Any, ...]]) -> None:
-        """Apply an incremental update, updating only changed cells.
+        """Apply an incremental update, handling row adds/removes/cell changes.
 
-        Falls back to a full rebuild if the visible row set changes (rows
-        added, removed, or filter visibility changed). Cell-only updates
-        preserve cursor position and scroll state.
+        Removes departed rows and adds new rows individually instead of
+        doing a full table rebuild.  Falls back to ``_refresh_table_data``
+        only when more than half the visible rows changed (bulk reimport) or
+        when sorting is active and new rows were inserted (since DataTable
+        lacks positional insert).
 
         Args:
             new_rows_by_key: New row data keyed by the key column value.
@@ -717,22 +722,41 @@ class FilterableDataTable(Vertical):
         old_visible = {k for k, v in old_rows_by_key.items() if self._row_matches_filter(v)}
         new_visible = {k for k, v in new_rows_by_key.items() if self._row_matches_filter(v)}
 
-        # If the visible set changed, fall back to full rebuild
-        if old_visible != new_visible:
-            logger.debug(
-                f"Visible set changed "
-                f"(+{len(new_visible - old_visible)}, -{len(old_visible - new_visible)}); "
-                f"full rebuild"
-            )
+        removed = old_visible - new_visible
+        added = new_visible - old_visible
+        kept = old_visible & new_visible
+        delta = len(removed) + len(added)
+
+        # For very large deltas (more than half the table changed), full rebuild
+        # is more efficient than many individual DOM operations.
+        max_visible = max(len(old_visible), len(new_visible), 1)
+        if delta > max_visible // 2 and delta > self._INCREMENTAL_DELTA_FLOOR:
+            logger.debug(f"Large delta ({delta}/{max_visible}); full rebuild")
             self._rows_by_key = new_rows_by_key
             self._refresh_table_data()
             return
 
-        # Only cell updates for visible rows — cursor and scroll preserved
+        # Sorting is active and new rows arrived — we cannot insert at the
+        # correct sorted position, so fall back to a full rebuild.
+        sort_active = self._sort_state.column_key is not None and self._sort_state.direction != SortDirection.NONE
+        if added and sort_active:
+            logger.debug(f"Sort active with {len(added)} new rows; full rebuild for order")
+            self._rows_by_key = new_rows_by_key
+            self._refresh_table_data()
+            return
+
         table = self.table
         updated_cells = 0
-        unchanged_rows = 0
-        for key in new_visible:
+
+        # 1. Remove departed rows
+        for key in removed:
+            try:
+                table.remove_row(key)
+            except Exception:
+                logger.debug(f"Could not remove row {key}")
+
+        # 2. Update cells for kept rows
+        for key in kept:
             old_row = old_rows_by_key[key]
             new_row = new_rows_by_key[key]
             if old_row != new_row:
@@ -740,8 +764,11 @@ class FilterableDataTable(Vertical):
                     if col_idx < len(old_row) and col_idx < len(new_row) and old_row[col_idx] != new_row[col_idx]:
                         table.update_cell(key, col_config.key, new_row[col_idx], update_width=False)
                         updated_cells += 1
-            else:
-                unchanged_rows += 1
+
+        # 3. Add new rows (appended at end — order is correct when unsorted)
+        for key in added:
+            row = new_rows_by_key[key]
+            table.add_row(*row, key=key)
 
         self._rows_by_key = new_rows_by_key
 
@@ -749,7 +776,8 @@ class FilterableDataTable(Vertical):
         self._update_filter_status(len(new_visible), len(self._all_rows))
 
         logger.debug(
-            f"Incremental update: {updated_cells} cells updated, {unchanged_rows}/{len(new_visible)} rows unchanged"
+            f"Incremental update: -{len(removed)} +{len(added)} rows, "
+            f"{updated_cells} cells updated, {len(kept)} rows kept"
         )
 
     def add_row(self, *cells: CellType, key: str | None = None) -> RowKey:
