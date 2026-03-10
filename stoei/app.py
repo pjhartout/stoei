@@ -3,7 +3,7 @@
 import contextlib
 import re
 from collections.abc import Callable
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 from typing import ClassVar, TypeAlias, cast
@@ -931,7 +931,7 @@ class SlurmMonitor(App[None]):
         try:
             max_workers = 7 if is_first_cycle else 6
             with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures = {
+                futures: dict[Future[object], str] = {
                     pool.submit(self._fetch_user_jobs): "user_jobs",
                     pool.submit(self._fetch_nodes): "nodes",
                     pool.submit(self._fetch_all_jobs): "all_jobs",
