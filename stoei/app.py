@@ -948,7 +948,7 @@ class SlurmMonitor(App[None]):
                         return
                     label = futures[future]
                     try:
-                        result = future.result()
+                        result = cast(_FetchResult, future.result())
                         self._apply_fetch_result(label, result)
                     except Exception:
                         logger.exception(f"Failed to fetch {label}")

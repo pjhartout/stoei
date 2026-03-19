@@ -73,11 +73,17 @@ def slurm_monitor_factory(monkeypatch: pytest.MonkeyPatch) -> Callable[[], Slurm
     def fake_all_running() -> tuple[list[tuple[str, ...]], str | None]:
         return ([tuple(job) for job in ALL_RUNNING_JOBS], None)
 
+    def fake_job_info_and_log_paths(
+        _job_id: str,
+    ) -> tuple[str, str | None, str | None, str | None]:
+        return ("", None, None, None)
+
     monkeypatch.setattr("stoei.app.check_slurm_available", fake_check)
     monkeypatch.setattr("stoei.app.get_cluster_nodes", fake_nodes)
     monkeypatch.setattr("stoei.app.get_running_jobs", fake_running)
     monkeypatch.setattr("stoei.app.get_job_history", fake_history)
     monkeypatch.setattr("stoei.app.get_all_running_jobs", fake_all_running)
+    monkeypatch.setattr("stoei.app.get_job_info_and_log_paths", fake_job_info_and_log_paths)
 
     def factory() -> SlurmMonitor:
         JobCache.reset()
@@ -89,6 +95,7 @@ def slurm_monitor_factory(monkeypatch: pytest.MonkeyPatch) -> Callable[[], Slurm
 
         app.set_interval = _noop  # type: ignore[assignment]
         app._start_refresh_worker = _noop  # type: ignore[assignment]
+        app._start_initial_load_worker = _noop  # type: ignore[assignment]
         return app
 
     return factory
@@ -138,9 +145,6 @@ async def test_manual_refresh_triggers_worker(slurm_monitor_factory: Callable[[]
 
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
-        await pilot.pause()
-        # Clear any calls from initial load completing
-        refresh_calls.clear()
         await pilot.press("r")
 
     assert refresh_calls == ["called"]
@@ -154,8 +158,12 @@ async def test_new_jobs_appear_after_refresh(slurm_monitor_factory: Callable[[],
     app = slurm_monitor_factory()
 
     async with app.run_test(size=(80, 24)) as pilot:
-        # Wait for initial load to finish
-        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        # Seed the table with initial data (initial load worker is nooped)
+        initial_result = (list(RUNNING_JOBS), list(HISTORY_JOBS), len(HISTORY_JOBS), 0, 0)
+        app._apply_fetch_result("user_jobs", initial_result)
+        await pilot.pause()
         await pilot.pause()
 
         jobs_ft = app.query_one("#jobs-filterable-table", FilterableDataTable)
@@ -188,12 +196,17 @@ async def test_completed_jobs_removed_after_refresh(slurm_monitor_factory: Calla
     app = slurm_monitor_factory()
 
     async with app.run_test(size=(80, 24)) as pilot:
-        await app.workers.wait_for_complete()
+        await pilot.pause()
+
+        # Seed the table with initial data (initial load worker is nooped)
+        initial_result = (list(RUNNING_JOBS), list(HISTORY_JOBS), len(HISTORY_JOBS), 0, 0)
+        app._apply_fetch_result("user_jobs", initial_result)
+        await pilot.pause()
         await pilot.pause()
 
         jobs_ft = app.query_one("#jobs-filterable-table", FilterableDataTable)
         initial_count = jobs_ft.table.row_count
-        assert initial_count > 0, "Expected at least one job after initial load"
+        assert initial_count > 0, "Expected at least one job after initial seed"
 
         # Simulate a refresh where the running job completed and moved to history
         new_history: list[tuple[str, ...]] = [
