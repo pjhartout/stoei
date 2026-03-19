@@ -785,8 +785,9 @@ class PriorityOverviewTab(VerticalScroll):
         """Apply pre-built priority data and rows to the widget.
 
         All sorting, ranking, and row building has already been done in the
-        background worker. This method only stores the data and pushes
-        pre-built rows into the table widgets.
+        background worker. This method stores the data and schedules table
+        updates via call_later so the event loop can process user input
+        (e.g. tab switches) between each table update.
 
         Args:
             data: Pre-computed priority data bundle from background worker.
@@ -807,11 +808,13 @@ class PriorityOverviewTab(VerticalScroll):
             self._pending_summary_markup = data.summary_markup
             return
 
-        self._apply_user_rows(data.user_rows)
-        self._apply_account_rows(data.account_rows)
-        self._apply_job_rows(data.job_rows)
-        self._apply_summary_markup(data.summary_markup)
-        self._apply_my_job_rows(data.my_job_rows)
+        # Schedule each table update separately so the event loop can
+        # process key events between them, keeping the UI responsive.
+        self.call_later(self._apply_user_rows, data.user_rows)
+        self.call_later(self._apply_account_rows, data.account_rows)
+        self.call_later(self._apply_job_rows, data.job_rows)
+        self.call_later(self._apply_summary_markup, data.summary_markup)
+        self.call_later(self._apply_my_job_rows, data.my_job_rows)
 
     def update_user_priorities(self, priorities: list[UserPriority]) -> None:
         """Update the user priority data table (with on-main-thread computation).

@@ -1,17 +1,26 @@
 """Log pane widget for displaying application logs in the TUI."""
 
+import contextlib
 from datetime import datetime
-from typing import TYPE_CHECKING, ClassVar
+from typing import ClassVar
 
 from rich.text import Text
 from textual._context import NoActiveAppError
+from textual.message import Message
 from textual.widgets import RichLog
 
 from stoei.colors import get_theme_colors
 from stoei.settings import DEFAULT_MAX_LOG_LINES
 
-if TYPE_CHECKING:
-    pass
+
+class _LogEntry(Message, bubble=False):
+    """Non-blocking log entry posted from worker threads."""
+
+    def __init__(self, level: str, msg: str, timestamp: datetime) -> None:
+        super().__init__()
+        self.level = level
+        self.msg = msg
+        self.timestamp = timestamp
 
 
 class LogPane(RichLog):
@@ -56,6 +65,10 @@ class LogPane(RichLog):
             classes=classes,
             disabled=disabled,
         )
+
+    def on__log_entry(self, message: _LogEntry) -> None:
+        """Handle a log entry posted from a worker thread."""
+        self.add_log(message.level, message.msg, message.timestamp)
 
     def add_log(self, level: str, message: str, timestamp: datetime | None = None) -> None:
         """Add a log entry to the pane.
@@ -107,16 +120,6 @@ class LogPane(RichLog):
         timestamp_obj = record["time"]  # type: ignore[index]
         timestamp = timestamp_obj.replace(tzinfo=None)
 
-        # Call from app thread if available
-        try:
-            app = self.app
-        except (LookupError, RuntimeError, NoActiveAppError):
-            app = None
-
-        if app is not None:
-            try:
-                app.call_from_thread(self.add_log, level, str(msg), timestamp)
-            except RuntimeError:
-                self.add_log(level, str(msg), timestamp)
-        else:
-            self.add_log(level, str(msg), timestamp)
+        # Post non-blocking message to the main thread
+        with contextlib.suppress(LookupError, RuntimeError, NoActiveAppError):
+            self.post_message(_LogEntry(level, str(msg), timestamp))

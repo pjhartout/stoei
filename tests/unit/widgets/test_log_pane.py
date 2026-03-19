@@ -117,10 +117,8 @@ class TestLogPaneSink:
         mock_message = MagicMock()
         mock_message.record = mock_record
 
-        # Patch add_log to verify it's called (since we're not mounted)
-        # The sink will try to call app.call_from_thread which will fail
-        # So we test the direct call path
-        with patch.object(pane, "add_log"), contextlib.suppress(RuntimeError, AttributeError):
+        # Patch post_message since we're not mounted
+        with patch.object(pane, "post_message"), contextlib.suppress(RuntimeError, AttributeError):
             pane.sink(mock_message)
 
     def test_sink_extracts_level_name(self) -> None:
@@ -148,10 +146,9 @@ class TestLogPaneSink:
             pane.sink(mock_message)
 
     def test_sink_handles_runtime_error(self) -> None:
-        """Test sink handles RuntimeError gracefully (fallback path)."""
-        import contextlib
+        """Test sink handles RuntimeError gracefully (suppressed)."""
         from datetime import datetime
-        from unittest.mock import MagicMock, PropertyMock, patch
+        from unittest.mock import MagicMock, patch
 
         pane = LogPane()
 
@@ -166,15 +163,9 @@ class TestLogPaneSink:
         mock_message = MagicMock()
         mock_message.record = mock_record
 
-        # Mock the app property to raise RuntimeError
-        with patch.object(type(pane), "app", new_callable=PropertyMock) as mock_app:
-            mock_app_instance = MagicMock()
-            mock_app_instance.call_from_thread.side_effect = RuntimeError("No app context")
-            mock_app.return_value = mock_app_instance
-
-            # Should not raise - should fallback to direct call
-            with contextlib.suppress(AttributeError):
-                pane.sink(mock_message)
+        # Mock post_message to raise RuntimeError — should be suppressed
+        with patch.object(pane, "post_message", side_effect=RuntimeError("No app context")):
+            pane.sink(mock_message)  # should not raise
 
     def test_sink_extracts_timestamp(self) -> None:
         """Test sink extracts and converts timestamp."""

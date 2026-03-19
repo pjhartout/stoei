@@ -6,7 +6,7 @@ import pytest
 from stoei.app import SlurmMonitor
 from stoei.slurm.cache import JobCache
 from stoei.widgets.cluster_sidebar import ClusterSidebar
-from stoei.widgets.tabs import TabContainer, TabSwitched
+from stoei.widgets.tabs import TabContainer
 
 
 class TestAppClusterIntegration:
@@ -20,7 +20,9 @@ class TestAppClusterIntegration:
     @pytest.fixture
     def app(self) -> SlurmMonitor:
         """Create a SlurmMonitor instance for testing."""
-        return SlurmMonitor()
+        monitor = SlurmMonitor()
+        monitor._initial_load_complete = True
+        return monitor
 
     async def test_app_composes_cluster_sidebar(self, app: SlurmMonitor) -> None:
         """Test that the app composes the cluster sidebar."""
@@ -67,7 +69,7 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 # Mock cluster data
                 app._cluster_nodes = [
                     {
@@ -81,9 +83,11 @@ class TestAppClusterIntegration:
                 ]
                 app._all_users_jobs = []
 
-                # Switch to nodes tab
-                event = TabSwitched("nodes")
-                app.on_tab_switched(event)
+                # Switch to nodes tab via TabContainer (the proper API)
+                tab_container = app.query_one("TabContainer", TabContainer)
+                tab_container.switch_tab("nodes")
+                # Allow the posted TabSwitched message to be processed
+                await pilot.pause()
 
                 # Nodes tab should be visible
                 nodes_tab = app.query_one("#tab-nodes-content")
@@ -117,8 +121,8 @@ class TestAppClusterIntegration:
                 app._cached_node_infos = app._parse_node_infos()
                 app._dirty_nodes_tab = True
 
-                event = TabSwitched("nodes")
-                app.on_tab_switched(event)
+                tab_container = app.query_one("TabContainer", TabContainer)
+                tab_container.switch_tab("nodes")
                 # Wait for deferred update to complete
                 await pilot.pause()
                 # Give a bit more time for call_later to execute
@@ -143,9 +147,11 @@ class TestAppClusterIntegration:
                 ]
                 app._dirty_users_tab = True
 
-                event = TabSwitched("users")
-                app.on_tab_switched(event)
-                # Wait for deferred update to complete
+                tab_container = app.query_one("TabContainer", TabContainer)
+                tab_container.switch_tab("users")
+                # Allow message processing: tab switch → worker → _UICallback
+                await pilot.pause()
+                await app.workers.wait_for_complete()
                 await pilot.pause()
 
                 user_tab = app.query_one("#user-overview", UserOverviewTab)
@@ -187,7 +193,7 @@ class TestAppClusterIntegration:
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=mock_worker),
             patch.object(app, "post_message", side_effect=posted_messages.append),
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._refresh_data_async()
             mock_nodes.assert_called_once()
@@ -207,7 +213,7 @@ class TestAppClusterIntegration:
             patch("stoei.app.get_pending_job_priority", return_value=([], None)),
             patch("stoei.app.get_wait_time_job_history", return_value=([], None)),
             patch("stoei.app.get_current_worker", return_value=mock_worker),
-            patch.object(app, "call_from_thread"),
+            patch.object(app, "_post_ui_callback"),
         ):
             app._refresh_data_async()
             assert app._cluster_nodes == []
@@ -274,14 +280,15 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 # Start on a different tab
                 tab_container = app.query_one("TabContainer", TabContainer)
                 tab_container.switch_tab("nodes")
                 assert tab_container.active_tab == "nodes"
 
-                # Switch to jobs tab using action
+                # Switch to jobs tab using action (debounced)
                 app.action_switch_tab_jobs()
+                await pilot.pause()
 
                 # Should be on jobs tab
                 assert tab_container.active_tab == "jobs"
@@ -294,12 +301,13 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
                 assert tab_container.active_tab == "jobs"
 
-                # Switch to nodes tab using action
+                # Switch to nodes tab using action (debounced)
                 app.action_switch_tab_nodes()
+                await pilot.pause()
 
                 # Should be on nodes tab
                 assert tab_container.active_tab == "nodes"
@@ -312,12 +320,13 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
                 assert tab_container.active_tab == "jobs"
 
-                # Switch to users tab using action
+                # Switch to users tab using action (debounced)
                 app.action_switch_tab_users()
+                await pilot.pause()
 
                 # Should be on users tab
                 assert tab_container.active_tab == "users"
@@ -330,12 +339,13 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
                 assert tab_container.active_tab == "jobs"
 
-                # Switch to logs tab using action
+                # Switch to logs tab using action (debounced)
                 app.action_switch_tab_logs()
+                await pilot.pause()
 
                 # Should be on logs tab
                 assert tab_container.active_tab == "logs"
@@ -376,28 +386,33 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
                 assert tab_container.active_tab == "jobs"
 
                 # Cycle forward: jobs -> nodes
                 app.action_next_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "nodes"
 
                 # Cycle forward: nodes -> users
                 app.action_next_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "users"
 
                 # Cycle forward: users -> priority
                 app.action_next_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "priority"
 
                 # Cycle forward: priority -> logs
                 app.action_next_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "logs"
 
                 # Cycle forward: logs -> jobs (wraps around)
                 app.action_next_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "jobs"
 
     async def test_action_previous_tab_cycles_backward(self, app: SlurmMonitor) -> None:
@@ -406,28 +421,33 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
                 assert tab_container.active_tab == "jobs"
 
                 # Cycle backward: jobs -> logs (wraps around)
                 app.action_previous_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "logs"
 
                 # Cycle backward: logs -> priority
                 app.action_previous_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "priority"
 
                 # Cycle backward: priority -> users
                 app.action_previous_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "users"
 
                 # Cycle backward: users -> nodes
                 app.action_previous_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "nodes"
 
                 # Cycle backward: nodes -> jobs
                 app.action_previous_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "jobs"
 
     async def test_tab_key_cycles_forward(self, app: SlurmMonitor) -> None:
@@ -469,8 +489,9 @@ class TestAppClusterIntegration:
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
             patch.object(app, "_start_refresh_worker"),
         ):
-            async with app.run_test(size=(80, 24)):
+            async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
                 # Test that the action works directly (binding may work in real usage)
                 app.action_previous_tab()
+                await pilot.pause()
                 assert tab_container.active_tab == "logs"
