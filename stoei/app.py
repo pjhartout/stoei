@@ -1007,7 +1007,9 @@ class SlurmMonitor(App[None]):
             running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = cast(_UserJobsResult, result)
             if running_jobs is not None:
                 self._error_notified["running_jobs"] = False
+                old_job_ids = {j.job_id for j in self._job_cache.jobs}
                 self._handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+                self._notify_new_jobs(old_job_ids)
             else:
                 if not self._error_notified.get("running_jobs"):
                     self._error_notified["running_jobs"] = True
@@ -1232,6 +1234,28 @@ class SlurmMonitor(App[None]):
             self._last_history_stats = (total_jobs, total_requeues, max_requeues)
 
         self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
+
+    def _notify_new_jobs(self, old_job_ids: set[str]) -> None:
+        """Post a notification if new jobs appeared in the cache after a refresh.
+
+        Compares the current cache contents against *old_job_ids* (captured
+        before the cache was rebuilt) and notifies the user about any newly
+        detected active (running/pending) jobs.
+
+        Args:
+            old_job_ids: Set of job IDs that were in the cache before the refresh.
+        """
+        if not old_job_ids:
+            return  # First load — don't notify for initial data
+        new_active_jobs = [j for j in self._job_cache.jobs if j.job_id not in old_job_ids and j.is_active]
+        if not new_active_jobs:
+            return
+        if len(new_active_jobs) == 1:
+            job = new_active_jobs[0]
+            msg = f"New job detected: {job.job_id} ({job.name})"
+        else:
+            msg = f"{len(new_active_jobs)} new jobs detected"
+        self._post_ui_callback(lambda m=msg: self.notify(m, timeout=5, severity="information"))
 
     def _set_loading_indicator(self, active: bool) -> None:
         """Safely toggle the global loading indicator spinner."""
