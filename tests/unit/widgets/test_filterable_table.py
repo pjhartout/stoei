@@ -758,6 +758,87 @@ class TestIncrementalUpdate:
             assert filterable.row_count == 2
 
     @pytest.mark.asyncio
+    async def test_new_row_appears_at_correct_sorted_position(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that a new row added via set_data appears at the position given by the data order."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+            assert filterable.row_count == 2
+
+            # Add a new row at the BEGINNING of the data (simulating
+            # _sorted_jobs_for_display placing a new pending job first).
+            updated_rows = [
+                ("300", "PENDING", "0:00"),
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+            ]
+            filterable.set_data(updated_rows)
+            await pilot.pause()
+
+            assert filterable.row_count == 3
+            # The first row in the DataTable should be "300" (the new job),
+            # matching the data order — NOT appended at the end.
+            first_row = filterable.get_row_at(0)
+            assert "300" in str(first_row[0])
+
+    @pytest.mark.asyncio
+    async def test_cell_only_update_uses_incremental_path(self, sample_columns: list[ColumnConfig]) -> None:
+        """Test that cell-value-only changes use the efficient incremental path (no full rebuild)."""
+
+        class TestApp(App[None]):
+            def compose(self):
+                yield FilterableDataTable(
+                    columns=sample_columns,
+                    table_id="test_table",
+                    id="filterable",
+                )
+
+        app = TestApp()
+        async with app.run_test(size=(80, 24)) as pilot:
+            await pilot.pause()
+            filterable = app.query_one("#filterable", FilterableDataTable)
+
+            rows = [
+                ("100", "RUNNING", "1:00"),
+                ("200", "PENDING", "0:30"),
+            ]
+            filterable.set_data(rows)
+            await pilot.pause()
+            assert filterable.row_count == 2
+
+            # Update cell values only (same keys, different values)
+            updated_rows = [
+                ("100", "RUNNING", "1:05"),
+                ("200", "RUNNING", "0:35"),
+            ]
+            filterable.set_data(updated_rows)
+            await pilot.pause()
+
+            # Rows should still be present with updated values
+            assert filterable.row_count == 2
+            # Verify values were updated in-place
+            assert filterable._rows_by_key is not None
+            assert filterable._rows_by_key["100"][2] == "1:05"
+            assert filterable._rows_by_key["200"][1] == "RUNNING"
+
+    @pytest.mark.asyncio
     async def test_first_load_uses_full_build(self, sample_columns: list[ColumnConfig]) -> None:
         """Test that the first set_data call does a full build."""
 

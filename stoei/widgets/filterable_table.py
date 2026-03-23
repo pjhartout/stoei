@@ -706,11 +706,11 @@ class FilterableDataTable(Vertical):
     def _apply_incremental_update(self, new_rows_by_key: dict[str, tuple[Any, ...]]) -> None:
         """Apply an incremental update, handling row adds/removes/cell changes.
 
-        Removes departed rows and adds new rows individually instead of
-        doing a full table rebuild.  Falls back to ``_refresh_table_data``
-        only when more than half the visible rows changed (bulk reimport) or
-        when sorting is active and new rows were inserted (since DataTable
-        lacks positional insert).
+        When rows are added or removed, falls back to a full
+        ``_refresh_table_data`` rebuild so that the visual order matches the
+        pre-sorted data order.  When only cell values change (the common
+        case on each refresh cycle), updates are applied in-place for
+        efficiency.
 
         Args:
             new_rows_by_key: New row data keyed by the key column value.
@@ -736,11 +736,13 @@ class FilterableDataTable(Vertical):
             self._refresh_table_data()
             return
 
-        # Sorting is active and new rows arrived — we cannot insert at the
-        # correct sorted position, so fall back to a full rebuild.
-        sort_active = self._sort_state.column_key is not None and self._sort_state.direction != SortDirection.NONE
-        if added and sort_active:
-            logger.debug(f"Sort active with {len(added)} new rows; full rebuild for order")
+        # Rows were added or removed — full rebuild to preserve correct sort
+        # order.  DataTable lacks positional insert, so appending new rows
+        # would place them at the bottom instead of the pre-sorted position
+        # (e.g. pending/newest-first).  Removals also warrant a rebuild to
+        # keep the visual order consistent with the data order.
+        if added or removed:
+            logger.debug(f"Row membership changed (+{len(added)} -{len(removed)}); full rebuild for order")
             self._rows_by_key = new_rows_by_key
             self._refresh_table_data()
             return
@@ -748,14 +750,7 @@ class FilterableDataTable(Vertical):
         table = self.table
         updated_cells = 0
 
-        # 1. Remove departed rows
-        for key in removed:
-            try:
-                table.remove_row(key)
-            except Exception:
-                logger.debug(f"Could not remove row {key}")
-
-        # 2. Update cells for kept rows
+        # Update cells for kept rows (no adds/removes at this point)
         for key in kept:
             old_row = old_rows_by_key[key]
             new_row = new_rows_by_key[key]
@@ -765,20 +760,12 @@ class FilterableDataTable(Vertical):
                         table.update_cell(key, col_config.key, new_row[col_idx], update_width=False)
                         updated_cells += 1
 
-        # 3. Add new rows (appended at end — order is correct when unsorted)
-        for key in added:
-            row = new_rows_by_key[key]
-            table.add_row(*row, key=key)
-
         self._rows_by_key = new_rows_by_key
 
         # Update filter status
         self._update_filter_status(len(new_visible), len(self._all_rows))
 
-        logger.debug(
-            f"Incremental update: -{len(removed)} +{len(added)} rows, "
-            f"{updated_cells} cells updated, {len(kept)} rows kept"
-        )
+        logger.debug(f"Incremental update: {updated_cells} cells updated, {len(kept)} rows kept")
 
     def add_row(self, *cells: CellType, key: str | None = None) -> RowKey:
         """Add a row to the table.
