@@ -2,7 +2,7 @@
 
 import argparse
 import os
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, call, patch
 
 
 class TestGetVersion:
@@ -80,6 +80,140 @@ class TestRunFunction:
 
             run()
             mock_traceback.assert_called_once()
+
+
+class TestSetTerminalTitle:
+    """Tests for the _set_terminal_title() function."""
+
+    def test_emits_osc2_when_tty(self) -> None:
+        """Test that OSC 2 escape is emitted when stdout is a TTY."""
+        from stoei.__main__ import _set_terminal_title
+
+        mock_stdout = MagicMock()
+        mock_stdout.isatty.return_value = True
+        with (
+            patch("stoei.__main__.sys.stdout", mock_stdout),
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("TMUX", None)
+            _set_terminal_title("stoei")
+
+        mock_stdout.write.assert_called_once_with("\033]2;stoei\033\\")
+        mock_stdout.flush.assert_called_once()
+
+    def test_emits_tmux_escape_when_in_tmux(self) -> None:
+        """Test that tmux window-name escape is also emitted inside tmux."""
+        from stoei.__main__ import _set_terminal_title
+
+        mock_stdout = MagicMock()
+        mock_stdout.isatty.return_value = True
+        with (
+            patch("stoei.__main__.sys.stdout", mock_stdout),
+            patch.dict(os.environ, {"TMUX": "tmux-socket,1234,0"}),
+        ):
+            _set_terminal_title("stoei")
+
+        assert mock_stdout.write.call_args_list == [
+            call("\033]2;stoei\033\\"),
+            call("\033kstoei\033\\"),
+        ]
+        mock_stdout.flush.assert_called_once()
+
+    def test_noop_when_not_tty(self) -> None:
+        """Test that nothing is written when stdout is not a TTY."""
+        from stoei.__main__ import _set_terminal_title
+
+        mock_stdout = MagicMock()
+        mock_stdout.isatty.return_value = False
+        with patch("stoei.__main__.sys.stdout", mock_stdout):
+            _set_terminal_title("stoei")
+
+        mock_stdout.write.assert_not_called()
+        mock_stdout.flush.assert_not_called()
+
+
+class TestRestoreTerminalTitle:
+    """Tests for the _restore_terminal_title() function."""
+
+    def test_emits_empty_osc2_when_tty(self) -> None:
+        """Test that an empty OSC 2 escape is emitted when stdout is a TTY."""
+        from stoei.__main__ import _restore_terminal_title
+
+        mock_stdout = MagicMock()
+        mock_stdout.isatty.return_value = True
+        with (
+            patch("stoei.__main__.sys.stdout", mock_stdout),
+            patch.dict(os.environ, {}, clear=False),
+        ):
+            os.environ.pop("TMUX", None)
+            _restore_terminal_title()
+
+        mock_stdout.write.assert_called_once_with("\033]2;\033\\")
+        mock_stdout.flush.assert_called_once()
+
+    def test_emits_empty_tmux_escape_when_in_tmux(self) -> None:
+        """Test that empty tmux escape is also emitted inside tmux."""
+        from stoei.__main__ import _restore_terminal_title
+
+        mock_stdout = MagicMock()
+        mock_stdout.isatty.return_value = True
+        with (
+            patch("stoei.__main__.sys.stdout", mock_stdout),
+            patch.dict(os.environ, {"TMUX": "tmux-socket,1234,0"}),
+        ):
+            _restore_terminal_title()
+
+        assert mock_stdout.write.call_args_list == [
+            call("\033]2;\033\\"),
+            call("\033k\033\\"),
+        ]
+
+    def test_noop_when_not_tty(self) -> None:
+        """Test that nothing is written when stdout is not a TTY."""
+        from stoei.__main__ import _restore_terminal_title
+
+        mock_stdout = MagicMock()
+        mock_stdout.isatty.return_value = False
+        with patch("stoei.__main__.sys.stdout", mock_stdout):
+            _restore_terminal_title()
+
+        mock_stdout.write.assert_not_called()
+
+
+class TestRunTerminalTitle:
+    """Tests for terminal title integration in run()."""
+
+    def test_run_restores_title_on_normal_exit(self) -> None:
+        """Test that run() restores the terminal title after normal exit."""
+        with (
+            patch("stoei.__main__.main"),
+            patch("stoei.__main__._ensure_truecolor"),
+            patch("stoei.__main__.parse_args", return_value=MagicMock()),
+            patch("stoei.__main__._set_terminal_title") as mock_set,
+            patch("stoei.__main__._restore_terminal_title") as mock_restore,
+        ):
+            from stoei.__main__ import run
+
+            run()
+            mock_set.assert_called_once_with("stoei")
+            mock_restore.assert_called_once()
+
+    def test_run_restores_title_on_exception(self) -> None:
+        """Test that run() restores the terminal title even when main() raises."""
+        with (
+            patch("stoei.__main__.main", side_effect=RuntimeError("boom")),
+            patch("stoei.__main__._ensure_truecolor"),
+            patch("stoei.__main__.parse_args", return_value=MagicMock()),
+            patch("stoei.__main__._set_terminal_title") as mock_set,
+            patch("stoei.__main__._restore_terminal_title") as mock_restore,
+            patch("stoei.__main__.traceback.print_exc"),
+            patch("stoei.__main__.sys.exit"),
+        ):
+            from stoei.__main__ import run
+
+            run()
+            mock_set.assert_called_once_with("stoei")
+            mock_restore.assert_called_once()
 
 
 class TestEnsureTruecolor:

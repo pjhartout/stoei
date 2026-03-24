@@ -11,6 +11,8 @@ from stoei.logger import get_logger
 
 logger = get_logger(__name__)
 
+_TITLE = "stoei"
+
 
 def _ensure_truecolor() -> None:
     """Ensure true color mode is enabled for consistent theme rendering.
@@ -28,6 +30,48 @@ def _ensure_truecolor() -> None:
     if colorterm.lower() not in ("truecolor", "24bit"):
         os.environ["COLORTERM"] = "truecolor"
         logger.debug(f"Set COLORTERM=truecolor (was: {colorterm!r})")
+
+
+def _set_terminal_title(title: str) -> None:
+    """Set the terminal and tmux tab title via escape sequences.
+
+    Emits OSC 2 (xterm window title) for all terminals, plus the tmux
+    window-name escape when running inside tmux.  No-ops when stdout
+    is not a TTY to avoid leaking escape sequences into piped output.
+
+    Args:
+        title: The title string to display.
+    """
+    if not sys.stdout.isatty():
+        return
+
+    # OSC 2 — standard xterm window title
+    sys.stdout.write(f"\033]2;{title}\033\\")
+
+    # tmux window name (only inside tmux)
+    if os.environ.get("TMUX"):
+        sys.stdout.write(f"\033k{title}\033\\")
+
+    sys.stdout.flush()
+    logger.debug(f"Set terminal title to {title!r}")
+
+
+def _restore_terminal_title() -> None:
+    """Restore the default terminal and tmux tab title.
+
+    Emits empty title sequences so the terminal (and tmux) resume their
+    default title behaviour (e.g. tmux re-enables automatic-rename).
+    """
+    if not sys.stdout.isatty():
+        return
+
+    sys.stdout.write("\033]2;\033\\")
+
+    if os.environ.get("TMUX"):
+        sys.stdout.write("\033k\033\\")
+
+    sys.stdout.flush()
+    logger.debug("Restored terminal title")
 
 
 def get_version() -> str:
@@ -70,6 +114,9 @@ def run() -> None:
     # Ensure true color mode for consistent theme colors
     _ensure_truecolor()
 
+    # Set terminal/tmux tab title
+    _set_terminal_title(_TITLE)
+
     try:
         main()
     except Exception:
@@ -77,6 +124,8 @@ def run() -> None:
         # Print standard Python traceback instead of Rich's fancy one
         traceback.print_exc()
         sys.exit(1)
+    finally:
+        _restore_terminal_title()
 
 
 if __name__ == "__main__":
