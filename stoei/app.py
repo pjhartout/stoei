@@ -1007,9 +1007,10 @@ class SlurmMonitor(App[None]):
             running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = cast(_UserJobsResult, result)
             if running_jobs is not None:
                 self._error_notified["running_jobs"] = False
-                old_job_ids = {j.job_id for j in self._job_cache.jobs}
+                old_states = self._job_states()
                 self._handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-                self._notify_new_jobs(old_job_ids)
+                self._notify_new_jobs(set(old_states))
+                self._invalidate_changed_job_info(old_states)
             else:
                 if not self._error_notified.get("running_jobs"):
                     self._error_notified["running_jobs"] = True
@@ -1190,7 +1191,6 @@ class SlurmMonitor(App[None]):
         Args:
             is_first_cycle: Whether this was the first background refresh cycle.
         """
-        self._job_info_cache.clear()
         if is_first_cycle:
             self._initial_background_complete = True
             self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_refresh_worker)
@@ -1256,6 +1256,32 @@ class SlurmMonitor(App[None]):
         else:
             msg = f"{len(new_active_jobs)} new jobs detected"
         self._post_ui_callback(lambda m=msg: self.notify(m, timeout=5, severity="information"))
+
+    def _job_states(self) -> dict[str, str]:
+        """Return a snapshot mapping each cached job's ID to its current state."""
+        return {job.job_id: job.state for job in self._job_cache.jobs}
+
+    def _invalidate_changed_job_info(self, old_states: dict[str, str]) -> None:
+        """Evict cached modal job-info for jobs whose state changed (worker thread).
+
+        Compares each job's state before and after the cache rebuild. Any job
+        whose state changed - or that disappeared from the cache - has its cached
+        ``scontrol``/``sacct`` detail evicted so the next modal open re-fetches
+        it; unchanged jobs keep their cached entry for instant display. Eviction
+        is conservative: array tasks that share a normalized cache key are
+        evicted together when any one of them changes.
+
+        Called from ``_apply_fetch_result`` right after the cache rebuild, so the
+        modal cache stays consistent with the table cache it was derived from
+        instead of being gated behind full-cycle completion.
+
+        Args:
+            old_states: Job-ID-to-state snapshot captured before the rebuild.
+        """
+        new_states = self._job_states()
+        for job_id, old_state in old_states.items():
+            if new_states.get(job_id) != old_state:
+                self._job_info_cache.pop(normalize_array_job_id(job_id), None)
 
     def _set_loading_indicator(self, active: bool) -> None:
         """Safely toggle the global loading indicator spinner."""

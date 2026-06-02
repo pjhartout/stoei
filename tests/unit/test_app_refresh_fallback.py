@@ -539,10 +539,8 @@ class TestOnRefreshComplete:
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:
-        """Return a SlurmMonitor instance with a pre-populated job info cache."""
-        instance = SlurmMonitor()
-        instance._job_info_cache["123"] = ("formatted", None, None, None)
-        return instance
+        """Return a bare SlurmMonitor instance."""
+        return SlurmMonitor()
 
     def test_first_cycle_sets_initial_background_complete(self, app: SlurmMonitor) -> None:
         """First cycle sets _initial_background_complete = True."""
@@ -578,13 +576,6 @@ class TestOnRefreshComplete:
         assert app._initial_background_complete is True
         mock_interval.assert_called_once()
 
-    def test_first_cycle_clears_job_info_cache(self, app: SlurmMonitor) -> None:
-        """_on_refresh_complete always clears the job info cache."""
-        with patch.object(app, "set_interval", return_value=MagicMock()):
-            app._on_refresh_complete(is_first_cycle=True)
-
-        assert app._job_info_cache == {}
-
     def test_subsequent_cycle_does_not_call_set_interval(self, app: SlurmMonitor) -> None:
         """Subsequent refresh cycles must not re-register the auto-refresh timer."""
         app._initial_background_complete = True
@@ -598,14 +589,79 @@ class TestOnRefreshComplete:
         mock_set_interval.assert_not_called()
         mock_notify.assert_not_called()
 
-    def test_subsequent_cycle_clears_job_info_cache(self, app: SlurmMonitor) -> None:
-        """Subsequent refresh cycles still clear the job info cache."""
-        app._initial_background_complete = True
 
-        with (
-            patch.object(app, "set_interval"),
-            patch.object(app, "notify"),
-        ):
-            app._on_refresh_complete(is_first_cycle=False)
+class TestJobInfoCacheInvalidation:
+    """Tests for selective modal job-info cache invalidation on state change.
 
-        assert app._job_info_cache == {}
+    The job-detail modal is served from ``_job_info_cache`` (scontrol/sacct
+    output). A refresh must evict only entries whose state changed so the
+    modal re-fetches them, while unchanged jobs keep their cached entry.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_job_cache(self) -> None:
+        """Reset JobCache singleton before each test."""
+        JobCache.reset()
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Return a bare SlurmMonitor with widget-tree side-effects stubbed out."""
+        instance = SlurmMonitor()
+        instance._parse_node_infos = MagicMock(return_value=[])  # type: ignore[method-assign]
+        instance._compute_user_overview_cache = MagicMock()  # type: ignore[method-assign]
+        instance._calculate_cluster_stats = MagicMock(return_value=None)  # type: ignore[method-assign]
+        instance._compute_priority_overview_cache = MagicMock()  # type: ignore[method-assign]
+        return instance
+
+    @staticmethod
+    def _squeue(job_id: str, state: str) -> tuple[str, ...]:
+        """Build an 8-field squeue row tuple for the given job ID and state."""
+        return (job_id, "job", state, "1:00", "1", "node1", "2026-01-01T00:00:00", "2026-01-01T00:00:00")
+
+    def test_changed_state_evicts_entry_unchanged_kept(self, app: SlurmMonitor) -> None:
+        """A job whose state changed is evicted; an unchanged job's entry survives."""
+        app._job_cache._build_from_data([self._squeue("1", "PENDING"), self._squeue("2", "RUNNING")], [], 0, 0, 0)
+        app._job_info_cache = {"1": ("info1", None, None, None), "2": ("info2", None, None, None)}
+
+        with patch.object(app, "_post_ui_callback"):
+            app._apply_fetch_result(
+                "user_jobs",
+                ([self._squeue("1", "RUNNING"), self._squeue("2", "RUNNING")], [], 0, 0, 0),
+            )
+
+        assert "1" not in app._job_info_cache  # PENDING -> RUNNING: evicted
+        assert "2" in app._job_info_cache  # RUNNING -> RUNNING: kept
+
+    def test_new_job_in_same_cycle_not_evicted(self, app: SlurmMonitor) -> None:
+        """A job appearing for the first time this cycle is not evicted; a changed one is."""
+        app._job_cache._build_from_data([self._squeue("1", "PENDING")], [], 0, 0, 0)
+        app._job_info_cache = {"1": ("info1", None, None, None), "2": ("info2", None, None, None)}
+
+        with patch.object(app, "_post_ui_callback"):
+            app._apply_fetch_result(
+                "user_jobs",
+                ([self._squeue("1", "RUNNING"), self._squeue("2", "RUNNING")], [], 0, 0, 0),
+            )
+
+        assert "1" not in app._job_info_cache  # PENDING -> RUNNING: evicted
+        assert "2" in app._job_info_cache  # absent from old snapshot: left untouched
+
+    def test_vanished_job_evicts_entry(self, app: SlurmMonitor) -> None:
+        """A job that disappears from the cache has its modal entry evicted."""
+        app._job_cache._build_from_data([self._squeue("1", "PENDING")], [], 0, 0, 0)
+        app._job_info_cache = {"1": ("info1", None, None, None)}
+
+        with patch.object(app, "_post_ui_callback"):
+            app._apply_fetch_result("user_jobs", ([], [], 0, 0, 0))
+
+        assert "1" not in app._job_info_cache
+
+    def test_array_job_id_normalized_on_eviction(self, app: SlurmMonitor) -> None:
+        """Array job eviction uses the normalized (bracket-stripped) cache key."""
+        app._job_cache._build_from_data([self._squeue("12345_[0-99]", "PENDING")], [], 0, 0, 0)
+        app._job_info_cache = {"12345": ("info", None, None, None)}
+
+        with patch.object(app, "_post_ui_callback"):
+            app._apply_fetch_result("user_jobs", ([], [], 0, 0, 0))
+
+        assert "12345" not in app._job_info_cache
