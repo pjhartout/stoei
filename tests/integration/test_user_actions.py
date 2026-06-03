@@ -95,6 +95,7 @@ def slurm_monitor_factory(monkeypatch: pytest.MonkeyPatch) -> Callable[[], Slurm
 
         app.set_interval = _noop  # type: ignore[assignment]
         app._start_refresh_worker = _noop  # type: ignore[assignment]
+        app._start_running_refresh_worker = _noop  # type: ignore[assignment]
         app._start_initial_load_worker = _noop  # type: ignore[assignment]
         return app
 
@@ -160,22 +161,22 @@ async def test_new_jobs_appear_after_refresh(slurm_monitor_factory: Callable[[],
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
-        # Seed the table with initial data (initial load worker is nooped)
-        initial_result = (list(RUNNING_JOBS), list(HISTORY_JOBS), len(HISTORY_JOBS), 0, 0)
-        app._apply_fetch_result("user_jobs", initial_result)
+        # Seed the table with initial data (initial load worker is nooped):
+        # history via the heavy loop, running jobs via the fast loop.
+        app._apply_fetch_result("history", (list(HISTORY_JOBS), len(HISTORY_JOBS), 0, 0))
+        app._apply_running_jobs_result(list(RUNNING_JOBS))
         await pilot.pause()
         await pilot.pause()
 
         jobs_ft = app.query_one("#jobs-filterable-table", FilterableDataTable)
         initial_count = jobs_ft.table.row_count
 
-        # Simulate a refresh that returns the original job + a new one
+        # Simulate a fast-loop refresh that returns the original job + a new one
         new_running: list[tuple[str, ...]] = [
             *RUNNING_JOBS,
             ("102", "eval", "RUNNING", "00:05:00", "1", "node002", "2024-01-15T11:00:00", "2024-01-15T11:00:00"),
         ]
-        result = (new_running, list(HISTORY_JOBS), len(HISTORY_JOBS), 0, 0)
-        app._apply_fetch_result("user_jobs", result)
+        app._apply_running_jobs_result(new_running)
 
         # Let the _UICallback → _update_jobs_table → call_later chain run
         await pilot.pause()
@@ -198,9 +199,10 @@ async def test_completed_jobs_removed_after_refresh(slurm_monitor_factory: Calla
     async with app.run_test(size=(80, 24)) as pilot:
         await pilot.pause()
 
-        # Seed the table with initial data (initial load worker is nooped)
-        initial_result = (list(RUNNING_JOBS), list(HISTORY_JOBS), len(HISTORY_JOBS), 0, 0)
-        app._apply_fetch_result("user_jobs", initial_result)
+        # Seed the table with initial data (initial load worker is nooped):
+        # history via the heavy loop, running jobs via the fast loop.
+        app._apply_fetch_result("history", (list(HISTORY_JOBS), len(HISTORY_JOBS), 0, 0))
+        app._apply_running_jobs_result(list(RUNNING_JOBS))
         await pilot.pause()
         await pilot.pause()
 
@@ -208,7 +210,8 @@ async def test_completed_jobs_removed_after_refresh(slurm_monitor_factory: Calla
         initial_count = jobs_ft.table.row_count
         assert initial_count > 0, "Expected at least one job after initial seed"
 
-        # Simulate a refresh where the running job completed and moved to history
+        # Simulate the running job completing: it drops from squeue (fast loop) and
+        # reappears in the sacct history (heavy loop).
         new_history: list[tuple[str, ...]] = [
             *HISTORY_JOBS,
             (
@@ -224,14 +227,8 @@ async def test_completed_jobs_removed_after_refresh(slurm_monitor_factory: Calla
                 "2024-01-15T10:10:00",
             ),
         ]
-        result: tuple[list[tuple[str, ...]], list[tuple[str, ...]], int, int, int] = (
-            [],  # no running jobs
-            new_history,
-            len(new_history),
-            0,
-            0,
-        )
-        app._apply_fetch_result("user_jobs", result)
+        app._apply_running_jobs_result([])  # no running jobs
+        app._apply_fetch_result("history", (new_history, len(new_history), 0, 0))
 
         await pilot.pause()
         await pilot.pause()

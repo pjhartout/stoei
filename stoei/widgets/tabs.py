@@ -1,6 +1,6 @@
 """Tab system widget."""
 
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from textual.app import ComposeResult
 from textual.containers import Container, Horizontal
@@ -11,11 +11,14 @@ from stoei.logger import get_logger
 
 logger = get_logger(__name__)
 
+# The top-level tabs of the application.
+TabName = Literal["jobs", "nodes", "users", "priority", "logs"]
+
 
 class TabSwitched(Message):
     """Message sent when a tab is switched."""
 
-    def __init__(self, tab_name: str) -> None:
+    def __init__(self, tab_name: TabName) -> None:
         """Initialize the TabSwitched message.
 
         Args:
@@ -79,7 +82,7 @@ class TabContainer(Container):
     def __init__(self, *args, **kwargs) -> None:
         """Initialize the TabContainer."""
         super().__init__(*args, **kwargs)
-        self._active_tab: str = "jobs"
+        self._active_tab: TabName = "jobs"
         self._tabs: dict[str, Container] = {}
         self._is_compact: bool = False
         self._tab_labels: dict[str, tuple[str, str]] = {
@@ -116,7 +119,7 @@ class TabContainer(Container):
         elif event.button.id == "tab-logs":
             self.switch_tab("logs")
 
-    def switch_tab(self, tab_name: str) -> None:
+    def switch_tab(self, tab_name: TabName) -> None:
         """Switch to a different tab.
 
         Args:
@@ -166,7 +169,7 @@ class TabContainer(Container):
         self.post_message(TabSwitched(tab_name))
 
     @property
-    def active_tab(self) -> str:
+    def active_tab(self) -> TabName:
         """Get the currently active tab name."""
         return self._active_tab
 

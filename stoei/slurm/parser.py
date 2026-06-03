@@ -1,12 +1,8 @@
 """Parsers for SLURM command output."""
 
 import re
-from typing import TYPE_CHECKING
 
 from stoei.slurm.gpu_parser import parse_gpu_entries
-
-if TYPE_CHECKING:
-    pass
 
 # Constants for parsing
 MIN_SQUEUE_PARTS = 8  # JobID, Name, State, Time, Nodes, NodeList, SubmitTime, StartTime

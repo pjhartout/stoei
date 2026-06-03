@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
@@ -10,6 +10,7 @@ from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Button, Input, Select, Static, Switch
 
+from stoei.keybindings import KeybindMode
 from stoei.logger import get_logger
 from stoei.settings import (
     KEYBIND_MODES,
@@ -19,6 +20,7 @@ from stoei.settings import (
     MIN_JOB_HISTORY_DAYS,
     MIN_LOG_LINES,
     MIN_REFRESH_INTERVAL,
+    LogLevel,
     Settings,
     save_settings,
 )
@@ -191,7 +193,7 @@ class SettingsScreen(Screen[Settings | None]):
         if event.key in ("left", "right") and isinstance(focused, Select) and not focused.expanded:
             event.stop()
             # Type narrow: we know it's a Select[str] in this screen
-            select_widget: Select[str] = focused  # type: ignore[assignment]
+            select_widget = cast("Select[str]", focused)
             self._cycle_select_option(select_widget, direction=1 if event.key == "right" else -1)
             return
 
@@ -423,7 +425,7 @@ class SettingsScreen(Screen[Settings | None]):
             return None
         return theme_value
 
-    def _validate_log_level(self) -> str | None:
+    def _validate_log_level(self) -> LogLevel | None:
         """Validate and return log level selection."""
         log_level_select = self.query_one("#settings-log-level", Select)
         log_level_value = log_level_select.value
@@ -431,7 +433,7 @@ class SettingsScreen(Screen[Settings | None]):
             logger.warning("Invalid log level selection")
             self.app.notify("Please select a valid log level", severity="warning")
             return None
-        return log_level_value
+        return cast("LogLevel", log_level_value)
 
     def _validate_max_lines(self) -> int | None:
         """Validate and return max log lines value."""
@@ -481,7 +483,7 @@ class SettingsScreen(Screen[Settings | None]):
             return None
         return job_history_days
 
-    def _validate_keybind_mode(self) -> str | None:
+    def _validate_keybind_mode(self) -> KeybindMode | None:
         """Validate and return keybind mode selection."""
         keybind_select = self.query_one("#settings-keybind-mode", Select)
         keybind_value = keybind_select.value
@@ -489,7 +491,7 @@ class SettingsScreen(Screen[Settings | None]):
             logger.warning("Invalid keybind mode selection")
             self.app.notify("Please select a valid keybind mode", severity="warning")
             return None
-        return keybind_value
+        return cast("KeybindMode", keybind_value)
 
     def action_jump_keybind(self) -> None:
         """Jump focus to the keybind mode selector."""
@@ -550,10 +552,10 @@ class SettingsScreen(Screen[Settings | None]):
 
         # Update the app's settings
         # Access the app's _settings attribute directly since we need to update it
-        self.app._settings = validated  # type: ignore[attr-defined]
+        self.app._settings = validated  # ty: ignore[unresolved-attribute]
 
         # Trigger energy data reload
-        self.app.reload_energy_data()  # type: ignore[attr-defined]
+        self.app.reload_energy_data()  # ty: ignore[unresolved-attribute]
 
         # Dismiss the settings screen
         self.dismiss(None)

@@ -8,7 +8,7 @@ import subprocess
 from collections import deque
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from rich.errors import MarkupError
 from textual.app import ComposeResult, SuspendNotSupported
@@ -23,6 +23,9 @@ from stoei.logger import get_logger
 from stoei.settings import load_settings
 
 logger = get_logger(__name__)
+
+# A job log stream: standard output or standard error.
+LogType = Literal["stdout", "stderr"]
 
 # Timeout for file loading operations (in seconds)
 FILE_LOAD_TIMEOUT = 1.0
@@ -88,12 +91,12 @@ class LogViewerScreen(Screen[None]):
     # Spinner frames for loading indicator
     SPINNER_FRAMES: ClassVar[tuple[str, ...]] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
 
-    def __init__(self, filepath: str, log_type: str, max_lines: int | None = None) -> None:
+    def __init__(self, filepath: str, log_type: LogType, max_lines: int | None = None) -> None:
         """Initialize the log viewer screen.
 
         Args:
             filepath: Path to the log file.
-            log_type: Type of log (e.g., "stdout" or "stderr").
+            log_type: Type of log ("stdout" or "stderr").
             max_lines: Maximum number of lines to display (truncates from start if exceeded).
         """
         super().__init__()
@@ -1248,12 +1251,12 @@ class JobInfoScreen(Screen[None]):
                 buttons[prev_idx].focus()
                 return
 
-    def _open_log(self, path: str | None, log_type: str) -> None:
+    def _open_log(self, path: str | None, log_type: LogType) -> None:
         """Open the log viewer screen for a log file.
 
         Args:
             path: Path to the log file.
-            log_type: Type of log (stdout or stderr).
+            log_type: Type of log ("stdout" or "stderr").
         """
         # Check if path is None, empty, or whitespace-only
         if not path or (isinstance(path, str) and not path.strip()):

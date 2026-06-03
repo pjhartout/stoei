@@ -7,15 +7,17 @@ import os
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal, cast
 
-from stoei.keybindings import DEFAULT_PRESET, KeybindingConfig
+from stoei.keybindings import DEFAULT_PRESET, KeybindingConfig, KeybindMode
 from stoei.logger import get_logger
 from stoei.themes import DEFAULT_THEME_NAME, THEME_LABELS
 
 logger = get_logger(__name__)
 
-LOG_LEVELS: tuple[str, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
-KEYBIND_MODES: tuple[str, ...] = ("vim", "emacs")
+LogLevel = Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+LOG_LEVELS: tuple[LogLevel, ...] = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+KEYBIND_MODES: tuple[KeybindMode, ...] = ("vim", "emacs")
 DEFAULT_KEYBIND_MODE = DEFAULT_PRESET
 MIN_LOG_LINES = 200
 DEFAULT_MAX_LOG_LINES = 2000
@@ -49,12 +51,12 @@ class Settings:
     """User-configurable settings stored on disk."""
 
     theme: str = DEFAULT_THEME_NAME
-    log_level: str = "WARNING"
+    log_level: LogLevel = "WARNING"
     max_log_lines: int = DEFAULT_MAX_LOG_LINES
     refresh_interval: float = DEFAULT_REFRESH_INTERVAL
     job_history_days: int = DEFAULT_JOB_HISTORY_DAYS
     log_viewer_lines: int = DEFAULT_LOG_VIEWER_LINES
-    keybind_mode: str = DEFAULT_KEYBIND_MODE
+    keybind_mode: KeybindMode = DEFAULT_KEYBIND_MODE
     # Store keybinding overrides as tuple of (action, key) pairs (hashable for frozen dataclass)
     keybind_overrides: tuple[tuple[str, str], ...] = ()
     # Energy loading settings (disabled by default to speed up startup)
@@ -90,7 +92,11 @@ class Settings:
         theme = theme_value if theme_value is not None and theme_value in THEME_LABELS else DEFAULT_THEME_NAME
 
         log_level_value = _coerce_str(data.get("log_level"))
-        log_level = log_level_value if log_level_value is not None and log_level_value in LOG_LEVELS else "WARNING"
+        log_level: LogLevel = (
+            cast("LogLevel", log_level_value)
+            if log_level_value is not None and log_level_value in LOG_LEVELS
+            else "WARNING"
+        )
 
         max_log_lines = _coerce_int(data.get("max_log_lines"))
         if max_log_lines is None or max_log_lines < MIN_LOG_LINES:
@@ -121,8 +127,8 @@ class Settings:
             log_viewer_lines = DEFAULT_LOG_VIEWER_LINES
 
         keybind_mode_value = _coerce_str(data.get("keybind_mode"))
-        keybind_mode = (
-            keybind_mode_value
+        keybind_mode: KeybindMode = (
+            cast("KeybindMode", keybind_mode_value)
             if keybind_mode_value is not None and keybind_mode_value in KEYBIND_MODES
             else DEFAULT_KEYBIND_MODE
         )

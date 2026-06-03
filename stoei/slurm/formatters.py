@@ -5,16 +5,13 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from datetime import datetime
-from typing import TYPE_CHECKING
 
 from stoei.colors import FALLBACK_COLORS, ThemeColors
 from stoei.slurm.energy import ENERGY_KWH_THRESHOLD, ENERGY_MWH_THRESHOLD
 from stoei.slurm.gpu_parser import calculate_total_gpus
 from stoei.slurm.nodelist import expand_nodelist
 from stoei.slurm.parser import parse_scontrol_output, parse_tres_resources
-
-if TYPE_CHECKING:
-    from stoei.widgets.user_overview import UserEnergyStats, UserPendingStats, UserStats
+from stoei.usage_stats import UserEnergyStats, UserPendingStats, UserStats
 
 
 def _get_default_colors() -> ThemeColors:
