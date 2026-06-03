@@ -88,7 +88,7 @@ from stoei.widgets.screens import (
 )
 from stoei.widgets.settings_screen import SettingsScreen
 from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
-from stoei.widgets.tabs import TabContainer, TabSwitched
+from stoei.widgets.tabs import TabContainer, TabName, TabSwitched
 from stoei.widgets.user_overview import (
     UserEnergyStats,
     UserOverviewTab,
@@ -259,7 +259,7 @@ class SlurmMonitor(App[None]):
         self._error_notified: dict[str, bool] = {}
         # Tab switch debouncing: rapid key presses within the same event-loop
         # frame are batched so only the final tab is actually switched to.
-        self._pending_tab_switch: str | None = None
+        self._pending_tab_switch: TabName | None = None
         self._tab_switch_scheduled: bool = False
         self._init_update_generation_counters()
 
@@ -2309,7 +2309,7 @@ class SlurmMonitor(App[None]):
         except Exception as exc:
             logger.error(f"Failed to update energy UI: {exc}", exc_info=True)
 
-    def _switch_tab(self, tab_name: str) -> None:
+    def _switch_tab(self, tab_name: TabName) -> None:
         """Debounced tab switch.
 
         Multiple calls within the same event-loop frame are batched: only
@@ -2360,7 +2360,7 @@ class SlurmMonitor(App[None]):
         """Switch to the Logs tab."""
         self._switch_tab("logs")
 
-    def _resolve_base_tab(self) -> str:
+    def _resolve_base_tab(self) -> TabName:
         """Return the tab name to use as base for next/previous cycling.
 
         If a debounced switch is pending, use that so rapid Tab presses
@@ -2379,7 +2379,7 @@ class SlurmMonitor(App[None]):
         """Switch to the next tab (cycling)."""
         if not self._initial_load_complete:
             return
-        tab_order = ["jobs", "nodes", "users", "priority", "logs"]
+        tab_order: list[TabName] = ["jobs", "nodes", "users", "priority", "logs"]
         base = self._resolve_base_tab()
         current_index = tab_order.index(base) if base in tab_order else 0
         self._switch_tab(tab_order[(current_index + 1) % len(tab_order)])
@@ -2388,7 +2388,7 @@ class SlurmMonitor(App[None]):
         """Switch to the previous tab (cycling)."""
         if not self._initial_load_complete:
             return
-        tab_order = ["jobs", "nodes", "users", "priority", "logs"]
+        tab_order: list[TabName] = ["jobs", "nodes", "users", "priority", "logs"]
         base = self._resolve_base_tab()
         current_index = tab_order.index(base) if base in tab_order else 0
         self._switch_tab(tab_order[(current_index - 1) % len(tab_order)])

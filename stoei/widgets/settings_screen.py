@@ -10,6 +10,7 @@ from textual.events import Key
 from textual.screen import Screen
 from textual.widgets import Button, Input, Select, Static, Switch
 
+from stoei.keybindings import KeybindMode
 from stoei.logger import get_logger
 from stoei.settings import (
     KEYBIND_MODES,
@@ -19,6 +20,7 @@ from stoei.settings import (
     MIN_JOB_HISTORY_DAYS,
     MIN_LOG_LINES,
     MIN_REFRESH_INTERVAL,
+    LogLevel,
     Settings,
     save_settings,
 )
@@ -423,7 +425,7 @@ class SettingsScreen(Screen[Settings | None]):
             return None
         return theme_value
 
-    def _validate_log_level(self) -> str | None:
+    def _validate_log_level(self) -> LogLevel | None:
         """Validate and return log level selection."""
         log_level_select = self.query_one("#settings-log-level", Select)
         log_level_value = log_level_select.value
@@ -431,7 +433,7 @@ class SettingsScreen(Screen[Settings | None]):
             logger.warning("Invalid log level selection")
             self.app.notify("Please select a valid log level", severity="warning")
             return None
-        return log_level_value
+        return cast("LogLevel", log_level_value)
 
     def _validate_max_lines(self) -> int | None:
         """Validate and return max log lines value."""
@@ -481,7 +483,7 @@ class SettingsScreen(Screen[Settings | None]):
             return None
         return job_history_days
 
-    def _validate_keybind_mode(self) -> str | None:
+    def _validate_keybind_mode(self) -> KeybindMode | None:
         """Validate and return keybind mode selection."""
         keybind_select = self.query_one("#settings-keybind-mode", Select)
         keybind_value = keybind_select.value
@@ -489,7 +491,7 @@ class SettingsScreen(Screen[Settings | None]):
             logger.warning("Invalid keybind mode selection")
             self.app.notify("Please select a valid keybind mode", severity="warning")
             return None
-        return keybind_value
+        return cast("KeybindMode", keybind_value)
 
     def action_jump_keybind(self) -> None:
         """Jump focus to the keybind mode selector."""

@@ -18,7 +18,7 @@ from textual.reactive import reactive
 from textual.widgets import DataTable, Input, Static
 from textual.widgets.data_table import CellType, ColumnKey, RowKey
 
-from stoei.keybindings import Actions, KeybindingConfig, get_default_config
+from stoei.keybindings import Actions, KeybindingConfig, KeybindMode, get_default_config
 from stoei.logger import get_logger
 
 logger = get_logger(__name__)
@@ -171,7 +171,7 @@ class FilterableDataTable(Vertical):
         self,
         *,
         columns: list[ColumnConfig] | None = None,
-        keybind_mode: str = "vim",
+        keybind_mode: KeybindMode = "vim",
         keybindings: KeybindingConfig | None = None,
         table_id: str | None = None,
         name: str | None = None,
@@ -264,7 +264,7 @@ class FilterableDataTable(Vertical):
         """Get the current filter state."""
         return self._filter_state
 
-    def set_keybind_mode(self, mode: str, keybindings: KeybindingConfig | None = None) -> None:
+    def set_keybind_mode(self, mode: KeybindMode, keybindings: KeybindingConfig | None = None) -> None:
         """Set the keybind mode and optionally update keybindings.
 
         Args:

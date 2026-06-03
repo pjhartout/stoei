@@ -66,10 +66,14 @@ class _UserEnergyDataDict(TypedDict):
     cpu_hours: float
 
 
+# Type alias for subtab names
+SubtabName = Literal["running", "pending", "energy"]
+
+
 class SubtabSwitched(Message):
     """Message sent when a sub-tab within the user overview is switched."""
 
-    def __init__(self, subtab_name: str) -> None:
+    def __init__(self, subtab_name: SubtabName) -> None:
         """Initialize the SubtabSwitched message.
 
         Args:
@@ -77,10 +81,6 @@ class SubtabSwitched(Message):
         """
         super().__init__()
         self.subtab_name = subtab_name
-
-
-# Type alias for subtab names
-SubtabName = Literal["running", "pending", "energy"]
 
 
 class UserOverviewTab(VerticalScroll):

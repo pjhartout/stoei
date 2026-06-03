@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import ClassVar
+from typing import ClassVar, Literal
 
 from stoei.logger import get_logger
 
 logger = get_logger(__name__)
+
+# Keybinding presets the app ships with.
+KeybindMode = Literal["vim", "emacs"]
 
 
 # Action names (used as keys in binding maps)
@@ -261,7 +264,7 @@ PRESETS: dict[str, KeybindingPreset] = {
     "emacs": _create_emacs_preset(),
 }
 
-DEFAULT_PRESET = "vim"
+DEFAULT_PRESET: KeybindMode = "vim"
 
 
 @dataclass
@@ -383,7 +386,7 @@ class KeybindingConfig:
         return cls(preset=preset, overrides=overrides)
 
 
-def get_default_config(mode: str = "vim") -> KeybindingConfig:
+def get_default_config(mode: KeybindMode = "vim") -> KeybindingConfig:
     """Get a default keybinding configuration for a mode.
 
     Args:
