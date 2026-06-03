@@ -58,6 +58,7 @@ I want to have a clear code structure. In the end, I want the main source code f
 ## Code style
 
 - **All imports must be hoisted to the top of the file** - no imports inside functions, methods, or conditional blocks. This is enforced by ruff rule PLC0415.
+- **Do not use `if TYPE_CHECKING:` blocks.** Import everything as a regular top-level runtime import. If a runtime import would be circular, fix the underlying coupling - for example, move shared data models into a small dependency-free module that both sides can import (see `stoei/usage_stats.py`). Only when neither a runtime import nor a small refactor is viable (a genuinely type-only third-party symbol, or accessing a concrete `App` subclass attribute through Textual's `self.app`), suppress the specific diagnostic inline with `# ty: ignore[<rule>]` instead of reintroducing `TYPE_CHECKING`.
 
 ## Agent Auto-run Commands
 

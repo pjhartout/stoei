@@ -1,7 +1,6 @@
 """User overview tab widget with sub-tabs for running, pending, and energy views."""
 
 from collections import defaultdict
-from dataclasses import dataclass
 from typing import ClassVar, Literal, TypedDict
 
 from textual.app import ComposeResult
@@ -28,26 +27,11 @@ from stoei.slurm.gpu_parser import (
 )
 from stoei.slurm.nodelist import expand_nodelist
 from stoei.slurm.parser import parse_tres_resources
+from stoei.usage_stats import UserEnergyStats, UserPendingStats, UserStats
 from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
 from stoei.widgets.screens import EnergyEnableModal
 
 logger = get_logger(__name__)
-
-
-@dataclass
-class UserStats:
-    """User resource usage statistics."""
-
-    username: str
-    job_count: int
-    total_cpus: int
-    total_memory_gb: float
-    total_gpus: int
-    total_nodes: int
-    gpu_types: str = ""
-    node_names: str = ""
-    array_count: int = 0
-    plain_job_count: int = 0
 
 
 class _UserDataDict(TypedDict):
@@ -63,18 +47,6 @@ class _UserDataDict(TypedDict):
     plain_job_count: int
 
 
-@dataclass
-class UserPendingStats:
-    """User pending job resource statistics."""
-
-    username: str
-    pending_job_count: int
-    pending_cpus: int
-    pending_memory_gb: float
-    pending_gpus: int
-    pending_gpu_types: str = ""
-
-
 class _UserPendingDataDict(TypedDict):
     """Internal dictionary structure for aggregating user pending statistics."""
 
@@ -83,17 +55,6 @@ class _UserPendingDataDict(TypedDict):
     pending_memory_gb: float
     pending_gpus: int
     gpu_types: dict[str, int]
-
-
-@dataclass
-class UserEnergyStats:
-    """User energy usage statistics over a historical period."""
-
-    username: str
-    total_energy_wh: float  # Total energy in Watt-hours
-    job_count: int  # Number of completed jobs
-    gpu_hours: float  # Total GPU-hours used
-    cpu_hours: float  # Total CPU-hours used
 
 
 class _UserEnergyDataDict(TypedDict):
@@ -368,7 +329,7 @@ class UserOverviewTab(VerticalScroll):
         """
         if result == "settings":
             # Navigate to settings screen
-            self.app.action_show_settings()  # type: ignore[attr-defined]
+            self.app.action_show_settings()  # ty: ignore[unresolved-attribute]
 
     def update_users(self, users: list[UserStats]) -> None:
         """Update the user data table.

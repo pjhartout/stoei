@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import ClassVar
+from typing import ClassVar, cast
 
 from textual.app import ComposeResult
 from textual.containers import Container, Vertical
@@ -191,7 +191,7 @@ class SettingsScreen(Screen[Settings | None]):
         if event.key in ("left", "right") and isinstance(focused, Select) and not focused.expanded:
             event.stop()
             # Type narrow: we know it's a Select[str] in this screen
-            select_widget: Select[str] = focused  # type: ignore[assignment]
+            select_widget = cast("Select[str]", focused)
             self._cycle_select_option(select_widget, direction=1 if event.key == "right" else -1)
             return
 
@@ -550,10 +550,10 @@ class SettingsScreen(Screen[Settings | None]):
 
         # Update the app's settings
         # Access the app's _settings attribute directly since we need to update it
-        self.app._settings = validated  # type: ignore[attr-defined]
+        self.app._settings = validated  # ty: ignore[unresolved-attribute]
 
         # Trigger energy data reload
-        self.app.reload_energy_data()  # type: ignore[attr-defined]
+        self.app.reload_energy_data()  # ty: ignore[unresolved-attribute]
 
         # Dismiss the settings screen
         self.dismiss(None)

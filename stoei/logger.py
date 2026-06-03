@@ -8,12 +8,10 @@ import os
 from collections.abc import Callable
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import Protocol
 
+import loguru
 from loguru import logger
-
-if TYPE_CHECKING:
-    import loguru
 
 
 class LoguruLevel(Protocol):

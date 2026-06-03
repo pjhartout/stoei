@@ -114,10 +114,10 @@ class LogPane(RichLog):
         if not hasattr(message, "record"):
             return
         record = message.record
-        level_obj = record["level"]  # type: ignore[index]
+        level_obj = record["level"]  # ty: ignore[not-subscriptable]
         level = level_obj.name
-        msg = record["message"]  # type: ignore[index]
-        timestamp_obj = record["time"]  # type: ignore[index]
+        msg = record["message"]  # ty: ignore[not-subscriptable]
+        timestamp_obj = record["time"]  # ty: ignore[not-subscriptable]
         timestamp = timestamp_obj.replace(tzinfo=None)
 
         # Post non-blocking message to the main thread

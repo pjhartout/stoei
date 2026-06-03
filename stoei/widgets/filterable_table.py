@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import Any, ClassVar
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -16,13 +16,10 @@ from textual.events import Key
 from textual.message import Message
 from textual.reactive import reactive
 from textual.widgets import DataTable, Input, Static
-from textual.widgets.data_table import ColumnKey, RowKey
+from textual.widgets.data_table import CellType, ColumnKey, RowKey
 
 from stoei.keybindings import Actions, KeybindingConfig, get_default_config
 from stoei.logger import get_logger
-
-if TYPE_CHECKING:
-    from textual.widgets.data_table import CellType
 
 logger = get_logger(__name__)
 
@@ -995,7 +992,7 @@ class FilterableDataTable(Vertical):
 
         for col_config in self._columns:
             try:
-                column = table.columns.get(col_config.key)  # type: ignore[arg-type]
+                column = table.columns.get(ColumnKey(col_config.key))
                 if column is not None and column.width is not None:
                     widths[col_config.key] = column.width
             except Exception:
@@ -1013,7 +1010,7 @@ class FilterableDataTable(Vertical):
 
         for col_key, col_width in widths.items():
             try:
-                column = table.columns.get(col_key)  # type: ignore[arg-type]
+                column = table.columns.get(ColumnKey(col_key))
                 if column is not None:
                     # Find the column config to get min/max constraints
                     col_config = next((c for c in self._columns if c.key == col_key), None)
