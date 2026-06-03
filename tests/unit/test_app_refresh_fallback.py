@@ -155,76 +155,73 @@ class TestErrorNotificationDeduplication:
             patch.object(app, "_post_ui_callback") as mock_call,
         ):
             # First failure
-            results: dict[str, object] = {"user_jobs": (None, None, 0, 0, 0)}
-            app._process_refresh_results(results)
+            app._apply_running_jobs_result(None)
             assert mock_call.call_count == 1
             assert app._error_notified.get("running_jobs") is True
 
             # Second failure - no new notification
             mock_call.reset_mock()
-            app._process_refresh_results(results)
+            app._apply_running_jobs_result(None)
             assert mock_call.call_count == 0
 
     def test_running_jobs_success_clears_error_flag(self) -> None:
         """Successful running jobs fetch clears the error flag."""
         app = SlurmMonitor()
         running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1")]
-        history_jobs = [("2", "job2", "COMPLETED", "0:00", "1", "node1")]
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "_post_ui_callback") as mock_call,
         ):
             # First failure
-            results_fail: dict[str, object] = {"user_jobs": (None, None, 0, 0, 0)}
-            app._process_refresh_results(results_fail)
+            app._apply_running_jobs_result(None)
             assert mock_call.call_count == 1
 
             # Success clears flag
-            results_ok: dict[str, object] = {"user_jobs": (running_jobs, history_jobs, 1, 0, 0)}
-            app._process_refresh_results(results_ok)
+            app._apply_running_jobs_result(running_jobs)
             assert app._error_notified.get("running_jobs") is False
 
             # Next failure re-notifies
             mock_call.reset_mock()
-            app._process_refresh_results(results_fail)
+            app._apply_running_jobs_result(None)
             assert mock_call.call_count == 1
 
     def test_independent_tracking_of_running_and_history(self) -> None:
-        """Running jobs and history errors are tracked independently."""
+        """Running jobs and history errors are tracked independently across loops."""
         app = SlurmMonitor()
         running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1")]
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "_post_ui_callback") as mock_call,
+            patch.object(app, "_post_ui_callback"),
         ):
-            # Running OK, history fails - should notify once for history
-            results: dict[str, object] = {"user_jobs": (running_jobs, None, 0, 0, 0)}
-            app._process_refresh_results(results)
-            assert mock_call.call_count == 1
+            # Fast loop: running OK
+            app._apply_running_jobs_result(running_jobs)
+            # Heavy loop: history fails
+            app._apply_fetch_result("history", (None, 0, 0, 0))
+
             assert app._error_notified.get("running_jobs") is False
             assert app._error_notified.get("history_jobs") is True
 
     def test_both_fail_simultaneously(self) -> None:
-        """Both running and history failing shows both notifications once."""
+        """Both running and history failing shows each notification once."""
         app = SlurmMonitor()
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "_post_ui_callback") as mock_call,
         ):
-            # Both fail
-            results: dict[str, object] = {"user_jobs": (None, None, 0, 0, 0)}
-            app._process_refresh_results(results)
-            # Running jobs failed notification
-            assert mock_call.call_count == 1
+            app._apply_running_jobs_result(None)
+            app._apply_fetch_result("history", (None, 0, 0, 0))
             assert app._error_notified.get("running_jobs") is True
+            assert app._error_notified.get("history_jobs") is True
+            both_count = mock_call.call_count
 
-            # Second cycle - no new notifications
+            # Second cycle - no new notifications (table updates aside)
             mock_call.reset_mock()
-            app._process_refresh_results(results)
-            assert mock_call.call_count == 0
+            app._apply_running_jobs_result(None)
+            app._apply_fetch_result("history", (None, 0, 0, 0))
+            assert mock_call.call_count < both_count
 
     def test_manual_refresh_resets_error_flags(self) -> None:
         """Manual refresh clears error flags so user always gets feedback."""
@@ -236,6 +233,7 @@ class TestErrorNotificationDeduplication:
 
         with (
             patch.object(app, "notify"),
+            patch.object(app, "_start_running_refresh_worker"),
             patch.object(app, "_start_refresh_worker"),
         ):
             app.action_refresh()
@@ -245,32 +243,20 @@ class TestErrorNotificationDeduplication:
     def test_history_processed_independently_when_running_fails(self) -> None:
         """Valid history data is still cached when running jobs fail."""
         app = SlurmMonitor()
-        history_jobs = [("2", "job2", "COMPLETED", "0:00", "1", "node1")]
+        history_jobs = [("2", "job2", "COMPLETED", "0", "0:00", "0:0", "node1", "t", "t", "t")]
 
         with (
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "_post_ui_callback"),
         ):
-            results: dict[str, object] = {"user_jobs": (None, history_jobs, 5, 1, 2)}
-            app._process_refresh_results(results)
+            # Fast loop failed (None), but the heavy loop still delivers history
+            app._apply_running_jobs_result(None)
+            app._apply_fetch_result("history", (history_jobs, 5, 1, 2))
 
             # History should be cached even though running jobs failed
             assert app._last_history_jobs == history_jobs
             assert app._last_history_stats == (5, 1, 2)
             assert app._error_notified.get("history_jobs") is False
-
-    def test_user_jobs_not_in_results(self) -> None:
-        """No notification or crash when user_jobs key is missing from results."""
-        app = SlurmMonitor()
-
-        with (
-            patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "_post_ui_callback") as mock_call,
-        ):
-            results: dict[str, object] = {}
-            app._process_refresh_results(results)
-            # No notifications when the key is simply missing
-            assert mock_call.call_count == 0
 
 
 class TestApplyFetchResult:
@@ -294,43 +280,46 @@ class TestApplyFetchResult:
         return instance
 
     # ------------------------------------------------------------------
-    # user_jobs — running jobs fail path
+    # history
     # ------------------------------------------------------------------
 
-    def test_user_jobs_running_fail_notifies_and_updates_table(self, app: SlurmMonitor) -> None:
-        """Failing running-jobs fetch notifies once and always schedules table update."""
+    def test_history_success_caches_and_schedules_table_update(self, app: SlurmMonitor) -> None:
+        """A successful history result caches the data and schedules a table update."""
+        app._last_running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1", "t", "t")]
+        history_jobs = [("2", "job2", "COMPLETED", "0", "0:00", "0:0", "node1", "t", "t", "t")]
+
+        with (
+            patch.object(app._job_cache, "_build_from_data") as mock_build,
+            patch.object(app, "_post_ui_callback") as mock_call,
+        ):
+            app._apply_fetch_result("history", (history_jobs, 3, 1, 2))
+
+        mock_build.assert_called_once_with(app._last_running_jobs, history_jobs, 3, 1, 2)
+        assert app._last_history_jobs == history_jobs
+        assert app._last_history_stats == (3, 1, 2)
+        assert mock_call.call_count == 1
+
+    def test_history_failure_notifies_once_and_keeps_cached(self, app: SlurmMonitor) -> None:
+        """A failed history fetch (None) notifies once and keeps the cached history."""
+        cached = [("2", "job2", "COMPLETED", "0", "0:00", "0:0", "node1", "t", "t", "t")]
+        app._last_history_jobs = cached
+        app._last_history_stats = (1, 0, 0)
+
         with (
             patch.object(app._job_cache, "_build_from_data"),
             patch.object(app, "_post_ui_callback") as mock_call,
         ):
-            app._apply_fetch_result("user_jobs", (None, None, 0, 0, 0))
-
-            # Error flag must be set
-            assert app._error_notified.get("running_jobs") is True
-            # _post_ui_callback called once: the warning notification lambda
-            # (the table update is also scheduled — two calls total; first is
-            # the notify lambda, second is _update_jobs_table)
-            assert mock_call.call_count == 2
-            # Second positional arg of the last call is _update_jobs_table (lambda)
-            # We just verify it was called — we don't invoke it (needs event loop).
-            assert mock_call.call_count >= 1
-
-    def test_user_jobs_running_fail_second_time_no_extra_notification(self, app: SlurmMonitor) -> None:
-        """Second consecutive running-jobs failure does not emit a second notification."""
-        with (
-            patch.object(app._job_cache, "_build_from_data"),
-            patch.object(app, "_post_ui_callback") as mock_call,
-        ):
-            app._apply_fetch_result("user_jobs", (None, None, 0, 0, 0))
+            app._apply_fetch_result("history", (None, 0, 0, 0))
             first_count = mock_call.call_count
+            assert app._error_notified.get("history_jobs") is True
 
             mock_call.reset_mock()
-            app._apply_fetch_result("user_jobs", (None, None, 0, 0, 0))
-            second_count = mock_call.call_count
+            app._apply_fetch_result("history", (None, 0, 0, 0))
+            # Second consecutive failure does not re-notify (fewer callbacks)
+            assert mock_call.call_count < first_count
 
-            # First run: 2 calls (notify + table update)
-            # Second run: only 1 call (table update, NO notify because flag already set)
-            assert second_count < first_count
+        # Cached history is preserved across failures
+        assert app._last_history_jobs == cached
 
     # ------------------------------------------------------------------
     # nodes
@@ -554,8 +543,8 @@ class TestOnRefreshComplete:
 
         assert app._initial_background_complete is True
 
-    def test_first_cycle_starts_auto_refresh_timer(self, app: SlurmMonitor) -> None:
-        """First cycle calls set_interval to set up the auto-refresh timer."""
+    def test_first_cycle_starts_heavy_refresh_timer(self, app: SlurmMonitor) -> None:
+        """First cycle registers the recurring heavy-refresh timer at the heavy interval."""
         app._initial_background_complete = False
 
         with (
@@ -564,7 +553,7 @@ class TestOnRefreshComplete:
         ):
             app._on_refresh_complete(is_first_cycle=True)
 
-        mock_set_interval.assert_called_once_with(app.refresh_interval, app._start_refresh_worker)
+        mock_set_interval.assert_called_once_with(app.heavy_refresh_interval, app._start_refresh_worker)
 
     def test_first_cycle_starts_auto_refresh(self, app: SlurmMonitor) -> None:
         """First cycle starts the auto-refresh timer."""
@@ -624,10 +613,7 @@ class TestJobInfoCacheInvalidation:
         app._job_info_cache = {"1": ("info1", None, None, None), "2": ("info2", None, None, None)}
 
         with patch.object(app, "_post_ui_callback"):
-            app._apply_fetch_result(
-                "user_jobs",
-                ([self._squeue("1", "RUNNING"), self._squeue("2", "RUNNING")], [], 0, 0, 0),
-            )
+            app._apply_running_jobs_result([self._squeue("1", "RUNNING"), self._squeue("2", "RUNNING")])
 
         assert "1" not in app._job_info_cache  # PENDING -> RUNNING: evicted
         assert "2" in app._job_info_cache  # RUNNING -> RUNNING: kept
@@ -638,10 +624,7 @@ class TestJobInfoCacheInvalidation:
         app._job_info_cache = {"1": ("info1", None, None, None), "2": ("info2", None, None, None)}
 
         with patch.object(app, "_post_ui_callback"):
-            app._apply_fetch_result(
-                "user_jobs",
-                ([self._squeue("1", "RUNNING"), self._squeue("2", "RUNNING")], [], 0, 0, 0),
-            )
+            app._apply_running_jobs_result([self._squeue("1", "RUNNING"), self._squeue("2", "RUNNING")])
 
         assert "1" not in app._job_info_cache  # PENDING -> RUNNING: evicted
         assert "2" in app._job_info_cache  # absent from old snapshot: left untouched
@@ -652,7 +635,7 @@ class TestJobInfoCacheInvalidation:
         app._job_info_cache = {"1": ("info1", None, None, None)}
 
         with patch.object(app, "_post_ui_callback"):
-            app._apply_fetch_result("user_jobs", ([], [], 0, 0, 0))
+            app._apply_running_jobs_result([])
 
         assert "1" not in app._job_info_cache
 
@@ -662,6 +645,109 @@ class TestJobInfoCacheInvalidation:
         app._job_info_cache = {"12345": ("info", None, None, None)}
 
         with patch.object(app, "_post_ui_callback"):
-            app._apply_fetch_result("user_jobs", ([], [], 0, 0, 0))
+            app._apply_running_jobs_result([])
 
         assert "12345" not in app._job_info_cache
+
+
+class TestRunningJobsRefreshDecoupling:
+    """Tests for the fast running-jobs loop being decoupled from the slow history loop.
+
+    The jobs-table "Time" column is driven by ``squeue`` and must refresh on its
+    own fast cadence without waiting for (or being gated by) the slow ``sacct``
+    history fetch. The fast loop rebuilds the table from fresh running jobs plus
+    the *cached* history; the slow loop rebuilds it from the *cached* running jobs
+    plus fresh history.
+    """
+
+    @pytest.fixture(autouse=True)
+    def reset_job_cache(self) -> None:
+        """Reset JobCache singleton before each test."""
+        JobCache.reset()
+
+    @pytest.fixture
+    def app(self) -> SlurmMonitor:
+        """Return a bare SlurmMonitor with widget-tree side-effects stubbed out."""
+        instance = SlurmMonitor()
+        instance._parse_node_infos = MagicMock(return_value=[])  # type: ignore[method-assign]
+        instance._compute_user_overview_cache = MagicMock()  # type: ignore[method-assign]
+        instance._calculate_cluster_stats = MagicMock(return_value=None)  # type: ignore[method-assign]
+        instance._compute_priority_overview_cache = MagicMock()  # type: ignore[method-assign]
+        return instance
+
+    def test_running_refresh_rebuilds_from_cached_history(self, app: SlurmMonitor) -> None:
+        """The fast loop rebuilds the table from fresh running jobs + cached history."""
+        cached_history = [("2", "job2", "COMPLETED", "0", "0:00", "0:0", "node1", "t", "t", "t")]
+        app._last_history_jobs = cached_history
+        app._last_history_stats = (1, 0, 0)
+
+        running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1", "t", "t")]
+
+        with (
+            patch.object(app._job_cache, "_build_from_data") as mock_build,
+            patch.object(app, "_post_ui_callback"),
+        ):
+            app._apply_running_jobs_result(running_jobs)
+
+        mock_build.assert_called_once_with(running_jobs, cached_history, 1, 0, 0)
+        assert app._last_running_jobs == running_jobs
+
+    def test_running_refresh_schedules_table_update(self, app: SlurmMonitor) -> None:
+        """The fast loop schedules a jobs-table UI update."""
+        running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1", "t", "t")]
+
+        with (
+            patch.object(app._job_cache, "_build_from_data"),
+            patch.object(app, "_update_jobs_table"),
+            patch.object(app, "_post_ui_callback") as mock_call,
+        ):
+            app._apply_running_jobs_result(running_jobs)
+
+        assert mock_call.call_count == 1
+
+    def test_running_refresh_does_not_reset_history_error_flag(self, app: SlurmMonitor) -> None:
+        """The fast loop must not clear the history error flag (no notification spam)."""
+        app._error_notified["history_jobs"] = True
+
+        running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1", "t", "t")]
+
+        with (
+            patch.object(app._job_cache, "_build_from_data"),
+            patch.object(app, "_post_ui_callback"),
+        ):
+            app._apply_running_jobs_result(running_jobs)
+
+        assert app._error_notified["history_jobs"] is True
+
+    def test_running_refresh_failure_keeps_old_data_and_notifies_once(self, app: SlurmMonitor) -> None:
+        """A failed running-jobs fetch (None) notifies once and does not rebuild the cache."""
+        with (
+            patch.object(app._job_cache, "_build_from_data") as mock_build,
+            patch.object(app, "_post_ui_callback") as mock_call,
+        ):
+            app._apply_running_jobs_result(None)
+            assert app._error_notified.get("running_jobs") is True
+            assert mock_call.call_count == 1
+
+            mock_call.reset_mock()
+            app._apply_running_jobs_result(None)
+            assert mock_call.call_count == 0
+
+        mock_build.assert_not_called()
+
+    def test_history_refresh_rebuilds_from_cached_running(self, app: SlurmMonitor) -> None:
+        """The slow loop's history result rebuilds the table from cached running jobs + fresh history."""
+        running_jobs = [("1", "job1", "RUNNING", "1:00", "1", "node1", "t", "t")]
+        app._last_running_jobs = running_jobs
+
+        new_history = [("2", "job2", "COMPLETED", "0", "00:10:00", "0:0", "node1", "t", "t", "t")]
+
+        with (
+            patch.object(app._job_cache, "_build_from_data") as mock_build,
+            patch.object(app, "_post_ui_callback"),
+        ):
+            app._apply_fetch_result("history", (new_history, 5, 1, 2))
+
+        mock_build.assert_called_once_with(running_jobs, new_history, 5, 1, 2)
+        assert app._last_history_jobs == new_history
+        assert app._last_history_stats == (5, 1, 2)
