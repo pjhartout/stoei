@@ -4,7 +4,6 @@
 from __future__ import annotations
 
 import argparse
-import random
 import sys
 
 # Constants for parsing
@@ -16,8 +15,6 @@ MIN_JOB_FIELDS_WITHOUT_USER = 8
 MIN_USER_INDEX = 2
 MIN_ALL_USERS_STATE_INDEX = 4
 MIN_USER_ONLY_STATE_INDEX = 2
-MIN_RANDOM_JOBS = 2
-MAX_RANDOM_JOBS = 10
 LEGACY_TUPLE_LEN_7 = 7
 LEGACY_TUPLE_LEN_8 = 8
 
@@ -352,15 +349,9 @@ def _get_job_pool(args: argparse.Namespace) -> tuple[list[tuple[str, ...]], bool
     return list(MOCK_JOBS_USER_ONLY), False
 
 
-def _select_random_jobs(jobs: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
-    """Randomly select jobs to simulate dynamic queue."""
-    if not jobs:
-        return []
-    num_jobs = random.randint(  # noqa: S311
-        min(len(jobs), MIN_RANDOM_JOBS),
-        min(len(jobs), MAX_RANDOM_JOBS),
-    )
-    return random.sample(jobs, num_jobs)
+def _select_jobs(jobs: list[tuple[str, ...]]) -> list[tuple[str, ...]]:
+    """Return the full job pool (deterministic, for stable test assertions)."""
+    return jobs
 
 
 def _print_header(using_all_users_jobs: bool, has_tres_field: bool) -> None:
@@ -399,8 +390,7 @@ def main() -> None:
     if args.user and using_all_users_jobs:
         jobs = [job for job in jobs if len(job) > MIN_USER_INDEX and job[MIN_USER_INDEX] == args.user]
 
-    # Randomly select jobs
-    selected_jobs = _select_random_jobs(jobs)
+    selected_jobs = _select_jobs(jobs)
 
     # Handle fixed-width output mode
     if args.Format is not None:

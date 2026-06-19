@@ -146,7 +146,7 @@ class TestGetRunningJobs:
 
         assert error is None
         assert isinstance(jobs, list)
-        assert len(jobs) >= 2  # Mock returns 2-5 random jobs
+        assert len(jobs) == 5  # Deterministic mock job pool
 
     def test_job_tuple_structure(self, mock_slurm_path: Path) -> None:
         from stoei.slurm.commands import get_running_jobs
