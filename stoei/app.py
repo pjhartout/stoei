@@ -2499,30 +2499,32 @@ class SlurmMonitor(App[None]):
             # Default to job info for jobs table
             self._show_job_info_for_row(event.data_table, event.row_key)
 
-    def _show_node_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
-        """Show node info for a specific row in the nodes table.
+    def _show_detail_for_row(self, table: DataTable, row_key: RowKey, noun: str, show: Callable[[str], None]) -> None:
+        """Extract the first-column identifier from a row and open its detail modal.
 
         Args:
             table: The DataTable containing the row.
             row_key: The key of the row to show info for.
+            noun: Entity name used in log and error messages (e.g. "node name").
+            show: Callback that opens the detail modal for the extracted identifier.
         """
         try:
             row_data = table.get_row(row_key)
-            node_name = str(row_data[0]).strip()
-            # Remove Rich markup tags if present
-            node_name = re.sub(r"\[.*?\]", "", node_name).strip()
-
-            if not node_name:
-                logger.warning(f"Could not extract node name from row {row_key}")
-                self.notify("Could not get node name from selected row", severity="error")
+            # Remove Rich markup tags if present.
+            value = re.sub(r"\[.*?\]", "", str(row_data[0])).strip()
+            if not value:
+                logger.warning(f"Could not extract {noun} from row {row_key}")
+                self.notify(f"Could not get {noun} from selected row", severity="error")
                 return
-
-            logger.info(f"Showing info for selected node {node_name}")
-            self._show_node_info(node_name)
-
+            logger.info(f"Showing info for selected {noun} {value}")
+            show(value)
         except (IndexError, KeyError):
-            logger.exception(f"Could not get node name from row {row_key}")
-            self.notify("Could not get node name from selected row", severity="error")
+            logger.exception(f"Could not get {noun} from row {row_key}")
+            self.notify(f"Could not get {noun} from selected row", severity="error")
+
+    def _show_node_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
+        """Show node info for a specific row in the nodes table."""
+        self._show_detail_for_row(table, row_key, "node name", self._show_node_info)
 
     def _show_node_info(self, node_name: str) -> None:
         """Show detailed information for a node.
@@ -2552,29 +2554,8 @@ class SlurmMonitor(App[None]):
         logger.debug(f"Displayed node info screen for {node_name}")
 
     def _show_user_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
-        """Show user info for a specific row in the users table.
-
-        Args:
-            table: The DataTable containing the row.
-            row_key: The key of the row to show info for.
-        """
-        try:
-            row_data = table.get_row(row_key)
-            username = str(row_data[0]).strip()
-            # Remove Rich markup tags if present
-            username = re.sub(r"\[.*?\]", "", username).strip()
-
-            if not username:
-                logger.warning(f"Could not extract username from row {row_key}")
-                self.notify("Could not get username from selected row", severity="error")
-                return
-
-            logger.info(f"Showing info for selected user {username}")
-            self._show_user_info(username)
-
-        except (IndexError, KeyError):
-            logger.exception(f"Could not get username from row {row_key}")
-            self.notify("Could not get username from selected row", severity="error")
+        """Show user info for a specific row in the users table."""
+        self._show_detail_for_row(table, row_key, "username", self._show_user_info)
 
     def _show_user_info(self, username: str) -> None:
         """Show detailed information for a user.
@@ -2711,29 +2692,8 @@ class SlurmMonitor(App[None]):
         logger.debug(f"Displayed user info screen for {username}")
 
     def _show_account_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
-        """Show account info for a specific row in the accounts table.
-
-        Args:
-            table: The DataTable containing the row.
-            row_key: The key of the row to show info for.
-        """
-        try:
-            row_data = table.get_row(row_key)
-            account_name = str(row_data[0]).strip()
-            # Remove Rich markup tags if present
-            account_name = re.sub(r"\[.*?\]", "", account_name).strip()
-
-            if not account_name:
-                logger.warning(f"Could not extract account name from row {row_key}")
-                self.notify("Could not get account name from selected row", severity="error")
-                return
-
-            logger.info(f"Showing info for selected account {account_name}")
-            self._show_account_info(account_name)
-
-        except (IndexError, KeyError):
-            logger.exception(f"Could not get account name from row {row_key}")
-            self.notify("Could not get account name from selected row", severity="error")
+        """Show account info for a specific row in the accounts table."""
+        self._show_detail_for_row(table, row_key, "account name", self._show_account_info)
 
     def _show_account_info(self, account_name: str) -> None:
         """Show detailed information for an account/institute.
