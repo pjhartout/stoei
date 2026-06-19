@@ -6,17 +6,12 @@ from unittest.mock import MagicMock, patch
 import pytest
 from stoei.app import SlurmMonitor
 from stoei.settings import DEFAULT_REFRESH_INTERVAL
-from stoei.slurm.cache import JobCache, JobState
+from stoei.slurm.cache import JobState
 from stoei.widgets.cluster_sidebar import ClusterStats
 
 
 class TestSlurmMonitorInit:
     """Tests for SlurmMonitor initialization."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     def test_init_sets_refresh_interval_from_settings(self) -> None:
         app = SlurmMonitor()
@@ -41,11 +36,6 @@ class TestSlurmMonitorInit:
 
 class TestFormatState:
     """Tests for the _format_state method."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:
@@ -98,11 +88,6 @@ class TestFormatState:
 
 class TestStartRefreshWorker:
     """Tests for the _start_refresh_worker method."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     def test_refresh_worker_uses_thread_mode(self) -> None:
         """Verify that the refresh worker is started with thread=True.
@@ -160,11 +145,6 @@ class TestStartRefreshWorker:
 
 class TestRefreshDataAsync:
     """Tests for the _refresh_data_async method."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture(autouse=True)
     def mock_energy_fetch(self) -> Generator[None, None, None]:
@@ -271,11 +251,6 @@ class TestRefreshDataAsync:
 
 class TestCalculateClusterStats:
     """Tests for the _calculate_cluster_stats method."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:
@@ -562,11 +537,6 @@ class TestCalculateClusterStats:
 class TestParseNodeStateDraining:
     """Tests for _parse_node_state handling of draining nodes."""
 
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
-
     @pytest.fixture
     def app(self) -> SlurmMonitor:
         """Create a SlurmMonitor instance for testing."""
@@ -618,11 +588,6 @@ class TestParseNodeStateDraining:
 
 class TestCalculateClusterStatsDraining:
     """Tests for _calculate_cluster_stats with draining nodes."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:
@@ -751,11 +716,6 @@ class TestCalculateClusterStatsDraining:
 
 class TestUpdateClusterSidebar:
     """Tests for the _update_cluster_sidebar method."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:

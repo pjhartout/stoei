@@ -4,18 +4,12 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from stoei.app import SlurmMonitor
-from stoei.slurm.cache import JobCache
 from stoei.widgets.cluster_sidebar import ClusterSidebar
 from stoei.widgets.tabs import TabContainer
 
 
 class TestAppClusterIntegration:
     """Integration tests for cluster features in the main app."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:
