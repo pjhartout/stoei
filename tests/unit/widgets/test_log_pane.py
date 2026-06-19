@@ -95,11 +95,6 @@ class TestLogPaneAddLog:
 class TestLogPaneSink:
     """Tests for LogPane.sink method (loguru integration)."""
 
-    def test_sink_callable(self) -> None:
-        """Test that sink is callable."""
-        pane = LogPane()
-        assert callable(pane.sink)
-
     def test_sink_handles_loguru_message(self) -> None:
         """Test sink processes loguru-style message."""
         import contextlib

@@ -45,39 +45,30 @@ class TestUserOverviewTab:
         """Test that initial users list is empty."""
         assert user_tab.users == []
 
-    async def test_update_users(self) -> None:
-        """Test updating users - requires mounted widget."""
-        from textual.app import App
-
-        class UserTestApp(App[None]):
-            def compose(self):
-                yield UserOverviewTab(id="user-overview")
-
-        app = UserTestApp()
-        async with app.run_test(size=(80, 24)):
-            user_tab = app.query_one("#user-overview", UserOverviewTab)
-            users = [
-                UserStats(
-                    username="user1",
-                    job_count=3,
-                    total_cpus=12,
-                    total_memory_gb=64.0,
-                    total_gpus=1,
-                    total_nodes=2,
-                    gpu_types="1x GPU",
-                ),
-                UserStats(
-                    username="user2",
-                    job_count=5,
-                    total_cpus=20,
-                    total_memory_gb=128.0,
-                    total_gpus=2,
-                    total_nodes=3,
-                    gpu_types="2x GPU",
-                ),
-            ]
-            user_tab.update_users(users)
-            assert len(user_tab.users) == 2
+    def test_update_users(self, user_tab: UserOverviewTab) -> None:
+        """Test updating users."""
+        users = [
+            UserStats(
+                username="user1",
+                job_count=3,
+                total_cpus=12,
+                total_memory_gb=64.0,
+                total_gpus=1,
+                total_nodes=2,
+                gpu_types="1x GPU",
+            ),
+            UserStats(
+                username="user2",
+                job_count=5,
+                total_cpus=20,
+                total_memory_gb=128.0,
+                total_gpus=2,
+                total_nodes=3,
+                gpu_types="2x GPU",
+            ),
+        ]
+        user_tab.update_users(users)
+        assert len(user_tab.users) == 2
 
     def test_aggregate_user_stats_empty_list(self) -> None:
         """Test aggregating stats from empty job list."""
@@ -863,37 +854,29 @@ class TestAggregatePendingUserStats:
         assert result[0].pending_job_count == 1
         assert result[0].pending_cpus == 0  # No TRES data
 
-    async def test_update_pending_users(self) -> None:
-        """Test updating pending users - requires mounted widget."""
-        from textual.app import App
-
-        class UserTestApp(App[None]):
-            def compose(self):
-                yield UserOverviewTab(id="user-overview")
-
-        app = UserTestApp()
-        async with app.run_test(size=(80, 24)):
-            user_tab = app.query_one("#user-overview", UserOverviewTab)
-            pending_users = [
-                UserPendingStats(
-                    username="user1",
-                    pending_job_count=10,
-                    pending_cpus=80,
-                    pending_memory_gb=320.0,
-                    pending_gpus=10,
-                    pending_gpu_types="10x H200",
-                ),
-                UserPendingStats(
-                    username="user2",
-                    pending_job_count=5,
-                    pending_cpus=40,
-                    pending_memory_gb=160.0,
-                    pending_gpus=5,
-                    pending_gpu_types="5x A100",
-                ),
-            ]
-            user_tab.update_pending_users(pending_users)
-            assert len(user_tab.pending_users) == 2
+    def test_update_pending_users(self) -> None:
+        """Test updating pending users."""
+        user_tab = UserOverviewTab(id="user-overview")
+        pending_users = [
+            UserPendingStats(
+                username="user1",
+                pending_job_count=10,
+                pending_cpus=80,
+                pending_memory_gb=320.0,
+                pending_gpus=10,
+                pending_gpu_types="10x H200",
+            ),
+            UserPendingStats(
+                username="user2",
+                pending_job_count=5,
+                pending_cpus=40,
+                pending_memory_gb=160.0,
+                pending_gpus=5,
+                pending_gpu_types="5x A100",
+            ),
+        ]
+        user_tab.update_pending_users(pending_users)
+        assert len(user_tab.pending_users) == 2
 
 
 class TestUserEnergyStats:

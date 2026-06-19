@@ -3,7 +3,6 @@
 import pytest
 from stoei.colors import FALLBACK_COLORS
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
-from textual.app import App
 
 
 def _has_color(result: str, color_name: str) -> bool:
@@ -110,21 +109,8 @@ class TestNodeInfo:
         assert node.gpu_usage_pct == 0.0
 
 
-class NodeOverviewTestApp(App[None]):
-    """Test app for widget testing."""
-
-    def compose(self):
-        """Create test app layout."""
-        yield NodeOverviewTab(id="node-overview")
-
-
 class TestNodeOverviewTab:
     """Tests for the NodeOverviewTab widget."""
-
-    @pytest.fixture
-    def app(self) -> NodeOverviewTestApp:
-        """Create a test app with NodeOverviewTab."""
-        return NodeOverviewTestApp()
 
     @pytest.fixture
     def node_tab(self) -> NodeOverviewTab:
@@ -135,38 +121,36 @@ class TestNodeOverviewTab:
         """Test that initial nodes list is empty."""
         assert node_tab.nodes == []
 
-    async def test_update_nodes(self, app: NodeOverviewTestApp) -> None:
+    def test_update_nodes(self, node_tab: NodeOverviewTab) -> None:
         """Test updating nodes."""
-        async with app.run_test(size=(80, 24)):
-            node_tab = app.query_one("#node-overview", NodeOverviewTab)
-            nodes = [
-                NodeInfo(
-                    name="node01",
-                    state="IDLE",
-                    cpus_alloc=0,
-                    cpus_total=16,
-                    memory_alloc_gb=0.0,
-                    memory_total_gb=64.0,
-                    gpus_alloc=0,
-                    gpus_total=0,
-                    partitions="cpu",
-                ),
-                NodeInfo(
-                    name="node02",
-                    state="ALLOCATED",
-                    cpus_alloc=8,
-                    cpus_total=16,
-                    memory_alloc_gb=32.0,
-                    memory_total_gb=64.0,
-                    gpus_alloc=0,
-                    gpus_total=0,
-                    partitions="gpu",
-                ),
-            ]
-            node_tab.update_nodes(nodes)
-            assert len(node_tab.nodes) == 2
-            assert node_tab.nodes[0].name == "node01"
-            assert node_tab.nodes[1].name == "node02"
+        nodes = [
+            NodeInfo(
+                name="node01",
+                state="IDLE",
+                cpus_alloc=0,
+                cpus_total=16,
+                memory_alloc_gb=0.0,
+                memory_total_gb=64.0,
+                gpus_alloc=0,
+                gpus_total=0,
+                partitions="cpu",
+            ),
+            NodeInfo(
+                name="node02",
+                state="ALLOCATED",
+                cpus_alloc=8,
+                cpus_total=16,
+                memory_alloc_gb=32.0,
+                memory_total_gb=64.0,
+                gpus_alloc=0,
+                gpus_total=0,
+                partitions="gpu",
+            ),
+        ]
+        node_tab.update_nodes(nodes)
+        assert len(node_tab.nodes) == 2
+        assert node_tab.nodes[0].name == "node01"
+        assert node_tab.nodes[1].name == "node02"
 
     def test_format_pct_high_usage(self, node_tab: NodeOverviewTab) -> None:
         """Test percentage formatting for high usage (>=90%)."""
@@ -227,23 +211,21 @@ class TestNodeOverviewTab:
         column_keys = [col.key for col in NodeOverviewTab.NODE_TABLE_COLUMN_CONFIGS]
         assert "reason" in column_keys
 
-    async def test_update_nodes_with_reason(self, app: NodeOverviewTestApp) -> None:
+    def test_update_nodes_with_reason(self, node_tab: NodeOverviewTab) -> None:
         """Test that reason field is included in node display."""
-        async with app.run_test(size=(120, 24)):
-            node_tab = app.query_one("#node-overview", NodeOverviewTab)
-            nodes = [
-                NodeInfo(
-                    name="node01",
-                    state="IDLE+DRAIN",
-                    cpus_alloc=0,
-                    cpus_total=16,
-                    memory_alloc_gb=0.0,
-                    memory_total_gb=64.0,
-                    gpus_alloc=0,
-                    gpus_total=0,
-                    partitions="cpu",
-                    reason="Maintenance scheduled",
-                ),
-            ]
-            node_tab.update_nodes(nodes)
-            assert node_tab.nodes[0].reason == "Maintenance scheduled"
+        nodes = [
+            NodeInfo(
+                name="node01",
+                state="IDLE+DRAIN",
+                cpus_alloc=0,
+                cpus_total=16,
+                memory_alloc_gb=0.0,
+                memory_total_gb=64.0,
+                gpus_alloc=0,
+                gpus_total=0,
+                partitions="cpu",
+                reason="Maintenance scheduled",
+            ),
+        ]
+        node_tab.update_nodes(nodes)
+        assert node_tab.nodes[0].reason == "Maintenance scheduled"

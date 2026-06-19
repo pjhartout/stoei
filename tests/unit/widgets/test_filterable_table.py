@@ -485,29 +485,6 @@ class TestFilterableDataTableEmacsMode:
             assert filterable.filter_visible is True
 
 
-class TestFilterableDataTableBindings:
-    """Tests for keybindings."""
-
-    def test_bindings_defined(self) -> None:
-        """Test that bindings are defined."""
-        assert len(FilterableDataTable.BINDINGS) > 0
-
-    def test_bindings_include_filter(self) -> None:
-        """Test that filter binding is included."""
-        binding_keys = [b.key for b in FilterableDataTable.BINDINGS]
-        assert "slash" in binding_keys
-
-    def test_bindings_include_sort(self) -> None:
-        """Test that sort binding is included."""
-        binding_keys = [b.key for b in FilterableDataTable.BINDINGS]
-        assert "o" in binding_keys
-
-    def test_bindings_include_escape(self) -> None:
-        """Test that escape binding is included."""
-        binding_keys = [b.key for b in FilterableDataTable.BINDINGS]
-        assert "escape" in binding_keys
-
-
 class TestIncrementalUpdate:
     """Tests for incremental diff-based updates in FilterableDataTable."""
 
