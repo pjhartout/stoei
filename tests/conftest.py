@@ -4,8 +4,19 @@ import os
 from pathlib import Path
 
 import pytest
+from stoei.slurm.cache import JobCache
 
 from tests.mocks import MOCKS_DIR
+
+
+@pytest.fixture(autouse=True)
+def _reset_job_cache() -> None:
+    """Reset the JobCache singleton before every test for isolation.
+
+    Replaces ~38 per-class ``reset_job_cache`` fixtures that all did the same
+    thing; centralizing here keeps test files focused on behavior.
+    """
+    JobCache.reset()
 
 
 @pytest.fixture(autouse=True)

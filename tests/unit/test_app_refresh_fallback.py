@@ -4,16 +4,10 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 from stoei.app import SlurmMonitor
-from stoei.slurm.cache import JobCache
 
 
 class TestRefreshFallback:
     """Tests for partial failure handling in _handle_refresh_fallback."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     def test_refresh_running_ok_history_ok(self) -> None:
         """Test normal case where both succeed."""
@@ -101,11 +95,6 @@ class TestRefreshFallback:
 
 class TestErrorNotificationDeduplication:
     """Tests for notification deduplication on repeated refresh failures."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     def test_history_failure_notifies_once(self) -> None:
         """First history failure shows notification, second does not."""
@@ -261,11 +250,6 @@ class TestErrorNotificationDeduplication:
 
 class TestApplyFetchResult:
     """Tests for _apply_fetch_result — one test per label."""
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:
@@ -521,11 +505,6 @@ class TestApplyFetchResult:
 class TestOnRefreshComplete:
     """Tests for _on_refresh_complete — first-cycle and subsequent-cycle behaviour."""
 
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
-
     @pytest.fixture
     def app(self) -> SlurmMonitor:
         """Return a bare SlurmMonitor instance."""
@@ -586,11 +565,6 @@ class TestJobInfoCacheInvalidation:
     output). A refresh must evict only entries whose state changed so the
     modal re-fetches them, while unchanged jobs keep their cached entry.
     """
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:
@@ -659,11 +633,6 @@ class TestRunningJobsRefreshDecoupling:
     the *cached* history; the slow loop rebuilds it from the *cached* running jobs
     plus fresh history.
     """
-
-    @pytest.fixture(autouse=True)
-    def reset_job_cache(self) -> None:
-        """Reset JobCache singleton before each test."""
-        JobCache.reset()
 
     @pytest.fixture
     def app(self) -> SlurmMonitor:
