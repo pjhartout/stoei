@@ -1,7 +1,6 @@
 """Main Textual TUI application for stoei."""
 
 import contextlib
-import re
 from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
@@ -57,7 +56,6 @@ from stoei.slurm.commands import (
     get_running_jobs,
     get_wait_time_job_history,
 )
-from stoei.slurm.formatters import format_compact_timeline
 from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
     calculate_total_gpus,
@@ -67,6 +65,7 @@ from stoei.slurm.gpu_parser import (
 )
 from stoei.slurm.parser import parse_sprio_output, parse_sshare_output
 from stoei.slurm.validation import check_slurm_available, get_current_username
+from stoei.table_controller import TableController
 from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
 from stoei.widgets.cluster_sidebar import ClusterSidebar
 from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
@@ -268,6 +267,8 @@ class SlurmMonitor(App[None]):
         self._init_update_generation_counters()
         # Collaborator owning the job/node/user/account detail-modal flows.
         self._detail: DetailController = DetailController(self)
+        # Collaborator owning the jobs-table / sidebar / overview render flows.
+        self._tables: TableController = TableController(self)
 
     def _init_refresh_state(self) -> None:
         """Initialise the data-refresh state: timers, workers, cache, and snapshots.
@@ -1352,76 +1353,16 @@ class SlurmMonitor(App[None]):
             logger.debug(f"Failed to toggle loading indicator: {exc}")
 
     def _update_jobs_table(self, job_rows: list[tuple[str, ...]]) -> None:
-        """Push pre-computed job rows into the jobs table widget (main thread only).
-
-        Uses a generation counter so that if multiple updates are queued
-        (e.g. after returning from another tmux tab), only the latest one
-        actually rebuilds the table.
-
-        Args:
-            job_rows: Pre-computed job table rows ready for display.
-        """
-        self._jobs_update_gen += 1
-        gen = self._jobs_update_gen
-        try:
-            jobs_filterable = self.query_one("#jobs-filterable-table", FilterableDataTable)
-
-            def _apply_jobs() -> None:
-                if gen != self._jobs_update_gen:
-                    return
-                jobs_filterable.set_data(job_rows)
-                jobs_filterable.display = len(job_rows) > 0
-                logger.debug(f"Jobs table updated: {len(job_rows)} jobs")
-
-            self.call_later(_apply_jobs)
-        except Exception:
-            logger.exception("Failed to update jobs table")
+        """Push pre-computed job rows into the jobs table widget (main thread only)."""
+        self._tables.update_jobs_table(job_rows)
 
     def _sorted_jobs_for_display(self, jobs: list[Job]) -> list[Job]:
-        """Sort jobs for stable, user-friendly display.
-
-        Ordering:
-        - Active jobs first
-        - Pending jobs above running jobs (newly-submitted jobs are usually pending)
-        - Newest job IDs first (best-effort by numeric prefix)
-        """
-
-        def _job_id_number(job_id: str) -> int:
-            match = re.match(r"^(?P<num>\d+)", job_id)
-            if match is None:
-                return 0
-            try:
-                return int(match.group("num"))
-            except ValueError:
-                return 0
-
-        def _sort_key(job: Job) -> tuple[int, int, int]:
-            active_rank = 0 if job.is_active else 1
-            pending_rank = 0 if job.state_category == JobState.PENDING else 1
-            job_num = _job_id_number(job.job_id)
-            return (active_rank, pending_rank, -job_num)
-
-        return sorted(jobs, key=_sort_key)
+        """Sort jobs for stable, user-friendly display."""
+        return self._tables.sorted_jobs_for_display(jobs)
 
     def _job_row_values(self, job: Job) -> list[str]:
         """Build the row values for a job."""
-        state_display = self._format_state(job.state, job.state_category)
-        timeline = format_compact_timeline(
-            job.submit_time,
-            job.start_time,
-            job.end_time,
-            job.state,
-            job.restarts,
-        )
-        return [
-            job.job_id,
-            job.name,
-            state_display,
-            job.time,
-            job.nodes,
-            job.node_list,
-            timeline,
-        ]
+        return self._tables.job_row_values(job)
 
     def _format_state(self, state: str, category: JobState) -> str:
         """Format job state with color coding.
@@ -1445,39 +1386,12 @@ class SlurmMonitor(App[None]):
         return state_formats.get(category, state)
 
     def _update_cluster_sidebar(self) -> None:
-        """Update the cluster sidebar with current statistics.
-
-        Uses pre-computed cluster stats from background worker to avoid blocking UI.
-        Falls back to computing on-demand if cache is empty (initial load).
-        """
-        try:
-            sidebar = self.query_one("#cluster-sidebar", ClusterSidebar)
-            # Use cached cluster stats (computed in background worker)
-            # Fall back to computing if cache is empty (shouldn't happen after initial load)
-            stats = self._cached_cluster_stats if self._cached_cluster_stats else self._calculate_cluster_stats()
-            sidebar.update_stats(stats)
-            is_cached = self._cached_cluster_stats is not None
-            logger.debug(
-                f"Updated cluster sidebar: {stats.total_nodes} nodes, {stats.total_cpus} CPUs (cached={is_cached})"
-            )
-        except Exception as exc:
-            logger.error(f"Failed to update cluster sidebar: {exc}", exc_info=True)
+        """Update the cluster sidebar with current statistics."""
+        self._tables.update_cluster_sidebar()
 
     def _update_cluster_sidebar_with_stats(self, stats: ClusterStats) -> None:
-        """Update the cluster sidebar using pre-computed stats (main thread only).
-
-        Avoids reading the shared ``_cached_cluster_stats`` field, which may be
-        overwritten by another worker-thread branch before the callback runs.
-
-        Args:
-            stats: Pre-computed cluster stats captured by the calling branch.
-        """
-        try:
-            sidebar = self.query_one("#cluster-sidebar", ClusterSidebar)
-            sidebar.update_stats(stats)
-            logger.debug(f"Updated cluster sidebar: {stats.total_nodes} nodes, {stats.total_cpus} CPUs (pre-computed)")
-        except Exception as exc:
-            logger.error(f"Failed to update cluster sidebar: {exc}", exc_info=True)
+        """Update the cluster sidebar using pre-computed stats (main thread only)."""
+        self._tables.update_cluster_sidebar_with_stats(stats)
 
     def _parse_node_state(self, state: str, stats: ClusterStats) -> bool:
         """Delegate to ``stoei.cluster_stats.parse_node_state``."""
@@ -1522,32 +1436,8 @@ class SlurmMonitor(App[None]):
         return calculate_cluster_stats(self._cluster_nodes, self._all_users_jobs, self._wait_time_jobs)
 
     def _update_node_overview(self) -> None:
-        """Update the node overview tab using cached node infos.
-
-        Uses a generation counter to skip stale updates and a staleness
-        guard to skip work when the user has already switched away.
-        """
-        self._nodes_update_gen += 1
-        gen = self._nodes_update_gen
-        try:
-            node_tab = self.query_one("#node-overview", NodeOverviewTab)
-            node_infos = self._cached_node_infos if self._cached_node_infos else self._parse_node_infos()
-
-            def _guarded() -> None:
-                if gen != self._nodes_update_gen:
-                    return
-                try:
-                    tc = self.query_one("#tab-container", TabContainer)
-                    if tc.active_tab != "nodes":
-                        self._dirty_nodes_tab = True
-                        return
-                except Exception:
-                    return
-                node_tab.update_nodes(node_infos)
-
-            self.call_later(_guarded)
-        except Exception as exc:
-            logger.error(f"Failed to update node overview: {exc}", exc_info=True)
+        """Update the node overview tab using cached node infos."""
+        self._tables.update_node_overview()
 
     def _parse_node_infos(self) -> list[NodeInfo]:
         """Parse cluster node data into NodeInfo objects.
@@ -1792,36 +1682,7 @@ class SlurmMonitor(App[None]):
         Args:
             users: List of all running user statistics.
         """
-        try:
-            summary = self.query_one("#my-usage-summary", Static)
-        except Exception:
-            return
-
-        my_stats = next((u for u in users if u.username == self._current_username), None)
-        if my_stats is None:
-            summary.update("My Usage: No running jobs")
-            return
-
-        parts = [
-            f"{my_stats.total_cpus} CPUs",
-            f"{my_stats.total_memory_gb:.1f} GB RAM",
-        ]
-        if my_stats.total_gpus > 0:
-            gpu_label = f"{my_stats.total_gpus} GPUs"
-            if my_stats.gpu_types:
-                gpu_label += f" ({my_stats.gpu_types})"
-            parts.append(gpu_label)
-        parts.append(f"{my_stats.total_nodes} Nodes")
-
-        x = my_stats.job_count
-        y = my_stats.array_count
-        z = my_stats.plain_job_count
-        task_word = "task" if x == 1 else "tasks"
-        array_word = "array" if y == 1 else "arrays"
-        job_word = "job" if z == 1 else "jobs"
-        parts.append(f"{x} {task_word} ({y} {array_word}, {z} {job_word})")
-
-        summary.update(f"My Usage: {' | '.join(parts)}")
+        self._tables.update_my_usage_summary(users)
 
     def _apply_priority_overview_from_cache(self) -> None:
         """Apply cached priority overview data to the UI (main thread only).
