@@ -3,6 +3,7 @@
 import subprocess
 import threading
 import time
+from collections.abc import Iterator
 from datetime import datetime, timedelta
 
 from stoei.logger import get_logger
@@ -982,6 +983,32 @@ ENERGY_VALID_STATES = frozenset(
 )
 
 
+def _iter_pipe_rows(stdout: str, num_fields: int, *, strip: bool = False) -> Iterator[list[str]]:
+    """Yield pipe-delimited rows from command output that have enough fields.
+
+    Splits each non-blank line on "|", optionally strips whitespace from every
+    field, and yields the resulting list only when it contains at least
+    ``num_fields`` elements. Callers slice to ``num_fields`` and apply any
+    additional per-row filtering themselves.
+
+    Args:
+        stdout: Raw command stdout.
+        num_fields: Minimum number of "|"-separated fields a row must contain.
+        strip: If True, strip whitespace from each field before yielding.
+
+    Yields:
+        The list of fields for each qualifying row.
+    """
+    for line in stdout.strip().split("\n"):
+        if not line.strip():
+            continue
+        parts = line.split("|")
+        if strip:
+            parts = [p.strip() for p in parts]
+        if len(parts) >= num_fields:
+            yield parts
+
+
 def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str | None]:
     """Get completed job history for all users for energy calculations.
 
@@ -1041,22 +1068,16 @@ def get_energy_job_history(months: int = 6) -> tuple[list[tuple[str, ...]], str 
 
     # Parse pipe-delimited output
     jobs: list[tuple[str, ...]] = []
-    lines = result.stdout.strip().split("\n")
     skipped_states = 0
 
-    for line in lines:
-        if not line.strip():
+    # We expect 6 fields: JobID, User, Elapsed, NCPUS, AllocTRES, State
+    for parts in _iter_pipe_rows(result.stdout, len(ENERGY_HISTORY_FIELDS)):
+        # Filter by state - get the base state (e.g., "CANCELLED" from "CANCELLED by 12345")
+        state = parts[5].split()[0] if parts[5] else ""
+        if state not in ENERGY_VALID_STATES:
+            skipped_states += 1
             continue
-
-        parts = line.split("|")
-        # We expect 6 fields: JobID, User, Elapsed, NCPUS, AllocTRES, State
-        if len(parts) >= len(ENERGY_HISTORY_FIELDS):
-            # Filter by state - get the base state (e.g., "CANCELLED" from "CANCELLED by 12345")
-            state = parts[5].split()[0] if parts[5] else ""
-            if state not in ENERGY_VALID_STATES:
-                skipped_states += 1
-                continue
-            jobs.append(tuple(parts[: len(ENERGY_HISTORY_FIELDS)]))
+        jobs.append(tuple(parts[: len(ENERGY_HISTORY_FIELDS)]))
 
     _sacct_mark_success()
     logger.info(
@@ -1127,22 +1148,16 @@ def get_wait_time_job_history(hours: int = 1) -> tuple[list[tuple[str, ...]], st
 
     # Parse pipe-delimited output
     jobs: list[tuple[str, ...]] = []
-    lines = result.stdout.strip().split("\n")
 
     # Field index for Start time in WAIT_TIME_FIELDS
     start_time_idx = WAIT_TIME_FIELDS.index("Start")
 
-    for line in lines:
-        if not line.strip():
-            continue
-
-        parts = line.split("|")
-        # We expect 5 fields: JobID, Partition, State, Submit, Start
-        if len(parts) >= len(WAIT_TIME_FIELDS):
-            # Filter out jobs with Unknown/empty start times (still pending)
-            start_time = parts[start_time_idx].strip() if len(parts) > start_time_idx else ""
-            if start_time and start_time.lower() not in ("unknown", "none", "n/a", ""):
-                jobs.append(tuple(parts[: len(WAIT_TIME_FIELDS)]))
+    # We expect 5 fields: JobID, Partition, State, Submit, Start
+    for parts in _iter_pipe_rows(result.stdout, len(WAIT_TIME_FIELDS)):
+        # Filter out jobs with Unknown/empty start times (still pending)
+        start_time = parts[start_time_idx].strip() if len(parts) > start_time_idx else ""
+        if start_time and start_time.lower() not in ("unknown", "none", "n/a", ""):
+            jobs.append(tuple(parts[: len(WAIT_TIME_FIELDS)]))
 
     _sacct_mark_success()
     logger.info(f"Fetched {len(jobs)} jobs from {hours}-hour history for wait time calculation")
@@ -1193,15 +1208,8 @@ def get_fair_share_priority(
 
     # Parse pipe-delimited output
     entries: list[tuple[str, ...]] = []
-    lines = result.stdout.strip().split("\n")
-
-    for line in lines:
-        if not line.strip():
-            continue
-
-        parts = line.split("|")
-        if len(parts) >= len(SSHARE_FIELDS):
-            entries.append(tuple(parts[: len(SSHARE_FIELDS)]))
+    for parts in _iter_pipe_rows(result.stdout, len(SSHARE_FIELDS)):
+        entries.append(tuple(parts[: len(SSHARE_FIELDS)]))
 
     logger.info(f"Fetched {len(entries)} fair-share entries")
     return entries, None
@@ -1253,19 +1261,10 @@ def get_pending_job_priority(
         logger.warning(f"sprio returned non-zero exit code: {result.returncode}, error: {error_msg}")
         return [], f"sprio error: {error_msg}"
 
-    # Parse pipe-delimited output
+    # Parse pipe-delimited output (whitespace stripped from each field)
     entries: list[tuple[str, ...]] = []
-    lines = result.stdout.strip().split("\n")
-
-    for line in lines:
-        if not line.strip():
-            continue
-
-        parts = line.split("|")
-        # Clean up whitespace in each field
-        cleaned_parts = [p.strip() for p in parts]
-        if len(cleaned_parts) >= len(SPRIO_FIELDS):
-            entries.append(tuple(cleaned_parts[: len(SPRIO_FIELDS)]))
+    for cleaned_parts in _iter_pipe_rows(result.stdout, len(SPRIO_FIELDS), strip=True):
+        entries.append(tuple(cleaned_parts[: len(SPRIO_FIELDS)]))
 
     logger.info(f"Fetched {len(entries)} pending job priority entries")
     return entries, None

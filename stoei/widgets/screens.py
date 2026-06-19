@@ -21,6 +21,7 @@ from textual.widgets import Button, Input, Static
 from stoei.editor import open_in_editor
 from stoei.logger import get_logger
 from stoei.settings import load_settings
+from stoei.widgets.loading_indicator import SPINNER_FRAMES
 
 logger = get_logger(__name__)
 
@@ -89,7 +90,7 @@ class LogViewerScreen(Screen[None]):
     )
 
     # Spinner frames for loading indicator
-    SPINNER_FRAMES: ClassVar[tuple[str, ...]] = ("⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏")
+    SPINNER_FRAMES: ClassVar[tuple[str, ...]] = SPINNER_FRAMES
 
     def __init__(self, filepath: str, log_type: LogType, max_lines: int | None = None) -> None:
         """Initialize the log viewer screen.

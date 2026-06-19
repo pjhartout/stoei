@@ -12,6 +12,7 @@ from textual.widgets import Label, ProgressBar, Static
 
 from stoei.colors import get_theme_colors
 from stoei.logger import get_logger
+from stoei.widgets.loading_indicator import SPINNER_FRAMES
 
 logger = get_logger(__name__)
 
@@ -125,18 +126,7 @@ class LoadingScreen(Screen[None]):
     }
     """
 
-    SPINNER_FRAMES: ClassVar[tuple[str, ...]] = (
-        "⠋",
-        "⠙",
-        "⠹",
-        "⠸",
-        "⠼",
-        "⠴",
-        "⠦",
-        "⠧",
-        "⠇",
-        "⠏",
-    )
+    SPINNER_FRAMES: ClassVar[tuple[str, ...]] = SPINNER_FRAMES
 
     def __init__(
         self,
