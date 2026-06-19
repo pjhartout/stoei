@@ -1,7 +1,6 @@
 """TUI widgets for stoei."""
 
 from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats
-from stoei.widgets.job_stats import JobStats
 from stoei.widgets.loading_screen import LoadingScreen, LoadingStep
 from stoei.widgets.log_pane import LogPane
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
@@ -16,7 +15,6 @@ __all__ = [
     "ClusterStats",
     "JobInfoScreen",
     "JobInputScreen",
-    "JobStats",
     "LoadingScreen",
     "LoadingStep",
     "LogPane",

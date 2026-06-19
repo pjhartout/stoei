@@ -1161,11 +1161,14 @@ class TestLogViewerAsyncLoading:
 
         app = TestApp()
         async with app.run_test(size=(80, 24)) as pilot:
-            # Wait for async loading to complete
             await pilot.pause()
             screen = app.screen
-            # After loading completes, loading container should be hidden
             loading_container = screen.query_one("#log-loading-container")
+            # Poll until the threaded load finishes (a single pause races it).
+            for _ in range(50):
+                if "hidden" in loading_container.classes:
+                    break
+                await pilot.pause()
             assert "hidden" in loading_container.classes
 
     async def test_async_load_shows_content_after_load(self, tmp_path: Path) -> None:
@@ -1184,8 +1187,12 @@ class TestLogViewerAsyncLoading:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            # Content should be visible
             content_scroll = screen.query_one("#log-content-scroll")
+            for _ in range(50):
+                if "hidden" not in content_scroll.classes:
+                    break
+                await pilot.pause()
+            # Content should be visible
             assert "hidden" not in content_scroll.classes
             # Content should contain the file data
             content_widget = screen.query_one("#log-content-text", Static)
@@ -1203,8 +1210,12 @@ class TestLogViewerAsyncLoading:
         async with app.run_test(size=(80, 24)) as pilot:
             await pilot.pause()
             screen = app.screen
-            # Error container should be visible
             error_container = screen.query_one("#log-error-container")
+            for _ in range(50):
+                if "hidden" not in error_container.classes:
+                    break
+                await pilot.pause()
+            # Error container should be visible
             assert "hidden" not in error_container.classes
             # Content scroll should be hidden
             content_scroll = screen.query_one("#log-content-scroll")

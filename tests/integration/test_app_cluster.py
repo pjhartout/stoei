@@ -59,7 +59,7 @@ class TestAppClusterIntegration:
                         "AllocMem": "0",
                     }
                 ]
-                app._update_ui_from_cache()
+                app._update_cluster_sidebar()
                 sidebar = app.query_one("#cluster-sidebar", ClusterSidebar)
                 assert sidebar.stats.total_nodes == 1
 

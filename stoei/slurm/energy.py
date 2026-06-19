@@ -119,18 +119,6 @@ def _get_cached_tdp_values() -> tuple[dict[str, int], int, int]:
     )
 
 
-def reload_tdp_values() -> None:
-    """Force reload of TDP values from the JSON file.
-
-    Call this after editing the tdp_values.json file to pick up changes.
-    """
-    _tdp_cache.gpu_tdp = None
-    _tdp_cache.default_gpu_tdp = None
-    _tdp_cache.cpu_tdp_per_core = None
-    _get_cached_tdp_values()  # Reload immediately
-    logger.info("TDP values reloaded from configuration file")
-
-
 def get_gpu_tdp(gpu_type: str) -> int:
     """Get the TDP (Thermal Design Power) for a GPU type.
 
@@ -347,12 +335,3 @@ def parse_cpu_count_from_tres(tres_str: str) -> int:
             pass
 
     return 0
-
-
-def get_tdp_file_path() -> Path:
-    """Get the path to the TDP values JSON file.
-
-    Returns:
-        Path to the tdp_values.json file.
-    """
-    return _TDP_JSON_PATH
