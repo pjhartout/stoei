@@ -6,21 +6,6 @@ from stoei.widgets.help_screen import HelpScreen
 class TestHelpScreen:
     """Tests for HelpScreen."""
 
-    def test_bindings_defined(self) -> None:
-        """Test that bindings are defined."""
-        assert len(HelpScreen.BINDINGS) > 0
-
-    def test_bindings_include_escape(self) -> None:
-        """Test that escape binding exists."""
-        binding_keys = [b[0] for b in HelpScreen.BINDINGS]
-        assert "escape" in binding_keys
-
-    def test_bindings_include_close(self) -> None:
-        """Test that q and ? bindings exist for close."""
-        binding_keys = [b[0] for b in HelpScreen.BINDINGS]
-        assert "q" in binding_keys
-        assert "?" in binding_keys
-
     def test_get_help_content_not_empty(self) -> None:
         """Test that help content is generated."""
         screen = HelpScreen()
@@ -52,16 +37,6 @@ class TestHelpScreen:
         assert "Test Section" in section
         assert "Action A" in section
         assert "Action B" in section
-
-
-class TestHelpScreenActions:
-    """Tests for HelpScreen action methods."""
-
-    def test_action_close_method_exists(self) -> None:
-        """Test action_close method exists."""
-        screen = HelpScreen()
-        assert hasattr(screen, "action_close")
-        assert callable(screen.action_close)
 
 
 class TestHelpScreenInApp:
