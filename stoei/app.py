@@ -33,6 +33,7 @@ from stoei.cluster_stats import (
     process_gpu_entries_for_stats,
 )
 from stoei.colors import get_theme_colors
+from stoei.detail_controller import DetailController
 from stoei.keybindings import Actions, KeybindingConfig
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
 from stoei.settings import (
@@ -52,13 +53,11 @@ from stoei.slurm.commands import (
     get_fair_share_priority,
     get_job_history,
     get_job_info_and_log_paths,
-    get_node_info,
     get_pending_job_priority,
     get_running_jobs,
-    get_user_jobs,
     get_wait_time_job_history,
 )
-from stoei.slurm.formatters import format_account_info, format_compact_timeline, format_user_info
+from stoei.slurm.formatters import format_compact_timeline
 from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
     calculate_total_gpus,
@@ -89,12 +88,7 @@ from stoei.widgets.priority_overview import (
     build_user_priority_rows,
 )
 from stoei.widgets.screens import (
-    AccountInfoScreen,
     CancelConfirmScreen,
-    JobInfoScreen,
-    JobInputScreen,
-    NodeInfoScreen,
-    UserInfoScreen,
 )
 from stoei.widgets.settings_screen import SettingsScreen
 from stoei.widgets.slurm_error_screen import SlurmUnavailableScreen
@@ -272,6 +266,8 @@ class SlurmMonitor(App[None]):
         self._pending_tab_switch: TabName | None = None
         self._tab_switch_scheduled: bool = False
         self._init_update_generation_counters()
+        # Collaborator owning the job/node/user/account detail-modal flows.
+        self._detail: DetailController = DetailController(self)
 
     def _init_refresh_state(self) -> None:
         """Initialise the data-refresh state: timers, workers, cache, and snapshots.
@@ -2196,44 +2192,15 @@ class SlurmMonitor(App[None]):
 
     def action_show_job_info(self) -> None:
         """Show job info dialog."""
-
-        def handle_job_id(job_id: str | None) -> None:
-            if job_id:
-                logger.info(f"Looking up job info for {job_id}")
-                self.notify("Loading job information...", timeout=2)
-                # Run SLURM queries in background worker to avoid blocking UI
-                self.run_worker(
-                    lambda: self._fetch_and_display_job_info(job_id),
-                    name="fetch_job_info",
-                    thread=True,
-                )
-
-        self.push_screen(JobInputScreen(), handle_job_id)
+        self._detail.show_job_info_prompt()
 
     def _fetch_and_display_job_info(self, job_id: str) -> None:
         """Fetch job info in background and display on main thread.
 
-        Uses the job info cache for instant display on cache hit. On miss,
-        fetches via a single combined SLURM query and stores the result.
-
         Args:
             job_id: The SLURM job ID to fetch.
         """
-        query_id = normalize_array_job_id(job_id)
-
-        # Check cache first
-        cached = self._job_info_cache.get(query_id)
-        if cached is not None:
-            logger.debug(f"Job info cache hit for {query_id}")
-            job_info, error, stdout_path, stderr_path = cached
-        else:
-            job_info, error, stdout_path, stderr_path = get_job_info_and_log_paths(query_id)
-            self._job_info_cache[query_id] = (job_info, error, stdout_path, stderr_path)
-
-        # Schedule UI update on main thread
-        self._post_ui_callback(
-            lambda: self.push_screen(JobInfoScreen(job_id, job_info, error, stdout_path, stderr_path))
-        )
+        self._detail.fetch_and_display_job_info(job_id)
 
     def _prefetch_job_info(self, job_id: str) -> None:
         """Pre-fetch job info into cache in background.
@@ -2288,382 +2255,67 @@ class SlurmMonitor(App[None]):
         """
         # Check which table is selected
         if event.data_table.id == "nodes_table":
-            self._show_node_info_for_row(event.data_table, event.row_key)
+            self._detail.show_node_info_for_row(event.data_table, event.row_key)
         elif event.data_table.id in (
             "users_table",
             "pending_users_table",
             "energy_users_table",
             "user_priority_table",
         ):
-            self._show_user_info_for_row(event.data_table, event.row_key)
+            self._detail.show_user_info_for_row(event.data_table, event.row_key)
         elif event.data_table.id == "account_priority_table":
-            self._show_account_info_for_row(event.data_table, event.row_key)
+            self._detail.show_account_info_for_row(event.data_table, event.row_key)
         else:
             # Default to job info for jobs table
-            self._show_job_info_for_row(event.data_table, event.row_key)
+            self._detail.show_job_info_for_row(event.data_table, event.row_key)
 
     def _show_detail_for_row(self, table: DataTable, row_key: RowKey, noun: str, show: Callable[[str], None]) -> None:
-        """Extract the first-column identifier from a row and open its detail modal.
-
-        Args:
-            table: The DataTable containing the row.
-            row_key: The key of the row to show info for.
-            noun: Entity name used in log and error messages (e.g. "node name").
-            show: Callback that opens the detail modal for the extracted identifier.
-        """
-        try:
-            row_data = table.get_row(row_key)
-            # Remove Rich markup tags if present.
-            value = re.sub(r"\[.*?\]", "", str(row_data[0])).strip()
-            if not value:
-                logger.warning(f"Could not extract {noun} from row {row_key}")
-                self.notify(f"Could not get {noun} from selected row", severity="error")
-                return
-            logger.info(f"Showing info for selected {noun} {value}")
-            show(value)
-        except (IndexError, KeyError):
-            logger.exception(f"Could not get {noun} from row {row_key}")
-            self.notify(f"Could not get {noun} from selected row", severity="error")
+        """Extract the first-column identifier from a row and open its detail modal."""
+        self._detail.show_detail_for_row(table, row_key, noun, show)
 
     def _show_node_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
         """Show node info for a specific row in the nodes table."""
-        self._show_detail_for_row(table, row_key, "node name", self._show_node_info)
+        self._detail.show_node_info_for_row(table, row_key)
 
     def _show_node_info(self, node_name: str) -> None:
-        """Show detailed information for a node.
-
-        Args:
-            node_name: The name of the node to display.
-        """
-        logger.info(f"Fetching node info for {node_name}")
-        self.notify("Loading node information...", timeout=2)
-
-        # Get node info in a worker to avoid blocking
-        def fetch_node_info() -> None:
-            node_info, error = get_node_info(node_name)
-            self._post_ui_callback(lambda: self._display_node_info(node_name, node_info, error))
-
-        self.run_worker(fetch_node_info, name="fetch_node_info", thread=True)
+        """Show detailed information for a node."""
+        self._detail.show_node_info(node_name)
 
     def _display_node_info(self, node_name: str, node_info: str, error: str | None) -> None:
-        """Display node information in a modal screen.
-
-        Args:
-            node_name: The node name.
-            node_info: Formatted node information.
-            error: Optional error message.
-        """
-        self.push_screen(NodeInfoScreen(node_name, node_info, error))
-        logger.debug(f"Displayed node info screen for {node_name}")
+        """Display node information in a modal screen."""
+        self._detail.display_node_info(node_name, node_info, error)
 
     def _show_user_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
         """Show user info for a specific row in the users table."""
-        self._show_detail_for_row(table, row_key, "username", self._show_user_info)
+        self._detail.show_user_info_for_row(table, row_key)
 
     def _show_user_info(self, username: str) -> None:
-        """Show detailed information for a user.
-
-        Args:
-            username: The username to display.
-        """
-        logger.info(f"Fetching user info for {username}")
-        self.notify("Loading user information...", timeout=2)
-
-        # Capture cached data references for use in worker thread
-        all_users_jobs = self._all_users_jobs
-        energy_history_jobs = self._energy_history_jobs
-        fair_share_entries = self._fair_share_entries
-        job_priority_entries = self._job_priority_entries
-
-        # Get user info in a worker to avoid blocking
-        def fetch_user_info() -> None:  # noqa: PLR0912
-            jobs, error = get_user_jobs(username)
-            if error:
-                self._post_ui_callback(lambda: self._display_user_info(username, "", error))
-                return
-
-            # Aggregate user stats from the jobs
-            # Build a job list in the format expected by aggregate_user_stats
-            # Jobs from get_user_jobs: (JobID, Name, Partition, State, Time, Nodes, NodeList, TRES)
-            # aggregate_user_stats expects: (JobID, Name, User, Partition, State, Time, Nodes, NodeList, TRES)
-            min_user_job_fields = 8  # Minimum fields from get_user_jobs
-            formatted_jobs: list[tuple[str, ...]] = []
-            for job in jobs:
-                if len(job) >= min_user_job_fields:
-                    # Insert username at position 2
-                    formatted_job = (job[0], job[1], username, job[2], job[3], job[4], job[5], job[6], job[7])
-                    formatted_jobs.append(formatted_job)
-
-            user_stats_list = UserOverviewTab.aggregate_user_stats(formatted_jobs)
-
-            # Find stats for this user
-            user_stats: UserStats | None = None
-            for stats in user_stats_list:
-                if stats.username == username:
-                    user_stats = stats
-                    break
-
-            if user_stats is None:
-                # Create default stats if no jobs
-                user_stats = UserStats(
-                    username=username,
-                    job_count=0,
-                    total_cpus=0,
-                    total_memory_gb=0.0,
-                    total_gpus=0,
-                    total_nodes=0,
-                    gpu_types="",
-                )
-
-            # Gather pending stats from cached all users jobs
-            pending_stats: UserPendingStats | None = None
-            if all_users_jobs:
-                pending_stats_list = UserOverviewTab.aggregate_pending_user_stats(all_users_jobs)
-                for stats in pending_stats_list:
-                    if stats.username == username:
-                        pending_stats = stats
-                        break
-
-            # Gather energy stats from cached energy history
-            energy_stats: UserEnergyStats | None = None
-            if energy_history_jobs:
-                energy_stats_list = UserOverviewTab.aggregate_energy_stats(energy_history_jobs)
-                for stats in energy_stats_list:
-                    if stats.username == username:
-                        energy_stats = stats
-                        break
-
-            # Gather fair-share priority info from cached data
-            # sshare format: (Account, User, RawShares, NormShares, RawUsage, NormUsage, EffectvUsage, FairShare)
-            priority_info: dict[str, str] | None = None
-            if fair_share_entries:
-                min_sshare_fields = 8
-                for entry in fair_share_entries:
-                    if len(entry) >= min_sshare_fields and entry[1] == username:
-                        priority_info = {
-                            "account": entry[0],
-                            "raw_shares": entry[2],
-                            "norm_shares": entry[3],
-                            "raw_usage": entry[4],
-                            "norm_usage": entry[5],
-                            "effective_usage": entry[6],
-                            "fair_share": entry[7],
-                        }
-                        break
-
-            # Gather pending job priorities for this user
-            # sprio format: (JOBID, USER, ACCOUNT, PRIORITY, AGE, FAIRSHARE, JOBSIZE, PARTITION, QOS)
-            job_priorities: list[dict[str, str]] = []
-            if job_priority_entries:
-                min_sprio_fields = 9
-                for entry in job_priority_entries:
-                    if len(entry) >= min_sprio_fields and entry[1] == username:
-                        job_priorities.append(
-                            {
-                                "job_id": entry[0],
-                                "priority": entry[3],
-                                "age": entry[4],
-                                "fair_share": entry[5],
-                                "job_size": entry[6],
-                                "partition": entry[7],
-                                "qos": entry[8],
-                            }
-                        )
-
-            formatted_info = format_user_info(
-                username,
-                user_stats,
-                jobs,
-                pending_stats=pending_stats,
-                energy_stats=energy_stats,
-                priority_info=priority_info,
-                job_priorities=job_priorities if job_priorities else None,
-            )
-            self._post_ui_callback(lambda: self._display_user_info(username, formatted_info, None))
-
-        self.run_worker(fetch_user_info, name="fetch_user_info", thread=True)
+        """Show detailed information for a user."""
+        self._detail.show_user_info(username)
 
     def _display_user_info(self, username: str, user_info: str, error: str | None) -> None:
-        """Display user information in a modal screen.
-
-        Args:
-            username: The username.
-            user_info: Formatted user information.
-            error: Optional error message.
-        """
-        self.push_screen(UserInfoScreen(username, user_info, error))
-        logger.debug(f"Displayed user info screen for {username}")
+        """Display user information in a modal screen."""
+        self._detail.display_user_info(username, user_info, error)
 
     def _show_account_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
         """Show account info for a specific row in the accounts table."""
-        self._show_detail_for_row(table, row_key, "account name", self._show_account_info)
+        self._detail.show_account_info_for_row(table, row_key)
 
     def _show_account_info(self, account_name: str) -> None:
-        """Show detailed information for an account/institute.
-
-        Args:
-            account_name: The account/institute name to display.
-        """
-        logger.info(f"Fetching account info for {account_name}")
-        self.notify("Loading account information...", timeout=2)
-
-        # Capture cached data references for use in worker thread
-        fair_share_entries = self._fair_share_entries
-        all_users_jobs = self._all_users_jobs
-        job_priority_entries = self._job_priority_entries
-
-        # Get account info in a worker to avoid blocking
-        def fetch_account_info() -> None:  # noqa: PLR0912
-            # Get account-level priority info from cached sshare data
-            # sshare format: (Account, User, RawShares, NormShares, RawUsage, NormUsage, EffectvUsage, FairShare)
-            account_priority: dict[str, str] = {}
-            users_in_account: list[dict[str, str]] = []
-
-            if fair_share_entries:
-                min_sshare_fields = 8
-                for entry in fair_share_entries:
-                    if len(entry) >= min_sshare_fields and entry[0] == account_name:
-                        if entry[1]:  # Has username - this is a user entry
-                            users_in_account.append(
-                                {
-                                    "username": entry[1],
-                                    "raw_shares": entry[2],
-                                    "norm_shares": entry[3],
-                                    "raw_usage": entry[4],
-                                    "norm_usage": entry[5],
-                                    "effective_usage": entry[6],
-                                    "fair_share": entry[7],
-                                }
-                            )
-                        else:  # No username - this is the account-level entry
-                            account_priority = {
-                                "raw_shares": entry[2],
-                                "norm_shares": entry[3],
-                                "raw_usage": entry[4],
-                                "norm_usage": entry[5],
-                                "effective_usage": entry[6],
-                                "fair_share": entry[7],
-                            }
-
-            # Get usernames in this account for filtering jobs
-            usernames_in_account = {u["username"] for u in users_in_account}
-
-            # Filter running jobs for users in this account
-            # Job format: (JobID, Name, User, Partition, State, Time, Nodes, NodeList, TRES)
-            running_jobs: list[tuple[str, ...]] = []
-            pending_jobs: list[tuple[str, ...]] = []
-
-            if all_users_jobs:
-                min_job_fields = 5
-                username_index = 2
-                state_index = 4
-                for job in all_users_jobs:
-                    if len(job) >= min_job_fields:
-                        username = job[username_index].strip()
-                        state = job[state_index].strip().upper()
-                        if username in usernames_in_account:
-                            if state in ("RUNNING", "R"):
-                                running_jobs.append(job)
-                            elif state in ("PENDING", "PD"):
-                                pending_jobs.append(job)
-
-            # Get pending job priorities for users in this account
-            # sprio format: (JOBID, USER, ACCOUNT, PRIORITY, AGE, FAIRSHARE, JOBSIZE, PARTITION, QOS)
-            job_priorities: list[dict[str, str]] = []
-            if job_priority_entries:
-                min_sprio_fields = 9
-                for entry in job_priority_entries:
-                    if len(entry) >= min_sprio_fields:
-                        # Check if account matches or user is in account
-                        entry_account = entry[2]
-                        entry_user = entry[1]
-                        if entry_account == account_name or entry_user in usernames_in_account:
-                            job_priorities.append(
-                                {
-                                    "job_id": entry[0],
-                                    "user": entry[1],
-                                    "account": entry[2],
-                                    "priority": entry[3],
-                                    "age": entry[4],
-                                    "fair_share": entry[5],
-                                    "job_size": entry[6],
-                                    "partition": entry[7],
-                                    "qos": entry[8],
-                                }
-                            )
-
-            formatted_info = format_account_info(
-                account_name,
-                account_priority,
-                users_in_account,
-                running_jobs,
-                pending_jobs,
-                job_priorities=job_priorities if job_priorities else None,
-            )
-            self._post_ui_callback(lambda: self._display_account_info(account_name, formatted_info, None))
-
-        self.run_worker(fetch_account_info, name="fetch_account_info", thread=True)
+        """Show detailed information for an account/institute."""
+        self._detail.show_account_info(account_name)
 
     def _display_account_info(self, account_name: str, account_info: str, error: str | None) -> None:
-        """Display account information in a modal screen.
-
-        Args:
-            account_name: The account/institute name.
-            account_info: Formatted account information.
-            error: Optional error message.
-        """
-        self.push_screen(AccountInfoScreen(account_name, account_info, error))
-        logger.debug(f"Displayed account info screen for {account_name}")
+        """Display account information in a modal screen."""
+        self._detail.display_account_info(account_name, account_info, error)
 
     def _show_job_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
-        """Show job info for a specific row in a table.
-
-        Args:
-            table: The DataTable containing the row.
-            row_key: The key of the row to show info for.
-        """
-        try:
-            row_data = table.get_row(row_key)
-            job_id = str(row_data[0]).strip()
-            logger.info(f"Showing info for selected job {job_id}")
-            self.notify("Loading job information...", timeout=2)
-            # Run SLURM queries in background worker to avoid blocking UI
-            self.run_worker(
-                lambda: self._fetch_and_display_job_info(job_id),
-                name="fetch_job_info",
-                thread=True,
-            )
-        except (IndexError, KeyError):
-            logger.exception(f"Could not get job ID from row {row_key}")
-            self.notify("Could not get job ID from selected row", severity="error")
+        """Show job info for a specific row in a table."""
+        self._detail.show_job_info_for_row(table, row_key)
 
     def action_show_selected_job_info(self) -> None:
         """Show job info for the currently selected row."""
-        jobs_table = self.query_one("#jobs_table", DataTable)
-
-        if jobs_table.row_count == 0:
-            self.notify("No jobs to display", severity="warning")
-            return
-
-        cursor_row = jobs_table.cursor_row
-        if cursor_row is None or cursor_row < 0:
-            self.notify("No row selected", severity="warning")
-            return
-
-        try:
-            row_data = jobs_table.get_row_at(cursor_row)
-            job_id = str(row_data[0]).strip()
-            logger.info(f"Showing info for selected job {job_id}")
-            self.notify("Loading job information...", timeout=2)
-            # Run SLURM queries in background worker to avoid blocking UI
-            self.run_worker(
-                lambda: self._fetch_and_display_job_info(job_id),
-                name="fetch_job_info",
-                thread=True,
-            )
-        except (IndexError, KeyError):
-            logger.exception(f"Could not get job ID from row {cursor_row}")
-            self.notify("Could not get job ID from selected row", severity="error")
+        self._detail.show_selected_job_info()
 
     def action_cancel_job(self) -> None:
         """Cancel the selected job after confirmation."""
