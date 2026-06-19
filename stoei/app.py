@@ -2,12 +2,12 @@
 
 import contextlib
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from dataclasses import replace
 from pathlib import Path
 from threading import Lock
-from typing import ClassVar, TypeAlias, cast
+from typing import ClassVar
 
+import loguru
 from textual._path import CSSPathType
 from textual.app import App, ComposeResult
 from textual.binding import Binding, BindingType
@@ -17,7 +17,7 @@ from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
-from textual.worker import Worker, WorkerState, get_current_worker
+from textual.worker import Worker, get_current_worker
 
 from stoei.cluster_stats import (
     ClusterStats,
@@ -35,6 +35,11 @@ from stoei.colors import get_theme_colors
 from stoei.detail_controller import DetailController
 from stoei.keybindings import Actions, KeybindingConfig
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
+from stoei.refresh_controller import (
+    HEAVY_REFRESH_MULTIPLIER,
+    RefreshController,
+    _FetchResult,
+)
 from stoei.settings import (
     MAX_SIDEBAR_WIDTH_PERCENT,
     MIN_SIDEBAR_WIDTH_PERCENT,
@@ -45,6 +50,7 @@ from stoei.settings import (
 from stoei.slurm.array_parser import normalize_array_job_id
 from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
+    DEFAULT_MAX_RETRIES,
     cancel_job,
     get_all_running_jobs,
     get_cluster_nodes,
@@ -101,25 +107,8 @@ from stoei.widgets.user_overview import (
 
 logger = get_logger(__name__)
 
-# Type aliases for fetch result types used in _apply_fetch_result.
-_HistoryResult: TypeAlias = tuple[list[tuple[str, ...]] | None, int, int, int]
-_PriorityHalfResult: TypeAlias = tuple[list[tuple[str, ...]], str | None]
-_EnergyResult: TypeAlias = tuple[list[tuple[str, ...]], bool]
-_FetchResult: TypeAlias = (
-    _HistoryResult | list[dict[str, str]] | list[tuple[str, ...]] | _PriorityHalfResult | _EnergyResult
-)
-
-# The heavy data loop (history, nodes, all-users jobs, wait times, priority) refreshes
-# at this multiple of the base refresh interval. Slow sacct/sshare/sprio calls then never
-# gate the fast running-jobs loop that drives the jobs-table "Time" column.
-HEAVY_REFRESH_MULTIPLIER = 4
-
 # Path to styles directory
 STYLES_DIR = Path(__file__).parent / "styles"
-
-# Number of independent priority fetch futures (fair_share + job_priority).
-# The priority tab is updated once both halves have arrived in the same cycle.
-_PRIORITY_FETCH_COUNT = 2
 
 # Minimum window width to show sidebar (sidebar is 30 wide, need space for content)
 MIN_WIDTH_FOR_SIDEBAR = 100
@@ -269,6 +258,9 @@ class SlurmMonitor(App[None]):
         self._detail: DetailController = DetailController(self)
         # Collaborator owning the jobs-table / sidebar / overview render flows.
         self._tables: TableController = TableController(self)
+        # Collaborator owning the data-refresh orchestration (fast/slow loops,
+        # initial load, parallel fetch, and result application).
+        self._refresh: RefreshController = RefreshController(self)
 
     def _init_refresh_state(self) -> None:
         """Initialise the data-refresh state: timers, workers, cache, and snapshots.
@@ -404,13 +396,7 @@ class SlurmMonitor(App[None]):
 
     def _start_initial_load_worker(self) -> None:
         """Start background worker for initial step-by-step data load."""
-        self._refresh_worker = self.run_worker(
-            self._initial_load_async,
-            name="initial_load",
-            group="data_load",
-            exclusive=True,
-            thread=True,
-        )
+        self._refresh.start_initial_load_worker()
 
     def _loading_update_step(self, idx: int) -> None:
         """Update loading screen to show step starting."""
@@ -436,114 +422,68 @@ class SlurmMonitor(App[None]):
         if screen:
             self._post_ui_callback(lambda: screen.skip_step(idx, reason))
 
+    @property
+    def logger(self) -> "loguru.Logger":
+        """Expose this module's logger so the refresh controller logs as ``stoei.app``.
+
+        Resolved at call time so ``patch("stoei.app.logger")`` is honoured.
+        """
+        return logger
+
+    # --- SLURM command bridges ---
+    #
+    # The refresh controller calls these instead of importing the SLURM
+    # functions directly, so the names resolve in this module's namespace at
+    # call time (tests patch ``stoei.app.get_*``).
+    def _current_worker(self) -> Worker[object]:
+        """Return the worker running the current task/thread (resolves the patched symbol)."""
+        return get_current_worker()
+
+    def _slurm_check_available(self) -> tuple[bool, str | None]:
+        """Check SLURM controller availability."""
+        return check_slurm_available()
+
+    def _slurm_running_jobs(self, *, max_retries: int) -> tuple[list[tuple[str, ...]], str | None]:
+        """Fetch the current user's running/pending jobs (squeue)."""
+        return get_running_jobs(max_retries=max_retries)
+
+    def _slurm_job_history(
+        self, *, days: int, max_retries: int = DEFAULT_MAX_RETRIES
+    ) -> tuple[list[tuple[str, ...]], int, int, int, str | None]:
+        """Fetch the current user's job history (sacct)."""
+        return get_job_history(days=days, max_retries=max_retries)
+
+    def _slurm_cluster_nodes(self) -> tuple[list[dict[str, str]], str | None]:
+        """Fetch cluster node data (scontrol)."""
+        return get_cluster_nodes()
+
+    def _slurm_all_running_jobs(self) -> tuple[list[tuple[str, ...]], str | None]:
+        """Fetch all users' running jobs (squeue)."""
+        return get_all_running_jobs()
+
+    def _slurm_wait_time_history(self, *, hours: int) -> tuple[list[tuple[str, ...]], str | None]:
+        """Fetch wait-time history (sacct)."""
+        return get_wait_time_job_history(hours=hours)
+
+    def _slurm_energy_history(self, months: int) -> tuple[list[tuple[str, ...]], str | None]:
+        """Fetch energy history (sacct)."""
+        return get_energy_job_history(months)
+
+    def _slurm_fair_share_priority(self, *, max_retries: int) -> tuple[list[tuple[str, ...]], str | None]:
+        """Fetch fair-share priority data (sshare)."""
+        return get_fair_share_priority(max_retries=max_retries)
+
+    def _slurm_pending_job_priority(self, *, max_retries: int) -> tuple[list[tuple[str, ...]], str | None]:
+        """Fetch pending-job priority data (sprio)."""
+        return get_pending_job_priority(max_retries=max_retries)
+
+    def aggregate_energy_stats(self, energy_jobs: list[tuple[str, ...]]) -> list[UserEnergyStats]:
+        """Aggregate energy history rows into per-user stats."""
+        return UserOverviewTab.aggregate_energy_stats(energy_jobs)
+
     def _initial_load_async(self) -> None:
         """Perform initial data load with step-by-step progress (runs in worker thread)."""
-        logger.info("Starting initial data load")
-
-        # Execute loading steps and collect results
-        load_result = self._execute_loading_steps()
-        if load_result is None:
-            return  # SLURM error, already handled
-
-        running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = load_result
-
-        # Save initial snapshots so each refresh loop can rebuild the table from
-        # the other loop's last-known data without re-fetching it.
-        self._last_running_jobs = running_jobs
-        self._last_history_jobs = history_jobs
-        self._last_history_stats = (total_jobs, total_requeues, max_requeues)
-
-        # Build job cache from fetched data
-        self._loading_update_step(2)
-        self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-
-        # Pre-compute row tuples in the worker thread so the main thread
-        # only needs to push them into the DataTable (the unavoidable DOM work).
-        jobs = self._sorted_jobs_for_display(self._job_cache.jobs)
-        self._precomputed_job_rows = [tuple(self._job_row_values(job)) for job in jobs]
-
-        self._loading_complete_step(2, "Ready")
-
-        # Transition to main UI — the loading screen stays up until the
-        # first background refresh (cluster data) completes.
-        self._post_ui_callback(self._finish_initial_load)
-
-    def _execute_loading_steps(
-        self,
-    ) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]], int, int, int] | None:
-        """Execute critical loading steps and return collected data.
-
-        Only loads the minimum data needed for the jobs table (SLURM check,
-        running jobs, job history). All other data sources (cluster nodes,
-        all-users jobs, energy, wait times, priority) are loaded in the
-        background after the UI is shown.
-
-        Returns:
-            Tuple of (running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-            or None if SLURM is not available.
-        """
-        # Step 0: Check SLURM availability
-        if not self._load_step_check_slurm():
-            return None
-
-        # Step 1: Fetch running jobs + job history in parallel (no retries)
-        running_jobs, history_jobs, total_jobs, total_requeues, max_requeues = self._load_step_user_jobs()
-
-        return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
-
-    def _load_step_check_slurm(self) -> bool:
-        """Execute step 0: Check SLURM availability."""
-        self._loading_update_step(0)
-        is_available, error_msg = check_slurm_available()
-        if not is_available:
-            self._loading_fail_step(0, error_msg or "SLURM not available")
-            logger.error(f"SLURM not available: {error_msg}")
-            self._post_ui_callback(self._show_slurm_error)
-            return False
-        self._loading_complete_step(0, "SLURM available")
-        return True
-
-    def _load_step_user_jobs(
-        self,
-    ) -> tuple[list[tuple[str, ...]], list[tuple[str, ...]], int, int, int]:
-        """Execute step 1: Fetch running jobs and job history in parallel (no retries)."""
-        self._loading_update_step(1)
-        job_history_days = self._settings.job_history_days
-
-        running_jobs: list[tuple[str, ...]] = []
-        history_jobs: list[tuple[str, ...]] = []
-        total_jobs = 0
-        total_requeues = 0
-        max_requeues = 0
-        errors: list[str] = []
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            future_running = executor.submit(get_running_jobs, max_retries=0)
-            future_history = executor.submit(get_job_history, days=job_history_days, max_retries=0)
-
-            rj, rj_error = future_running.result()
-            if rj_error:
-                logger.warning(f"Failed to get running jobs: {rj_error}")
-                errors.append(rj_error)
-            else:
-                running_jobs = rj
-
-            hj, tj, tr, mr, hj_error = future_history.result()
-            if hj_error:
-                logger.warning(f"Failed to get job history: {hj_error}")
-                errors.append(hj_error)
-            else:
-                history_jobs = hj
-                total_jobs = tj
-                total_requeues = tr
-                max_requeues = mr
-
-        if errors:
-            self._loading_fail_step(1, "; ".join(errors))
-        else:
-            self._loading_complete_step(1, f"{len(running_jobs)} running/pending, {total_jobs} in {job_history_days}d")
-
-        return running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
+        self._refresh.initial_load_async()
 
     def _show_slurm_error(self) -> None:
         """Show SLURM unavailable error screen."""
@@ -862,278 +802,27 @@ class SlurmMonitor(App[None]):
 
     def _start_refresh_worker(self) -> None:
         """Start the heavy background worker (history, nodes, all-users jobs, priority)."""
-        if self._refresh_worker is not None and self._refresh_worker.state == WorkerState.RUNNING:
-            logger.debug("Heavy refresh worker already running, skipping")
-            return
-
-        self._refresh_worker = self.run_worker(
-            self._refresh_data_async,
-            name="refresh_data",
-            group="data_load",
-            exclusive=True,
-            thread=True,
-        )
+        self._refresh.start_refresh_worker()
 
     def _start_running_refresh_worker(self) -> None:
-        """Start the fast worker that refreshes running jobs (drives the jobs-table Time column).
-
-        This loop fetches ``squeue`` only, so it is never gated by the slow
-        ``sacct``/``sshare``/``sprio`` calls in the heavy loop.
-        """
-        if self._running_refresh_worker is not None and self._running_refresh_worker.state == WorkerState.RUNNING:
-            logger.debug("Running-jobs refresh worker already running, skipping")
-            return
-
-        self._running_refresh_worker = self.run_worker(
-            self._refresh_running_jobs_async,
-            name="refresh_running_jobs",
-            group="running_refresh",
-            exclusive=True,
-            thread=True,
-        )
+        """Start the fast worker that refreshes running jobs (drives the jobs-table Time column)."""
+        self._refresh.start_running_refresh_worker()
 
     def _refresh_running_jobs_async(self) -> None:
         """Fetch running jobs (squeue only) and refresh the jobs table (worker thread)."""
-        worker = get_current_worker()
-        running_jobs, error = get_running_jobs(max_retries=1)
-        if worker.is_cancelled:
-            return
-        if error:
-            logger.warning(f"Failed to refresh running jobs: {error}")
-            self._apply_running_jobs_result(None)
-        else:
-            self._apply_running_jobs_result(running_jobs)
+        self._refresh.refresh_running_jobs_async()
 
     def _apply_running_jobs_result(self, running_jobs: list[tuple[str, ...]] | None) -> None:
-        """Rebuild the jobs table from fresh running jobs + cached history (worker thread).
-
-        On a fetch failure (``running_jobs is None``) the previous table is kept
-        and the user is notified once. On success the running-jobs snapshot is
-        updated and the table is rebuilt against the last-known history snapshot,
-        so the "Time" column advances without waiting on the heavy history loop.
-
-        Args:
-            running_jobs: Fresh squeue job tuples, or None if the fetch failed.
-        """
-        if running_jobs is None:
-            if not self._error_notified.get("running_jobs"):
-                self._error_notified["running_jobs"] = True
-                self._post_ui_callback(
-                    lambda: self.notify("Running jobs refresh failed - keeping old data", severity="warning")
-                )
-            return
-
-        self._error_notified["running_jobs"] = False
-        with self._refresh_state_lock:
-            self._last_running_jobs = running_jobs
-            old_states = self._job_states()
-            total_jobs, total_requeues, max_requeues = self._last_history_stats
-            self._job_cache._build_from_data(
-                running_jobs, self._last_history_jobs, total_jobs, total_requeues, max_requeues
-            )
-            self._notify_new_jobs(set(old_states))
-            self._invalidate_changed_job_info(old_states)
-            job_rows = self._current_job_rows()
-        self._post_ui_callback(lambda: self._update_jobs_table(job_rows))
-
-    def _current_job_rows(self) -> list[tuple[str, ...]]:
-        """Snapshot the cached jobs as display-ready table rows."""
-        return [tuple(self._job_row_values(job)) for job in self._sorted_jobs_for_display(self._job_cache.jobs)]
-
-    # --- Parallel fetch helpers (run inside ThreadPoolExecutor threads) ---
-
-    def _fetch_history(self) -> _HistoryResult:
-        """Fetch the user's job history (sacct) for the heavy refresh loop.
-
-        Returns:
-            Tuple of (history_jobs, total_jobs, total_requeues, max_requeues).
-            ``history_jobs`` is None if the fetch failed.
-        """
-        history_raw, total_jobs, total_requeues, max_requeues, h_error = get_job_history(
-            days=self._settings.job_history_days
-        )
-        if h_error:
-            logger.warning(f"Failed to refresh job history: {h_error}")
-            return None, 0, 0, 0
-        return history_raw, total_jobs, total_requeues, max_requeues
-
-    def _fetch_nodes(self) -> list[dict[str, str]]:
-        """Fetch cluster node data.
-
-        Returns:
-            List of node data dicts, empty on error.
-        """
-        nodes, error = get_cluster_nodes()
-        if error:
-            logger.warning(f"Failed to get cluster nodes: {error}")
-            return []
-        logger.debug(f"Fetched {len(nodes)} cluster nodes")
-        return nodes
-
-    def _fetch_all_jobs(self) -> list[tuple[str, ...]]:
-        """Fetch all-users running job data.
-
-        Returns:
-            List of job tuples, empty on error.
-        """
-        all_jobs, error = get_all_running_jobs()
-        if error:
-            logger.warning(f"Failed to get all running jobs: {error}")
-            return []
-        logger.debug(f"Fetched {len(all_jobs)} running jobs from all users")
-        return all_jobs
-
-    def _fetch_wait_time(self) -> list[tuple[str, ...]]:
-        """Fetch wait-time history.
-
-        Returns:
-            List of wait-time job tuples, empty on error.
-        """
-        wait_time_jobs, error = get_wait_time_job_history(hours=1)
-        if error:
-            logger.warning(f"Failed to get wait time history: {error}")
-            return []
-        logger.debug(f"Fetched {len(wait_time_jobs)} jobs for wait time calculation")
-        return wait_time_jobs
-
-    def _fetch_energy(self) -> tuple[list[tuple[str, ...]], bool]:
-        """Fetch energy history data (only used during first background cycle).
-
-        Returns:
-            Tuple of (energy_jobs, energy_loaded).
-        """
-        if not self._settings.energy_loading_enabled:
-            logger.debug("Energy loading disabled, skipping")
-            return [], False
-
-        months = self._settings.energy_history_months
-        energy_jobs, error = get_energy_job_history(months)
-        if error:
-            logger.warning(f"Failed to get {months}-month energy history: {error}")
-            return [], False
-        logger.debug(f"Fetched {len(energy_jobs)} energy history jobs")
-        return energy_jobs, True
-
-    # --- Main refresh worker ---
+        """Rebuild the jobs table from fresh running jobs + cached history (worker thread)."""
+        self._refresh.apply_running_jobs_result(running_jobs)
 
     def _refresh_data_async(self) -> None:
-        """Parallel refresh of SLURM data (runs in background worker thread).
+        """Parallel refresh of SLURM data (runs in background worker thread)."""
+        self._refresh.refresh_data_async()
 
-        Fetches all data sources concurrently. Each fetch result is processed
-        and pushed to the UI as soon as it arrives (progressive rendering),
-        so widgets update incrementally rather than waiting for all fetches.
-        """
-        is_first_cycle = not self._initial_background_complete
-        logger.debug(f"Background refresh starting (parallel, first_cycle={is_first_cycle})")
-        self._post_ui_callback(lambda: self._set_loading_indicator(True))
-        worker = get_current_worker()
-
-        try:
-            max_workers = 7 if is_first_cycle else 6
-            with ThreadPoolExecutor(max_workers=max_workers) as pool:
-                futures: dict[Future[object], str] = {
-                    pool.submit(self._fetch_history): "history",
-                    pool.submit(self._fetch_nodes): "nodes",
-                    pool.submit(self._fetch_all_jobs): "all_jobs",
-                    pool.submit(self._fetch_wait_time): "wait_time",
-                    pool.submit(get_fair_share_priority, max_retries=1): "fair_share",
-                    pool.submit(get_pending_job_priority, max_retries=1): "job_priority",
-                }
-                if is_first_cycle:
-                    futures[pool.submit(self._fetch_energy)] = "energy"
-
-                for future in as_completed(futures):
-                    if worker.is_cancelled:
-                        logger.debug("Refresh worker cancelled, aborting")
-                        return
-                    label = futures[future]
-                    try:
-                        result = cast(_FetchResult, future.result())
-                        self._apply_fetch_result(label, result)
-                    except Exception:
-                        logger.exception(f"Failed to fetch {label}")
-
-            if worker.is_cancelled:
-                return
-            self._post_ui_callback(lambda: self._on_refresh_complete(is_first_cycle))
-
-        except Exception:
-            logger.exception("Error during parallel refresh")
-        finally:
-            self._post_ui_callback(lambda: self._set_loading_indicator(False))
-
-    def _apply_fetch_result(self, label: str, result: _FetchResult) -> None:  # noqa: PLR0912, PLR0915
-        """Process one completed fetch and push a partial UI update (worker thread).
-
-        Called in the background worker thread as each data source completes.
-        Updates shared state and schedules targeted main-thread UI updates.
-
-        Args:
-            label: Fetch label identifying the data source.
-            result: The data returned by the fetch function.
-        """
-        if label == "history":
-            history_jobs, total_jobs, total_requeues, max_requeues = cast(_HistoryResult, result)
-            with self._refresh_state_lock:
-                old_states = self._job_states()
-                self._handle_refresh_fallback(
-                    self._last_running_jobs, history_jobs, total_jobs, total_requeues, max_requeues
-                )
-                self._invalidate_changed_job_info(old_states)
-                job_rows = self._current_job_rows()
-            self._post_ui_callback(lambda: self._update_jobs_table(job_rows))
-
-        elif label == "nodes":
-            self._cluster_nodes = cast(list[dict[str, str]], result)
-            self._cached_node_infos = self._parse_node_infos()
-            self._post_ui_callback(self._update_nodes_tab_only)
-
-        elif label == "all_jobs":
-            self._all_users_jobs = cast(list[tuple[str, ...]], result)
-            self._compute_user_overview_cache()
-            self._post_ui_callback(self._update_all_jobs_widgets)
-
-        elif label == "wait_time":
-            self._wait_time_jobs = cast(list[tuple[str, ...]], result)
-            stats = self._calculate_cluster_stats()
-            self._cached_cluster_stats = stats
-            self._post_ui_callback(lambda s=stats: self._update_cluster_sidebar_with_stats(s))
-
-        elif label == "fair_share":
-            entries, error = cast(_PriorityHalfResult, result)
-            if error:
-                logger.warning(f"sshare failed: {error}")
-            else:
-                self._fair_share_entries = entries
-            # Only trigger priority tab update once both halves have arrived
-            self._priority_halves_received += 1
-            if self._priority_halves_received >= _PRIORITY_FETCH_COUNT:
-                self._priority_halves_received = 0
-                self._compute_priority_overview_cache()
-                self._post_ui_callback(self._update_priority_tab)
-
-        elif label == "job_priority":
-            entries, error = cast(_PriorityHalfResult, result)
-            if error:
-                logger.warning(f"sprio failed: {error}")
-            else:
-                self._job_priority_entries = entries
-            self._priority_halves_received += 1
-            if self._priority_halves_received >= _PRIORITY_FETCH_COUNT:
-                self._priority_halves_received = 0
-                self._compute_priority_overview_cache()
-                self._post_ui_callback(self._update_priority_tab)
-
-        elif label == "energy":
-            energy_jobs, energy_loaded = cast(_EnergyResult, result)
-            self._energy_history_jobs = energy_jobs
-            self._energy_data_loaded = energy_loaded
-            if energy_loaded:
-                self._cached_energy_user_stats = UserOverviewTab.aggregate_energy_stats(energy_jobs)
-                self._post_ui_callback(self._update_energy_tab)
-
-        else:
-            logger.warning(f"_apply_fetch_result: unknown label {label!r}")
+    def _apply_fetch_result(self, label: str, result: _FetchResult) -> None:
+        """Process one completed fetch and push a partial UI update (worker thread)."""
+        self._refresh.apply_fetch_result(label, result)
 
     def _update_nodes_and_sidebar(self) -> None:
         """Update cluster sidebar and node overview tab (main thread only)."""
@@ -1244,23 +933,10 @@ class SlurmMonitor(App[None]):
     def _on_refresh_complete(self, is_first_cycle: bool) -> None:
         """Handle post-refresh bookkeeping (main thread only).
 
-        On the first cycle this starts the recurring heavy-refresh timer and
-        notifies the user that all cluster data has been loaded. The fast
-        running-jobs timer is already started in :meth:`_finish_initial_load`.
-
         Args:
             is_first_cycle: Whether this was the first background refresh cycle.
         """
-        if is_first_cycle:
-            self._initial_background_complete = True
-            self.heavy_refresh_timer = self.set_interval(self.heavy_refresh_interval, self._start_refresh_worker)
-            self.notify("Cluster data ready", timeout=3, severity="information")
-            logger.info(
-                f"Background initial load complete. Running-jobs refresh every {self.refresh_interval}s, "
-                f"heavy refresh every {self.heavy_refresh_interval}s"
-            )
-        else:
-            logger.debug("Heavy refresh cycle complete - all data sources updated")
+        self._refresh.on_refresh_complete(is_first_cycle)
 
     def _handle_refresh_fallback(
         self,
@@ -1279,70 +955,7 @@ class SlurmMonitor(App[None]):
             total_requeues: Total requeues from history.
             max_requeues: Max requeues from history.
         """
-        if history_jobs is None:
-            # Reuse last successful history
-            history_jobs = list(self._last_history_jobs)
-            total_jobs, total_requeues, max_requeues = self._last_history_stats
-            if not self._error_notified.get("history_jobs"):
-                self._error_notified["history_jobs"] = True
-                self._post_ui_callback(
-                    lambda: self.notify("History refresh failed - using cached history", severity="warning")
-                )
-        else:
-            # Update cache of raw history data on success
-            self._error_notified["history_jobs"] = False
-            self._last_history_jobs = history_jobs
-            self._last_history_stats = (total_jobs, total_requeues, max_requeues)
-
-        self._job_cache._build_from_data(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-
-    def _notify_new_jobs(self, old_job_ids: set[str]) -> None:
-        """Post a notification if new jobs appeared in the cache after a refresh.
-
-        Compares the current cache contents against *old_job_ids* (captured
-        before the cache was rebuilt) and notifies the user about any newly
-        detected active (running/pending) jobs.
-
-        Args:
-            old_job_ids: Set of job IDs that were in the cache before the refresh.
-        """
-        if not old_job_ids:
-            return  # First load — don't notify for initial data
-        new_active_jobs = [j for j in self._job_cache.jobs if j.job_id not in old_job_ids and j.is_active]
-        if not new_active_jobs:
-            return
-        if len(new_active_jobs) == 1:
-            job = new_active_jobs[0]
-            msg = f"New job detected: {job.job_id} ({job.name})"
-        else:
-            msg = f"{len(new_active_jobs)} new jobs detected"
-        self._post_ui_callback(lambda m=msg: self.notify(m, timeout=5, severity="information"))
-
-    def _job_states(self) -> dict[str, str]:
-        """Return a snapshot mapping each cached job's ID to its current state."""
-        return {job.job_id: job.state for job in self._job_cache.jobs}
-
-    def _invalidate_changed_job_info(self, old_states: dict[str, str]) -> None:
-        """Evict cached modal job-info for jobs whose state changed (worker thread).
-
-        Compares each job's state before and after the cache rebuild. Any job
-        whose state changed - or that disappeared from the cache - has its cached
-        ``scontrol``/``sacct`` detail evicted so the next modal open re-fetches
-        it; unchanged jobs keep their cached entry for instant display. Eviction
-        is conservative: array tasks that share a normalized cache key are
-        evicted together when any one of them changes.
-
-        Called from ``_apply_fetch_result`` right after the cache rebuild, so the
-        modal cache stays consistent with the table cache it was derived from
-        instead of being gated behind full-cycle completion.
-
-        Args:
-            old_states: Job-ID-to-state snapshot captured before the rebuild.
-        """
-        new_states = self._job_states()
-        for job_id, old_state in old_states.items():
-            if new_states.get(job_id) != old_state:
-                self._job_info_cache.pop(normalize_array_job_id(job_id), None)
+        self._refresh.handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
 
     def _set_loading_indicator(self, active: bool) -> None:
         """Safely toggle the global loading indicator spinner."""
