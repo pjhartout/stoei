@@ -1,33 +1,9 @@
 """Unit tests for the NodeOverviewTab widget."""
 
 import pytest
-from stoei.colors import FALLBACK_COLORS
 from stoei.widgets.node_overview import NodeInfo, NodeOverviewTab
 
-
-def _has_color(result: str, color_name: str) -> bool:
-    """Check if result contains a color (either name or hex value).
-
-    Args:
-        result: The formatted string to check.
-        color_name: Semantic color name (success, warning, error) or ANSI name (green, yellow, red).
-
-    Returns:
-        True if the result contains a color markup.
-    """
-    # Map ANSI names to semantic names
-    ansi_to_semantic = {
-        "green": "success",
-        "yellow": "warning",
-        "red": "error",
-    }
-    semantic_name = ansi_to_semantic.get(color_name, color_name)
-
-    # Check for ANSI color name (legacy)
-    if f"[{color_name}]" in result:
-        return True
-    # Check for hex color from fallback colors
-    return bool(semantic_name in FALLBACK_COLORS and FALLBACK_COLORS[semantic_name] in result)
+from tests.helpers import has_color as _has_color
 
 
 class TestNodeInfo:
