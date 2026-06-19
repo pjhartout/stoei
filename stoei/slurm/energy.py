@@ -13,6 +13,7 @@ import re
 from pathlib import Path
 
 from stoei.logger import get_logger
+from stoei.slurm.gpu_parser import parse_gpu_entries
 
 logger = get_logger(__name__)
 
@@ -301,18 +302,7 @@ def parse_gpu_info_from_tres(tres_str: str) -> list[tuple[str, int]]:
     if not tres_str:
         return []
 
-    gpu_pattern = re.compile(r"gres/gpu(?::([^=,]+))?=(\d+)", re.IGNORECASE)
-    gpu_entries: list[tuple[str, int]] = []
-
-    for match in gpu_pattern.finditer(tres_str):
-        gpu_type = match.group(1) if match.group(1) else "gpu"
-        try:
-            gpu_count = int(match.group(2))
-            gpu_entries.append((gpu_type, gpu_count))
-        except ValueError:
-            pass
-
-    return gpu_entries
+    return parse_gpu_entries(tres_str)
 
 
 def parse_cpu_count_from_tres(tres_str: str) -> int:

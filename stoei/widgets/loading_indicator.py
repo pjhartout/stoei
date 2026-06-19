@@ -6,6 +6,20 @@ from textual.reactive import reactive
 from textual.timer import Timer
 from textual.widgets import Static
 
+# Braille spinner frame sequence shared across loading widgets.
+SPINNER_FRAMES: tuple[str, ...] = (
+    "⠋",
+    "⠙",
+    "⠹",
+    "⠸",
+    "⠼",
+    "⠴",
+    "⠦",
+    "⠧",
+    "⠇",
+    "⠏",
+)
+
 
 class LoadingIndicator(Static):
     """A small loading indicator widget that shows a spinner."""
@@ -19,18 +33,7 @@ class LoadingIndicator(Static):
     }
     """
 
-    SPINNER_FRAMES: ClassVar[tuple[str, ...]] = (
-        "⠋",
-        "⠙",
-        "⠹",
-        "⠸",
-        "⠼",
-        "⠴",
-        "⠦",
-        "⠧",
-        "⠇",
-        "⠏",
-    )
+    SPINNER_FRAMES: ClassVar[tuple[str, ...]] = SPINNER_FRAMES
 
     loading = reactive(False)
 

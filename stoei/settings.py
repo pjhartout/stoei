@@ -98,33 +98,28 @@ class Settings:
             else "WARNING"
         )
 
-        max_log_lines = _coerce_int(data.get("max_log_lines"))
-        if max_log_lines is None or max_log_lines < MIN_LOG_LINES:
-            max_log_lines = DEFAULT_MAX_LOG_LINES
+        max_log_lines = _bounded_int(data.get("max_log_lines"), MIN_LOG_LINES, None, DEFAULT_MAX_LOG_LINES)
 
-        refresh_interval = _coerce_float(data.get("refresh_interval"))
-        if (
-            refresh_interval is None
-            or refresh_interval < MIN_REFRESH_INTERVAL
-            or refresh_interval > MAX_REFRESH_INTERVAL
-        ):
-            refresh_interval = DEFAULT_REFRESH_INTERVAL
+        refresh_interval = _bounded_float(
+            data.get("refresh_interval"),
+            MIN_REFRESH_INTERVAL,
+            MAX_REFRESH_INTERVAL,
+            DEFAULT_REFRESH_INTERVAL,
+        )
 
-        job_history_days = _coerce_int(data.get("job_history_days"))
-        if (
-            job_history_days is None
-            or job_history_days < MIN_JOB_HISTORY_DAYS
-            or job_history_days > MAX_JOB_HISTORY_DAYS
-        ):
-            job_history_days = DEFAULT_JOB_HISTORY_DAYS
+        job_history_days = _bounded_int(
+            data.get("job_history_days"),
+            MIN_JOB_HISTORY_DAYS,
+            MAX_JOB_HISTORY_DAYS,
+            DEFAULT_JOB_HISTORY_DAYS,
+        )
 
-        log_viewer_lines = _coerce_int(data.get("log_viewer_lines"))
-        if (
-            log_viewer_lines is None
-            or log_viewer_lines < MIN_LOG_VIEWER_LINES
-            or log_viewer_lines > MAX_LOG_VIEWER_LINES
-        ):
-            log_viewer_lines = DEFAULT_LOG_VIEWER_LINES
+        log_viewer_lines = _bounded_int(
+            data.get("log_viewer_lines"),
+            MIN_LOG_VIEWER_LINES,
+            MAX_LOG_VIEWER_LINES,
+            DEFAULT_LOG_VIEWER_LINES,
+        )
 
         keybind_mode_value = _coerce_str(data.get("keybind_mode"))
         keybind_mode: KeybindMode = (
@@ -148,21 +143,18 @@ class Settings:
         if energy_loading_enabled is None:
             energy_loading_enabled = False
 
-        energy_history_months = _coerce_int(data.get("energy_history_months"))
-        if energy_history_months is None or energy_history_months < 1:
-            energy_history_months = DEFAULT_ENERGY_HISTORY_MONTHS
+        energy_history_months = _bounded_int(data.get("energy_history_months"), 1, None, DEFAULT_ENERGY_HISTORY_MONTHS)
 
         # Parse column widths
         column_widths = _parse_column_widths(data.get("column_widths"))
 
         # Parse sidebar width
-        sidebar_width_percent = _coerce_int(data.get("sidebar_width_percent"))
-        if (
-            sidebar_width_percent is None
-            or sidebar_width_percent < MIN_SIDEBAR_WIDTH_PERCENT
-            or sidebar_width_percent > MAX_SIDEBAR_WIDTH_PERCENT
-        ):
-            sidebar_width_percent = DEFAULT_SIDEBAR_WIDTH_PERCENT
+        sidebar_width_percent = _bounded_int(
+            data.get("sidebar_width_percent"),
+            MIN_SIDEBAR_WIDTH_PERCENT,
+            MAX_SIDEBAR_WIDTH_PERCENT,
+            DEFAULT_SIDEBAR_WIDTH_PERCENT,
+        )
 
         return cls(
             theme=theme,
@@ -343,6 +335,42 @@ def _coerce_bool(value: object) -> bool | None:
         if value.lower() in ("false", "0", "no"):
             return False
     return None
+
+
+def _bounded_int(value: object, minimum: int, maximum: int | None, default: int) -> int:
+    """Coerce a value to an int and clamp it to a default when out of bounds.
+
+    Args:
+        value: Raw value to coerce.
+        minimum: Inclusive lower bound; values below it fall back to the default.
+        maximum: Inclusive upper bound, or None for no upper bound.
+        default: Value returned when coercion fails or bounds are violated.
+
+    Returns:
+        The coerced integer when within bounds, otherwise the default.
+    """
+    coerced = _coerce_int(value)
+    if coerced is None or coerced < minimum or (maximum is not None and coerced > maximum):
+        return default
+    return coerced
+
+
+def _bounded_float(value: object, minimum: float, maximum: float | None, default: float) -> float:
+    """Coerce a value to a float and clamp it to a default when out of bounds.
+
+    Args:
+        value: Raw value to coerce.
+        minimum: Inclusive lower bound; values below it fall back to the default.
+        maximum: Inclusive upper bound, or None for no upper bound.
+        default: Value returned when coercion fails or bounds are violated.
+
+    Returns:
+        The coerced float when within bounds, otherwise the default.
+    """
+    coerced = _coerce_float(value)
+    if coerced is None or coerced < minimum or (maximum is not None and coerced > maximum):
+        return default
+    return coerced
 
 
 def _parse_column_widths(
