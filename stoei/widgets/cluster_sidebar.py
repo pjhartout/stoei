@@ -1,14 +1,18 @@
 """Cluster load sidebar widget."""
 
-from dataclasses import dataclass, field
 from typing import ClassVar
 
 from textual.app import ComposeResult
 from textual.containers import VerticalScroll
 from textual.widgets import Static
 
+from stoei.cluster_stats import ClusterStats, PendingPartitionStats
 from stoei.colors import get_theme_colors
-from stoei.slurm.wait_time import PartitionWaitStats, format_wait_time
+from stoei.slurm.wait_time import format_wait_time
+
+# Re-exported for backwards compatibility: these data models now live in
+# stoei.cluster_stats so that non-widget modules can import them.
+__all__ = ["ClusterSidebar", "ClusterStats", "PendingPartitionStats", "format_memory_gb"]
 
 # Conversion constant: 1 TB = 1024 GB
 GB_PER_TB = 1024
@@ -26,89 +30,6 @@ def format_memory_gb(memory_gb: float) -> str:
     if memory_gb >= GB_PER_TB:
         return f"{memory_gb / GB_PER_TB:.1f} TB"
     return f"{memory_gb:.1f} GB"
-
-
-@dataclass
-class PendingPartitionStats:
-    """Aggregated pending resources for a single partition."""
-
-    jobs_count: int = 0
-    cpus: int = 0
-    memory_gb: float = 0.0
-    gpus: int = 0
-    gpus_by_type: dict[str, int] = field(default_factory=dict)
-
-
-@dataclass
-class ClusterStats:
-    """Cluster statistics data."""
-
-    total_nodes: int = 0
-    free_nodes: int = 0
-    allocated_nodes: int = 0
-    total_cpus: int = 0
-    allocated_cpus: int = 0
-    total_memory_gb: float = 0.0
-    allocated_memory_gb: float = 0.0
-    total_gpus: int = 0
-    allocated_gpus: int = 0
-    gpus_by_type: dict[str, tuple[int, int]] = field(default_factory=dict)
-    # Draining nodes (excluded from totals, tracked separately)
-    draining_nodes: int = 0
-    # Pending job resources
-    pending_jobs_count: int = 0
-    pending_cpus: int = 0
-    pending_memory_gb: float = 0.0
-    pending_gpus: int = 0
-    pending_gpus_by_type: dict[str, int] = field(default_factory=dict)
-    pending_by_partition: dict[str, PendingPartitionStats] = field(default_factory=dict)
-    # Wait time statistics per partition (from last N hours)
-    wait_stats_by_partition: dict[str, PartitionWaitStats] = field(default_factory=dict)
-    wait_stats_hours: int = 1  # Time window used for stats
-
-    @property
-    def free_nodes_pct(self) -> float:
-        """Calculate percentage of free nodes."""
-        if self.total_nodes == 0:
-            return 0.0
-        return (self.free_nodes / self.total_nodes) * 100.0
-
-    @property
-    def free_cpus_pct(self) -> float:
-        """Calculate percentage of free CPUs."""
-        if self.total_cpus == 0:
-            return 0.0
-        return ((self.total_cpus - self.allocated_cpus) / self.total_cpus) * 100.0
-
-    @property
-    def free_memory_pct(self) -> float:
-        """Calculate percentage of free memory."""
-        if self.total_memory_gb == 0:
-            return 0.0
-        return ((self.total_memory_gb - self.allocated_memory_gb) / self.total_memory_gb) * 100.0
-
-    @property
-    def free_gpus_pct(self) -> float:
-        """Calculate percentage of free GPUs."""
-        if self.total_gpus == 0:
-            return 0.0
-        return ((self.total_gpus - self.allocated_gpus) / self.total_gpus) * 100.0
-
-    def get_gpu_type_free_pct(self, gpu_type: str) -> float:
-        """Calculate percentage of free GPUs for a specific type.
-
-        Args:
-            gpu_type: The GPU type (e.g., 'h200', 'a100', 'gpu').
-
-        Returns:
-            Percentage of free GPUs for this type.
-        """
-        if gpu_type not in self.gpus_by_type:
-            return 0.0
-        total, allocated = self.gpus_by_type[gpu_type]
-        if total == 0:
-            return 0.0
-        return ((total - allocated) / total) * 100.0
 
 
 class ClusterSidebar(VerticalScroll):
