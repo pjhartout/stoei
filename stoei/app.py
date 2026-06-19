@@ -1417,43 +1417,6 @@ class SlurmMonitor(App[None]):
             timeline,
         ]
 
-    def _update_ui_from_cache(self) -> None:
-        """Update UI components from cached data (must run on main thread)."""
-        # Check which tab is active
-        try:
-            tab_container = self.query_one("#tab-container", TabContainer)
-            active_tab = tab_container.active_tab
-        except Exception:
-            active_tab = "jobs"  # Default to jobs tab if we can't determine
-
-        # Only update jobs table if jobs tab is active
-        if active_tab == "jobs":
-            job_rows = [tuple(self._job_row_values(j)) for j in self._sorted_jobs_for_display(self._job_cache.jobs)]
-            self._update_jobs_table(job_rows)
-
-        # Always update the My Usage banner (lives on the Jobs tab)
-        self._update_my_usage_summary(self._cached_running_user_stats)
-
-        # Update cluster sidebar (skip if no node data yet -- sidebar keeps showing
-        # "Loading cluster data..." until node data arrives from background)
-        if self._cluster_nodes:
-            self._update_cluster_sidebar()
-
-        # Update node, user, and priority overview if those tabs are active
-        try:
-            tab_container = self.query_one("#tab-container", TabContainer)
-            if tab_container.active_tab == "nodes":
-                self._update_node_overview()
-            elif tab_container.active_tab == "users":
-                self._update_user_overview()
-            elif tab_container.active_tab == "priority":
-                self._update_priority_overview()
-        except Exception as exc:
-            logger.debug(f"Failed to update tab-specific overview: {exc}")
-
-        # Check window size and adjust layout
-        self._check_window_size()
-
     def _format_state(self, state: str, category: JobState) -> str:
         """Format job state with color coding.
 

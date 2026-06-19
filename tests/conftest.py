@@ -8,6 +8,19 @@ import pytest
 from tests.mocks import MOCKS_DIR
 
 
+@pytest.fixture(autouse=True)
+def _no_real_slurm(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Route every SLURM command to the offline mock executables.
+
+    This is a real HPC login node with ``/usr/bin/squeue`` etc. installed, so any
+    test reaching the command layer would otherwise query the live scheduler --
+    slow, non-deterministic, and abusive to production. Prepending the mocks to
+    PATH keeps the whole suite fast and offline. Tests that patch the command
+    layer in Python are unaffected (their patches take precedence).
+    """
+    monkeypatch.setenv("PATH", f"{MOCKS_DIR}:{os.environ.get('PATH', '')}")
+
+
 @pytest.fixture
 def mock_slurm_path(monkeypatch: pytest.MonkeyPatch) -> Path:
     """Add mock SLURM executables to PATH.

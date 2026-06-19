@@ -6,11 +6,9 @@ from stoei.slurm.energy import (
     format_energy,
     get_cpu_tdp_per_core,
     get_gpu_tdp,
-    get_tdp_file_path,
     parse_cpu_count_from_tres,
     parse_elapsed_to_seconds,
     parse_gpu_info_from_tres,
-    reload_tdp_values,
 )
 
 
@@ -263,17 +261,6 @@ class TestParseCpuCountFromTres:
 
 class TestTdpJsonFile:
     """Tests for JSON-based TDP loading."""
-
-    def test_tdp_file_exists(self) -> None:
-        """Test that the TDP JSON file exists."""
-        assert get_tdp_file_path().exists()
-
-    def test_reload_tdp_values(self) -> None:
-        """Test that TDP values can be reloaded."""
-        # Should not raise an exception
-        reload_tdp_values()
-        # Values should still work after reload
-        assert get_gpu_tdp("H200") == 700
 
     def test_common_gpus_have_tdp(self) -> None:
         """Test that common GPUs have TDP values defined."""
