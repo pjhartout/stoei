@@ -20,6 +20,18 @@ from textual.widgets import DataTable, Footer, Header, Static
 from textual.widgets.data_table import RowKey
 from textual.worker import Worker, WorkerState, get_current_worker
 
+from stoei.cluster_stats import (
+    ClusterStats,
+    PendingPartitionStats,
+    aggregate_pending_gpus,
+    calculate_cluster_stats,
+    calculate_pending_resources,
+    parse_gpus_from_gres,
+    parse_node_cpus,
+    parse_node_memory,
+    parse_node_state,
+    process_gpu_entries_for_stats,
+)
 from stoei.colors import get_theme_colors
 from stoei.keybindings import Actions, KeybindingConfig
 from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
@@ -30,7 +42,7 @@ from stoei.settings import (
     load_settings,
     save_settings,
 )
-from stoei.slurm.array_parser import normalize_array_job_id, parse_array_size
+from stoei.slurm.array_parser import normalize_array_job_id
 from stoei.slurm.cache import Job, JobCache, JobState
 from stoei.slurm.commands import (
     cancel_job,
@@ -51,15 +63,13 @@ from stoei.slurm.gpu_parser import (
     aggregate_gpu_counts,
     calculate_total_gpus,
     format_gpu_types,
-    has_specific_gpu_types,
     parse_gpu_entries,
     parse_gpu_from_gres,
 )
-from stoei.slurm.parser import parse_sprio_output, parse_sshare_output, parse_tres_resources
+from stoei.slurm.parser import parse_sprio_output, parse_sshare_output
 from stoei.slurm.validation import check_slurm_available, get_current_username
-from stoei.slurm.wait_time import calculate_partition_wait_stats
 from stoei.themes import DEFAULT_THEME_NAME, REGISTERED_THEMES
-from stoei.widgets.cluster_sidebar import ClusterSidebar, ClusterStats, PendingPartitionStats
+from stoei.widgets.cluster_sidebar import ClusterSidebar
 from stoei.widgets.filterable_table import ColumnConfig, FilterableDataTable
 from stoei.widgets.help_screen import HelpScreen
 from stoei.widgets.loading_indicator import LoadingIndicator
@@ -1474,116 +1484,28 @@ class SlurmMonitor(App[None]):
             logger.error(f"Failed to update cluster sidebar: {exc}", exc_info=True)
 
     def _parse_node_state(self, state: str, stats: ClusterStats) -> bool:
-        """Parse node state and update node counts.
-
-        Draining nodes are excluded from total_nodes but their allocated
-        resources are still counted. This prevents draining nodes from
-        inflating the denominator of utilization percentages.
-
-        Args:
-            state: Node state string (uppercase).
-            stats: ClusterStats object to update.
-
-        Returns:
-            True if the node is draining (excluded from totals).
-        """
-        if "DRAIN" in state:
-            stats.draining_nodes += 1
-            if "ALLOCATED" in state or "MIXED" in state:
-                stats.allocated_nodes += 1
-            return True
-        stats.total_nodes += 1
-        if "IDLE" in state:
-            stats.free_nodes += 1
-        elif "ALLOCATED" in state or "MIXED" in state:
-            stats.allocated_nodes += 1
-        return False
+        """Delegate to ``stoei.cluster_stats.parse_node_state``."""
+        return parse_node_state(state, stats)
 
     def _parse_node_cpus(self, node_data: dict[str, str], stats: ClusterStats, *, include_total: bool = True) -> None:
-        """Parse CPU information from node data.
-
-        Args:
-            node_data: Node data dictionary.
-            stats: ClusterStats object to update.
-            include_total: Whether to include in total_cpus (False for draining nodes).
-        """
-        cpus_total_str = node_data.get("CPUTot", "0")
-        cpus_alloc_str = node_data.get("CPUAlloc", "0")
-        try:
-            cpus_total = int(cpus_total_str)
-            cpus_alloc = int(cpus_alloc_str)
-            if include_total:
-                stats.total_cpus += cpus_total
-            stats.allocated_cpus += cpus_alloc
-        except ValueError:
-            pass
+        """Delegate to ``stoei.cluster_stats.parse_node_cpus``."""
+        parse_node_cpus(node_data, stats, include_total=include_total)
 
     def _parse_node_memory(self, node_data: dict[str, str], stats: ClusterStats, *, include_total: bool = True) -> None:
-        """Parse memory information from node data.
-
-        Args:
-            node_data: Node data dictionary.
-            stats: ClusterStats object to update.
-            include_total: Whether to include in total_memory_gb (False for draining nodes).
-        """
-        mem_total_str = node_data.get("RealMemory", "0")
-        mem_alloc_str = node_data.get("AllocMem", "0")
-        try:
-            mem_total_mb = int(mem_total_str)
-            mem_alloc_mb = int(mem_alloc_str)
-            if include_total:
-                stats.total_memory_gb += mem_total_mb / 1024.0
-            stats.allocated_memory_gb += mem_alloc_mb / 1024.0
-        except ValueError:
-            pass
+        """Delegate to ``stoei.cluster_stats.parse_node_memory``."""
+        parse_node_memory(node_data, stats, include_total=include_total)
 
     def _process_gpu_entries_for_stats(
         self, gpu_entries: list[tuple[str, int]], stats: ClusterStats, is_allocated: bool
     ) -> None:
-        """Process GPU entries and update cluster stats.
-
-        Args:
-            gpu_entries: List of (gpu_type, gpu_count) tuples.
-            stats: ClusterStats object to update.
-            is_allocated: Whether these are allocated GPUs.
-        """
-        has_specific = has_specific_gpu_types(gpu_entries)
-
-        for gpu_type, gpu_count in gpu_entries:
-            if has_specific and gpu_type.lower() == "gpu":
-                continue
-            current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
-            if is_allocated:
-                stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
-                stats.allocated_gpus += gpu_count
-            else:
-                stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
-                stats.total_gpus += gpu_count
+        """Delegate to ``stoei.cluster_stats.process_gpu_entries_for_stats``."""
+        process_gpu_entries_for_stats(gpu_entries, stats, is_allocated)
 
     def _parse_gpus_from_gres(
         self, node_data: dict[str, str], state: str, stats: ClusterStats, *, include_total: bool = True
     ) -> None:
-        """Parse GPUs from Gres field (fallback when TRES is not available).
-
-        Args:
-            node_data: Node data dictionary.
-            state: Node state string (uppercase).
-            stats: ClusterStats object to update.
-            include_total: Whether to include in total_gpus (False for draining nodes).
-        """
-        gres = node_data.get("Gres", "")
-        gpu_entries = parse_gpu_from_gres(gres)
-
-        for gpu_type, gpu_count in gpu_entries:
-            current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
-            if include_total:
-                stats.gpus_by_type[gpu_type] = (current_total + gpu_count, current_alloc)
-                stats.total_gpus += gpu_count
-            # Estimate allocated GPUs based on node state (skip for draining nodes)
-            if include_total and ("ALLOCATED" in state or "MIXED" in state):
-                current_total, current_alloc = stats.gpus_by_type.get(gpu_type, (0, 0))
-                stats.gpus_by_type[gpu_type] = (current_total, current_alloc + gpu_count)
-                stats.allocated_gpus += gpu_count
+        """Delegate to ``stoei.cluster_stats.parse_gpus_from_gres``."""
+        parse_gpus_from_gres(node_data, state, stats, include_total=include_total)
 
     def _aggregate_pending_gpus(
         self,
@@ -1592,135 +1514,16 @@ class SlurmMonitor(App[None]):
         pending_gpus_by_type: dict[str, int],
         partition_stats: PendingPartitionStats,
     ) -> int:
-        """Aggregate GPU counts from pending jobs.
-
-        Args:
-            gpu_entries: List of (gpu_type, gpu_count) tuples.
-            array_size: Array size multiplier.
-            pending_gpus_by_type: Dict to update with GPU counts by type.
-            partition_stats: Partition stats to update.
-
-        Returns:
-            Total pending GPUs from these entries.
-        """
-        total_gpus = 0
-        for gpu_type, gpu_count in gpu_entries:
-            scaled_gpu_count = gpu_count * array_size
-            total_gpus += scaled_gpu_count
-            partition_stats.gpus += scaled_gpu_count
-            pending_gpus_by_type[gpu_type] = pending_gpus_by_type.get(gpu_type, 0) + scaled_gpu_count
-            partition_stats.gpus_by_type[gpu_type] = partition_stats.gpus_by_type.get(gpu_type, 0) + scaled_gpu_count
-        return total_gpus
+        """Delegate to ``stoei.cluster_stats.aggregate_pending_gpus``."""
+        return aggregate_pending_gpus(gpu_entries, array_size, pending_gpus_by_type, partition_stats)
 
     def _calculate_pending_resources(self, stats: ClusterStats) -> None:
-        """Calculate resources requested by pending jobs.
-
-        Array jobs (e.g., 12345_[0-99]) are expanded so that resources are
-        multiplied by the number of tasks in the array.
-
-        Args:
-            stats: ClusterStats object to update with pending resource data.
-        """
-        # Job tuple indices
-        job_id_index, partition_index, state_index, tres_index = 0, 3, 4, 8
-        min_fields_for_tres = 9
-
-        pending_cpus, pending_memory_gb, pending_gpus, pending_jobs_count = 0, 0.0, 0, 0
-        pending_gpus_by_type: dict[str, int] = {}
-        pending_by_partition: dict[str, PendingPartitionStats] = {}
-
-        for job in self._all_users_jobs:
-            if len(job) <= state_index or job[state_index].strip().upper() not in ("PENDING", "PD"):
-                continue
-
-            job_id = job[job_id_index].strip() if len(job) > job_id_index else ""
-            array_size = parse_array_size(job_id)
-            pending_jobs_count += array_size
-
-            partition_key = (job[partition_index].strip() if len(job) > partition_index else "") or "unknown"
-            partition_stats = pending_by_partition.setdefault(partition_key, PendingPartitionStats())
-            partition_stats.jobs_count += array_size
-
-            if len(job) < min_fields_for_tres or not job[tres_index]:
-                continue
-
-            cpus, memory_gb, gpu_entries = parse_tres_resources(job[tres_index])
-            pending_cpus += cpus * array_size
-            pending_memory_gb += memory_gb * array_size
-            partition_stats.cpus += cpus * array_size
-            partition_stats.memory_gb += memory_gb * array_size
-
-            pending_gpus += self._aggregate_pending_gpus(gpu_entries, array_size, pending_gpus_by_type, partition_stats)
-
-        stats.pending_jobs_count = pending_jobs_count
-        stats.pending_cpus = pending_cpus
-        stats.pending_memory_gb = pending_memory_gb
-        stats.pending_gpus = pending_gpus
-        stats.pending_gpus_by_type = pending_gpus_by_type
-        stats.pending_by_partition = pending_by_partition
-
-        logger.debug(
-            f"Pending resources: {pending_jobs_count} jobs, {pending_cpus} CPUs, "
-            f"{pending_memory_gb:.1f} GB memory, {pending_gpus} GPUs"
-        )
+        """Delegate to ``stoei.cluster_stats.calculate_pending_resources``."""
+        calculate_pending_resources(self._all_users_jobs, stats)
 
     def _calculate_cluster_stats(self) -> ClusterStats:
-        """Calculate cluster statistics from node data.
-
-        Returns:
-            ClusterStats object with aggregated statistics.
-        """
-        stats = ClusterStats()
-
-        if not self._cluster_nodes:
-            logger.debug("No cluster nodes available for stats calculation")
-            # Still calculate pending resources even if no cluster nodes
-            self._calculate_pending_resources(stats)
-            return stats
-
-        for node_data in self._cluster_nodes:
-            # Parse node information
-            state = node_data.get("State", "").upper()
-
-            # Count nodes (draining nodes excluded from totals)
-            is_draining = self._parse_node_state(state, stats)
-
-            # Parse CPUs (draining nodes: allocated only, no totals)
-            self._parse_node_cpus(node_data, stats, include_total=not is_draining)
-
-            # Parse memory (draining nodes: allocated only, no totals)
-            self._parse_node_memory(node_data, stats, include_total=not is_draining)
-
-            # Parse GPUs by type from CfgTRES and AllocTRES
-            cfg_tres = node_data.get("CfgTRES", "")
-            alloc_tres = node_data.get("AllocTRES", "")
-
-            # Parse CfgTRES for total GPUs by type (skip for draining nodes)
-            # Note: If both generic (gres/gpu=8) and specific (gres/gpu:h200=8) exist,
-            # they represent the same GPUs, so we only count specific types to avoid double-counting
-            if not is_draining:
-                gpu_entries = parse_gpu_entries(cfg_tres)
-                self._process_gpu_entries_for_stats(gpu_entries, stats, is_allocated=False)
-
-            # Parse AllocTRES for allocated GPUs by type (skip for draining nodes)
-            if not is_draining:
-                alloc_entries = parse_gpu_entries(alloc_tres)
-                self._process_gpu_entries_for_stats(alloc_entries, stats, is_allocated=True)
-
-            # Fallback: if no TRES data, try parsing Gres field
-            if not cfg_tres and not alloc_tres:
-                self._parse_gpus_from_gres(node_data, state, stats, include_total=not is_draining)
-
-        # Calculate pending job resources
-        self._calculate_pending_resources(stats)
-
-        # Calculate wait time statistics
-        if self._wait_time_jobs:
-            stats.wait_stats_by_partition = calculate_partition_wait_stats(self._wait_time_jobs)
-            stats.wait_stats_hours = 1  # Currently hardcoded to 1 hour
-            logger.debug(f"Calculated wait stats for {len(stats.wait_stats_by_partition)} partitions")
-
-        return stats
+        """Delegate to ``stoei.cluster_stats.calculate_cluster_stats``."""
+        return calculate_cluster_stats(self._cluster_nodes, self._all_users_jobs, self._wait_time_jobs)
 
     def _update_node_overview(self) -> None:
         """Update the node overview tab using cached node infos.
