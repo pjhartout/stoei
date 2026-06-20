@@ -98,10 +98,10 @@ class TestStartRefreshWorker:
         app = SlurmMonitor()
 
         with patch.object(app, "run_worker", return_value=MagicMock()) as mock_run_worker:
-            app._start_refresh_worker()
+            app._refresh.start_refresh_worker()
 
             mock_run_worker.assert_called_once_with(
-                app._refresh_data_async,
+                app._refresh.refresh_data_async,
                 name="refresh_data",
                 group="data_load",
                 exclusive=True,
@@ -120,7 +120,7 @@ class TestStartRefreshWorker:
         app._refresh_worker = mock_worker
 
         with patch.object(app, "run_worker") as mock_run_worker:
-            app._start_refresh_worker()
+            app._refresh.start_refresh_worker()
 
             # run_worker should NOT be called since worker is already running
             mock_run_worker.assert_not_called()
@@ -137,7 +137,7 @@ class TestStartRefreshWorker:
         app._refresh_worker = mock_worker
 
         with patch.object(app, "run_worker", return_value=MagicMock()) as mock_run_worker:
-            app._start_refresh_worker()
+            app._refresh.start_refresh_worker()
 
             # run_worker should be called since previous worker finished
             mock_run_worker.assert_called_once()
@@ -162,7 +162,7 @@ class TestRefreshDataAsync:
         app = SlurmMonitor()
 
         # The method should NOT be a coroutine function
-        assert not inspect.iscoroutinefunction(app._refresh_data_async)
+        assert not inspect.iscoroutinefunction(app._refresh.refresh_data_async)
 
     def _make_mock_worker(self) -> MagicMock:
         """Create a mock Textual worker with is_cancelled=False."""
@@ -185,7 +185,7 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
             patch.object(app, "_post_ui_callback"),
         ):
-            app._refresh_data_async()
+            app._refresh.refresh_data_async()
 
         assert app._job_cache.jobs == []
 
@@ -204,7 +204,7 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
             patch.object(app, "_post_ui_callback"),
         ):
-            app._refresh_data_async()
+            app._refresh.refresh_data_async()
 
         assert app._cluster_nodes == [{"NodeName": "n1"}]
 
@@ -224,7 +224,7 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
             patch.object(app, "_post_ui_callback", side_effect=ui_callback_calls.append),
         ):
-            app._refresh_data_async()
+            app._refresh.refresh_data_async()
 
         # Progressive rendering: loading indicator + one call per data source + completion call
         assert len(ui_callback_calls) >= 6
@@ -244,7 +244,7 @@ class TestRefreshDataAsync:
             patch("stoei.app.get_current_worker", return_value=self._make_mock_worker()),
             patch.object(app, "_post_ui_callback"),
         ):
-            app._refresh_data_async()
+            app._refresh.refresh_data_async()
 
         assert app._cluster_nodes == []
 
@@ -728,7 +728,7 @@ class TestUpdateClusterSidebar:
 
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 app._cluster_nodes = [
@@ -741,7 +741,7 @@ class TestUpdateClusterSidebar:
                         "AllocMem": "0",
                     }
                 ]
-                app._update_cluster_sidebar()
+                app._tables.update_cluster_sidebar()
                 sidebar = app.query_one("#cluster-sidebar", ClusterSidebar)
                 assert sidebar.stats.total_nodes == 1
                 assert sidebar.stats.free_nodes == 1
@@ -750,25 +750,25 @@ class TestUpdateClusterSidebar:
         """Test that _update_cluster_sidebar handles missing widget gracefully."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 # Remove the sidebar widget
                 sidebar = app.query_one("#cluster-sidebar")
                 sidebar.remove()
                 # Should not raise an error
-                app._update_cluster_sidebar()
+                app._tables.update_cluster_sidebar()
 
     async def test_update_cluster_sidebar_handles_calculation_error(self, app: SlurmMonitor) -> None:
         """Test that _update_cluster_sidebar handles calculation errors gracefully."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 with patch.object(app, "_calculate_cluster_stats", side_effect=Exception("Test error")):
                     # Should not raise an error, should log it instead
-                    app._update_cluster_sidebar()
+                    app._tables.update_cluster_sidebar()
 
 
 class TestParseTresResources:

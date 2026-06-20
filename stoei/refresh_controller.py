@@ -28,7 +28,8 @@ from textual.worker import Worker, WorkerState
 from stoei.cluster_stats import ClusterStats
 from stoei.settings import Settings
 from stoei.slurm.array_parser import normalize_array_job_id
-from stoei.slurm.cache import Job, JobCache
+from stoei.slurm.cache import JobCache
+from stoei.table_controller import TableController
 
 # Type aliases for fetch result types used in apply_fetch_result.
 _HistoryResult: TypeAlias = tuple[list[tuple[str, ...]] | None, int, int, int]
@@ -139,27 +140,6 @@ class _RefreshHost(Protocol):
         """Return the worker running the current task/thread."""
         ...
 
-    # --- Worker-body delegators that must stay on the app (test patch targets) ---
-    def _initial_load_async(self) -> None:
-        """Initial step-by-step data load (worker thread)."""
-        ...
-
-    def _refresh_data_async(self) -> None:
-        """Heavy parallel refresh (worker thread)."""
-        ...
-
-    def _refresh_running_jobs_async(self) -> None:
-        """Fast running-jobs refresh (worker thread)."""
-        ...
-
-    def _start_refresh_worker(self) -> None:
-        """Start the heavy background refresh worker."""
-        ...
-
-    def _start_running_refresh_worker(self) -> None:
-        """Start the fast running-jobs refresh worker."""
-        ...
-
     # --- Loading-screen step bridges (stay on the app) ---
     def _loading_update_step(self, idx: int) -> None:
         """Mark a loading step as started."""
@@ -186,10 +166,6 @@ class _RefreshHost(Protocol):
         """Toggle the global loading indicator."""
         ...
 
-    def _update_jobs_table(self, job_rows: list[tuple[str, ...]]) -> None:
-        """Push pre-computed job rows into the jobs table widget."""
-        ...
-
     def _update_nodes_tab_only(self) -> None:
         """Update the node overview tab only."""
         ...
@@ -206,10 +182,6 @@ class _RefreshHost(Protocol):
         """Update the energy subtab in user overview."""
         ...
 
-    def _update_cluster_sidebar_with_stats(self, stats: ClusterStats) -> None:
-        """Update the cluster sidebar with pre-computed stats."""
-        ...
-
     def _parse_node_infos(self) -> list:
         """Parse cached cluster node data into NodeInfo objects."""
         ...
@@ -224,14 +196,6 @@ class _RefreshHost(Protocol):
 
     def _compute_priority_overview_cache(self) -> None:
         """Pre-compute priority overview data from cached SLURM results."""
-        ...
-
-    def _sorted_jobs_for_display(self, jobs: list[Job]) -> list[Job]:
-        """Sort jobs for stable, user-friendly display."""
-        ...
-
-    def _job_row_values(self, job: Job) -> list[str]:
-        """Build the row values for a job."""
         ...
 
     def aggregate_energy_stats(self, energy_jobs: list[tuple[str, ...]]) -> list:
@@ -287,20 +251,23 @@ class RefreshController:
     app via the :class:`_RefreshHost` protocol.
     """
 
-    def __init__(self, host: _RefreshHost) -> None:
+    def __init__(self, host: _RefreshHost, tables: TableController) -> None:
         """Initialise the controller.
 
         Args:
             host: The app whose refresh state the controller orchestrates.
+            tables: The table controller that renders the jobs table, sidebar,
+                and overview widgets the refresh flow pushes results into.
         """
         self._host = host
+        self._tables = tables
 
     # --- Worker starters ---
 
     def start_initial_load_worker(self) -> None:
         """Start background worker for initial step-by-step data load."""
         self._host._refresh_worker = self._host.run_worker(
-            self._host._initial_load_async,
+            self.initial_load_async,
             name="initial_load",
             group="data_load",
             exclusive=True,
@@ -314,7 +281,7 @@ class RefreshController:
             return
 
         self._host._refresh_worker = self._host.run_worker(
-            self._host._refresh_data_async,
+            self.refresh_data_async,
             name="refresh_data",
             group="data_load",
             exclusive=True,
@@ -335,7 +302,7 @@ class RefreshController:
             return
 
         self._host._running_refresh_worker = self._host.run_worker(
-            self._host._refresh_running_jobs_async,
+            self.refresh_running_jobs_async,
             name="refresh_running_jobs",
             group="running_refresh",
             exclusive=True,
@@ -367,8 +334,8 @@ class RefreshController:
 
         # Pre-compute row tuples in the worker thread so the main thread
         # only needs to push them into the DataTable (the unavoidable DOM work).
-        jobs = self._host._sorted_jobs_for_display(self._host._job_cache.jobs)
-        self._host._precomputed_job_rows = [tuple(self._host._job_row_values(job)) for job in jobs]
+        jobs = self._tables.sorted_jobs_for_display(self._host._job_cache.jobs)
+        self._host._precomputed_job_rows = [tuple(self._tables.job_row_values(job)) for job in jobs]
 
         self._host._loading_complete_step(2, "Ready")
 
@@ -499,13 +466,13 @@ class RefreshController:
             self._notify_new_jobs(set(old_states))
             self._invalidate_changed_job_info(old_states)
             job_rows = self._current_job_rows()
-        self._host._post_ui_callback(lambda: self._host._update_jobs_table(job_rows))
+        self._host._post_ui_callback(lambda: self._tables.update_jobs_table(job_rows))
 
     def _current_job_rows(self) -> list[tuple[str, ...]]:
         """Snapshot the cached jobs as display-ready table rows."""
         return [
-            tuple(self._host._job_row_values(job))
-            for job in self._host._sorted_jobs_for_display(self._host._job_cache.jobs)
+            tuple(self._tables.job_row_values(job))
+            for job in self._tables.sorted_jobs_for_display(self._host._job_cache.jobs)
         ]
 
     # --- Parallel fetch helpers (run inside ThreadPoolExecutor threads) ---
@@ -649,7 +616,7 @@ class RefreshController:
                 )
                 self._invalidate_changed_job_info(old_states)
                 job_rows = self._current_job_rows()
-            self._host._post_ui_callback(lambda: self._host._update_jobs_table(job_rows))
+            self._host._post_ui_callback(lambda: self._tables.update_jobs_table(job_rows))
 
         elif label == "nodes":
             self._host._cluster_nodes = cast(list[dict[str, str]], result)
@@ -665,7 +632,7 @@ class RefreshController:
             self._host._wait_time_jobs = cast(list[tuple[str, ...]], result)
             stats = self._host._calculate_cluster_stats()
             self._host._cached_cluster_stats = stats
-            self._host._post_ui_callback(lambda s=stats: self._host._update_cluster_sidebar_with_stats(s))
+            self._host._post_ui_callback(lambda s=stats: self._tables.update_cluster_sidebar_with_stats(s))
 
         elif label == "fair_share":
             entries, error = cast(_PriorityHalfResult, result)
@@ -716,7 +683,7 @@ class RefreshController:
         if is_first_cycle:
             self._host._initial_background_complete = True
             self._host.heavy_refresh_timer = self._host.set_interval(
-                self._host.heavy_refresh_interval, self._host._start_refresh_worker
+                self._host.heavy_refresh_interval, self.start_refresh_worker
             )
             self._host.notify("Cluster data ready", timeout=3, severity="information")
             self._host.logger.info(

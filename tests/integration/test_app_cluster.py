@@ -22,7 +22,7 @@ class TestAppClusterIntegration:
         """Test that the app composes the cluster sidebar."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 sidebar = app.query_one("#cluster-sidebar", ClusterSidebar)
@@ -38,8 +38,8 @@ class TestAppClusterIntegration:
         """Test that the app updates cluster sidebar when data is refreshed."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
-            patch.object(app, "_start_initial_load_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
+            patch.object(app._refresh, "start_initial_load_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 # Mock cluster nodes data
@@ -53,7 +53,7 @@ class TestAppClusterIntegration:
                         "AllocMem": "0",
                     }
                 ]
-                app._update_cluster_sidebar()
+                app._tables.update_cluster_sidebar()
                 sidebar = app.query_one("#cluster-sidebar", ClusterSidebar)
                 assert sidebar.stats.total_nodes == 1
 
@@ -61,7 +61,7 @@ class TestAppClusterIntegration:
         """Test that the app handles TabSwitched events."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 # Mock cluster data
@@ -97,8 +97,8 @@ class TestAppClusterIntegration:
 
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
-            patch.object(app, "_start_initial_load_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
+            patch.object(app._refresh, "start_initial_load_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 app._cluster_nodes = [
@@ -132,7 +132,7 @@ class TestAppClusterIntegration:
 
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 app._all_users_jobs = [
@@ -156,7 +156,7 @@ class TestAppClusterIntegration:
         """Test that the app hides non-default tabs on mount."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 nodes_tab = app.query_one("#tab-nodes-content")
@@ -189,7 +189,7 @@ class TestAppClusterIntegration:
             patch.object(app, "post_message", side_effect=posted_messages.append),
             patch.object(app, "_post_ui_callback"),
         ):
-            app._refresh_data_async()
+            app._refresh.refresh_data_async()
             mock_nodes.assert_called_once()
             mock_jobs.assert_called_once()
 
@@ -209,7 +209,7 @@ class TestAppClusterIntegration:
             patch("stoei.app.get_current_worker", return_value=mock_worker),
             patch.object(app, "_post_ui_callback"),
         ):
-            app._refresh_data_async()
+            app._refresh.refresh_data_async()
             assert app._cluster_nodes == []
 
     def test_app_calculates_stats_with_empty_nodes(self, app: SlurmMonitor) -> None:
@@ -242,7 +242,7 @@ class TestAppClusterIntegration:
         # Mock SLURM availability check and prevent background worker from starting
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 # The app should still be running without rendering errors
@@ -272,7 +272,7 @@ class TestAppClusterIntegration:
         """Test that action_switch_tab_jobs switches to jobs tab."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 # Start on a different tab
@@ -293,7 +293,7 @@ class TestAppClusterIntegration:
         """Test that action_switch_tab_nodes switches to nodes tab."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
@@ -312,7 +312,7 @@ class TestAppClusterIntegration:
         """Test that action_switch_tab_users switches to users tab."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
@@ -331,7 +331,7 @@ class TestAppClusterIntegration:
         """Test that action_switch_tab_logs switches to logs tab."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
@@ -378,7 +378,7 @@ class TestAppClusterIntegration:
         """Test that action_next_tab cycles through tabs forward."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
@@ -413,7 +413,7 @@ class TestAppClusterIntegration:
         """Test that action_previous_tab cycles through tabs backward."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
@@ -448,7 +448,7 @@ class TestAppClusterIntegration:
         """Test that Tab key cycles through tabs forward."""
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
@@ -481,7 +481,7 @@ class TestAppClusterIntegration:
         # Users can still use left arrow or number keys for navigation
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)) as pilot:
                 tab_container = app.query_one("TabContainer", TabContainer)
