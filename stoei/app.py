@@ -16,7 +16,6 @@ from textual.events import Key
 from textual.message import Message
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Static
-from textual.widgets.data_table import RowKey
 from textual.worker import Worker, get_current_worker
 
 from stoei.cluster_stats import (
@@ -38,7 +37,6 @@ from stoei.logger import add_tui_sink, get_logger, remove_tui_sink
 from stoei.refresh_controller import (
     HEAVY_REFRESH_MULTIPLIER,
     RefreshController,
-    _FetchResult,
 )
 from stoei.settings import (
     MAX_SIDEBAR_WIDTH_PERCENT,
@@ -48,7 +46,7 @@ from stoei.settings import (
     save_settings,
 )
 from stoei.slurm.array_parser import normalize_array_job_id
-from stoei.slurm.cache import Job, JobCache, JobState
+from stoei.slurm.cache import JobCache, JobState
 from stoei.slurm.commands import (
     DEFAULT_MAX_RETRIES,
     cancel_job,
@@ -259,8 +257,9 @@ class SlurmMonitor(App[None]):
         # Collaborator owning the jobs-table / sidebar / overview render flows.
         self._tables: TableController = TableController(self)
         # Collaborator owning the data-refresh orchestration (fast/slow loops,
-        # initial load, parallel fetch, and result application).
-        self._refresh: RefreshController = RefreshController(self)
+        # initial load, parallel fetch, and result application). It pushes
+        # results into the table controller, so it is constructed after it.
+        self._refresh: RefreshController = RefreshController(self, tables=self._tables)
 
     def _init_refresh_state(self) -> None:
         """Initialise the data-refresh state: timers, workers, cache, and snapshots.
@@ -392,10 +391,6 @@ class SlurmMonitor(App[None]):
         self.push_screen(self._loading_screen)
 
         # Start initial load in background worker
-        self._start_initial_load_worker()
-
-    def _start_initial_load_worker(self) -> None:
-        """Start background worker for initial step-by-step data load."""
         self._refresh.start_initial_load_worker()
 
     def _loading_update_step(self, idx: int) -> None:
@@ -481,10 +476,6 @@ class SlurmMonitor(App[None]):
         """Aggregate energy history rows into per-user stats."""
         return UserOverviewTab.aggregate_energy_stats(energy_jobs)
 
-    def _initial_load_async(self) -> None:
-        """Perform initial data load with step-by-step progress (runs in worker thread)."""
-        self._refresh.initial_load_async()
-
     def _show_slurm_error(self) -> None:
         """Show SLURM unavailable error screen."""
         if self._loading_screen:
@@ -553,13 +544,13 @@ class SlurmMonitor(App[None]):
 
         # Start the fast running-jobs loop now so the jobs-table "Time" column
         # advances every refresh_interval, independent of the slow heavy load.
-        self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_running_refresh_worker)
+        self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._refresh.start_running_refresh_worker)
 
         # Kick off the first heavy background load (nodes, all-users jobs, energy,
         # wait times, priority, history). Its recurring timer starts once it
-        # completes, in _on_refresh_complete.
+        # completes, in RefreshController.on_refresh_complete.
         logger.info("Starting background load for cluster data sources")
-        self._start_refresh_worker()
+        self._refresh.start_refresh_worker()
 
     def _register_custom_themes(self) -> None:
         """Register custom themes for the app."""
@@ -611,10 +602,14 @@ class SlurmMonitor(App[None]):
         # Restart both loops' timers if running so the new interval takes effect.
         if self.auto_refresh_timer is not None:
             self.auto_refresh_timer.stop()
-            self.auto_refresh_timer = self.set_interval(self.refresh_interval, self._start_running_refresh_worker)
+            self.auto_refresh_timer = self.set_interval(
+                self.refresh_interval, self._refresh.start_running_refresh_worker
+            )
         if self.heavy_refresh_timer is not None:
             self.heavy_refresh_timer.stop()
-            self.heavy_refresh_timer = self.set_interval(self.heavy_refresh_interval, self._start_refresh_worker)
+            self.heavy_refresh_timer = self.set_interval(
+                self.heavy_refresh_interval, self._refresh.start_refresh_worker
+            )
         logger.info(f"Refresh interval changed from {old_interval}s to {new_interval}s")
 
     def _apply_keybind_mode(self, settings: Settings) -> None:
@@ -800,37 +795,13 @@ class SlurmMonitor(App[None]):
         """Interval (seconds) for the heavy data loop (history, nodes, priority, ...)."""
         return self.refresh_interval * HEAVY_REFRESH_MULTIPLIER
 
-    def _start_refresh_worker(self) -> None:
-        """Start the heavy background worker (history, nodes, all-users jobs, priority)."""
-        self._refresh.start_refresh_worker()
-
-    def _start_running_refresh_worker(self) -> None:
-        """Start the fast worker that refreshes running jobs (drives the jobs-table Time column)."""
-        self._refresh.start_running_refresh_worker()
-
-    def _refresh_running_jobs_async(self) -> None:
-        """Fetch running jobs (squeue only) and refresh the jobs table (worker thread)."""
-        self._refresh.refresh_running_jobs_async()
-
-    def _apply_running_jobs_result(self, running_jobs: list[tuple[str, ...]] | None) -> None:
-        """Rebuild the jobs table from fresh running jobs + cached history (worker thread)."""
-        self._refresh.apply_running_jobs_result(running_jobs)
-
-    def _refresh_data_async(self) -> None:
-        """Parallel refresh of SLURM data (runs in background worker thread)."""
-        self._refresh.refresh_data_async()
-
-    def _apply_fetch_result(self, label: str, result: _FetchResult) -> None:
-        """Process one completed fetch and push a partial UI update (worker thread)."""
-        self._refresh.apply_fetch_result(label, result)
-
     def _update_nodes_and_sidebar(self) -> None:
         """Update cluster sidebar and node overview tab (main thread only)."""
-        self.call_later(self._update_cluster_sidebar)
+        self.call_later(self._tables.update_cluster_sidebar)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "nodes":
-                self.call_later(self._update_node_overview)
+                self.call_later(self._tables.update_node_overview)
             else:
                 self._dirty_nodes_tab = True
         except Exception as exc:
@@ -842,11 +813,11 @@ class SlurmMonitor(App[None]):
         Args:
             stats: Pre-computed cluster stats to pass directly to the sidebar.
         """
-        self.call_later(self._update_cluster_sidebar_with_stats, stats)
+        self.call_later(self._tables.update_cluster_sidebar_with_stats, stats)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "nodes":
-                self.call_later(self._update_node_overview)
+                self.call_later(self._tables.update_node_overview)
             else:
                 self._dirty_nodes_tab = True
         except Exception:
@@ -857,7 +828,7 @@ class SlurmMonitor(App[None]):
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "nodes":
-                self._update_node_overview()
+                self._tables.update_node_overview()
             else:
                 self._dirty_nodes_tab = True
         except Exception:
@@ -865,7 +836,7 @@ class SlurmMonitor(App[None]):
 
     def _update_all_jobs_widgets(self) -> None:
         """Update user overview and My Usage banner without touching the sidebar (main thread only)."""
-        self.call_later(self._update_my_usage_summary, self._cached_running_user_stats)
+        self.call_later(self._tables.update_my_usage_summary, self._cached_running_user_stats)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "users":
@@ -881,8 +852,8 @@ class SlurmMonitor(App[None]):
         Args:
             stats: Pre-computed cluster stats to pass directly to the sidebar.
         """
-        self.call_later(self._update_cluster_sidebar_with_stats, stats)
-        self.call_later(self._update_my_usage_summary, self._cached_running_user_stats)
+        self.call_later(self._tables.update_cluster_sidebar_with_stats, stats)
+        self.call_later(self._tables.update_my_usage_summary, self._cached_running_user_stats)
         try:
             tab_container = self.query_one("#tab-container", TabContainer)
             if tab_container.active_tab == "users":
@@ -930,33 +901,6 @@ class SlurmMonitor(App[None]):
 
         self.call_later(_guarded)
 
-    def _on_refresh_complete(self, is_first_cycle: bool) -> None:
-        """Handle post-refresh bookkeeping (main thread only).
-
-        Args:
-            is_first_cycle: Whether this was the first background refresh cycle.
-        """
-        self._refresh.on_refresh_complete(is_first_cycle)
-
-    def _handle_refresh_fallback(
-        self,
-        running_jobs: list[tuple[str, ...]],
-        history_jobs: list[tuple[str, ...]] | None,
-        total_jobs: int,
-        total_requeues: int,
-        max_requeues: int,
-    ) -> None:
-        """Handle refresh logic with fallback for failed history.
-
-        Args:
-            running_jobs: List of running jobs tuples.
-            history_jobs: List of history jobs tuples (or None if failed).
-            total_jobs: Total job count from history.
-            total_requeues: Total requeues from history.
-            max_requeues: Max requeues from history.
-        """
-        self._refresh.handle_refresh_fallback(running_jobs, history_jobs, total_jobs, total_requeues, max_requeues)
-
     def _set_loading_indicator(self, active: bool) -> None:
         """Safely toggle the global loading indicator spinner."""
         try:
@@ -964,18 +908,6 @@ class SlurmMonitor(App[None]):
             indicator.loading = active
         except Exception as exc:
             logger.debug(f"Failed to toggle loading indicator: {exc}")
-
-    def _update_jobs_table(self, job_rows: list[tuple[str, ...]]) -> None:
-        """Push pre-computed job rows into the jobs table widget (main thread only)."""
-        self._tables.update_jobs_table(job_rows)
-
-    def _sorted_jobs_for_display(self, jobs: list[Job]) -> list[Job]:
-        """Sort jobs for stable, user-friendly display."""
-        return self._tables.sorted_jobs_for_display(jobs)
-
-    def _job_row_values(self, job: Job) -> list[str]:
-        """Build the row values for a job."""
-        return self._tables.job_row_values(job)
 
     def _format_state(self, state: str, category: JobState) -> str:
         """Format job state with color coding.
@@ -997,14 +929,6 @@ class SlurmMonitor(App[None]):
             JobState.TIMEOUT: f"[{colors.error}]{state}[/{colors.error}]",
         }
         return state_formats.get(category, state)
-
-    def _update_cluster_sidebar(self) -> None:
-        """Update the cluster sidebar with current statistics."""
-        self._tables.update_cluster_sidebar()
-
-    def _update_cluster_sidebar_with_stats(self, stats: ClusterStats) -> None:
-        """Update the cluster sidebar using pre-computed stats (main thread only)."""
-        self._tables.update_cluster_sidebar_with_stats(stats)
 
     def _parse_node_state(self, state: str, stats: ClusterStats) -> bool:
         """Delegate to ``stoei.cluster_stats.parse_node_state``."""
@@ -1047,10 +971,6 @@ class SlurmMonitor(App[None]):
     def _calculate_cluster_stats(self) -> ClusterStats:
         """Delegate to ``stoei.cluster_stats.calculate_cluster_stats``."""
         return calculate_cluster_stats(self._cluster_nodes, self._all_users_jobs, self._wait_time_jobs)
-
-    def _update_node_overview(self) -> None:
-        """Update the node overview tab using cached node infos."""
-        self._tables.update_node_overview()
 
     def _parse_node_infos(self) -> list[NodeInfo]:
         """Parse cluster node data into NodeInfo objects.
@@ -1287,15 +1207,7 @@ class SlurmMonitor(App[None]):
                 user_tab.update_energy_users(energy)
 
         self.call_later(_guarded_users)
-        self.call_later(self._update_my_usage_summary, running)
-
-    def _update_my_usage_summary(self, users: list[UserStats]) -> None:
-        """Update the 'My Usage' banner on the Jobs tab.
-
-        Args:
-            users: List of all running user statistics.
-        """
-        self._tables.update_my_usage_summary(users)
+        self.call_later(self._tables.update_my_usage_summary, running)
 
     def _apply_priority_overview_from_cache(self) -> None:
         """Apply cached priority overview data to the UI (main thread only).
@@ -1403,7 +1315,7 @@ class SlurmMonitor(App[None]):
         """Handle switching to the nodes tab."""
         if self._dirty_nodes_tab:
             self._dirty_nodes_tab = False
-            self.call_later(self._update_node_overview)
+            self.call_later(self._tables.update_node_overview)
         try:
             node_tab = self.query_one("#node-overview", NodeOverviewTab)
             nodes_table = node_tab.query_one("#nodes_table", DataTable)
@@ -1492,8 +1404,8 @@ class SlurmMonitor(App[None]):
         logger.info("Manual refresh triggered")
         self._error_notified.clear()
         self.notify("Refreshing...")
-        self._start_running_refresh_worker()
-        self._start_refresh_worker()
+        self._refresh.start_running_refresh_worker()
+        self._refresh.start_refresh_worker()
 
     def reload_energy_data(self) -> None:
         """Reload energy data based on current settings.
@@ -1668,14 +1580,6 @@ class SlurmMonitor(App[None]):
         """Show job info dialog."""
         self._detail.show_job_info_prompt()
 
-    def _fetch_and_display_job_info(self, job_id: str) -> None:
-        """Fetch job info in background and display on main thread.
-
-        Args:
-            job_id: The SLURM job ID to fetch.
-        """
-        self._detail.fetch_and_display_job_info(job_id)
-
     def _prefetch_job_info(self, job_id: str) -> None:
         """Pre-fetch job info into cache in background.
 
@@ -1743,50 +1647,6 @@ class SlurmMonitor(App[None]):
             # Default to job info for jobs table
             self._detail.show_job_info_for_row(event.data_table, event.row_key)
 
-    def _show_detail_for_row(self, table: DataTable, row_key: RowKey, noun: str, show: Callable[[str], None]) -> None:
-        """Extract the first-column identifier from a row and open its detail modal."""
-        self._detail.show_detail_for_row(table, row_key, noun, show)
-
-    def _show_node_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
-        """Show node info for a specific row in the nodes table."""
-        self._detail.show_node_info_for_row(table, row_key)
-
-    def _show_node_info(self, node_name: str) -> None:
-        """Show detailed information for a node."""
-        self._detail.show_node_info(node_name)
-
-    def _display_node_info(self, node_name: str, node_info: str, error: str | None) -> None:
-        """Display node information in a modal screen."""
-        self._detail.display_node_info(node_name, node_info, error)
-
-    def _show_user_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
-        """Show user info for a specific row in the users table."""
-        self._detail.show_user_info_for_row(table, row_key)
-
-    def _show_user_info(self, username: str) -> None:
-        """Show detailed information for a user."""
-        self._detail.show_user_info(username)
-
-    def _display_user_info(self, username: str, user_info: str, error: str | None) -> None:
-        """Display user information in a modal screen."""
-        self._detail.display_user_info(username, user_info, error)
-
-    def _show_account_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
-        """Show account info for a specific row in the accounts table."""
-        self._detail.show_account_info_for_row(table, row_key)
-
-    def _show_account_info(self, account_name: str) -> None:
-        """Show detailed information for an account/institute."""
-        self._detail.show_account_info(account_name)
-
-    def _display_account_info(self, account_name: str, account_info: str, error: str | None) -> None:
-        """Display account information in a modal screen."""
-        self._detail.display_account_info(account_name, account_info, error)
-
-    def _show_job_info_for_row(self, table: DataTable, row_key: RowKey) -> None:
-        """Show job info for a specific row in a table."""
-        self._detail.show_job_info_for_row(table, row_key)
-
     def action_show_selected_job_info(self) -> None:
         """Show job info for the currently selected row."""
         self._detail.show_selected_job_info()
@@ -1823,7 +1683,7 @@ class SlurmMonitor(App[None]):
                             logger.info(f"Successfully cancelled job {job_id}")
                             self.notify(f"Job {job_id} cancelled", severity="information")
                             try:
-                                self._start_refresh_worker()  # Refresh to update state
+                                self._refresh.start_refresh_worker()  # Refresh to update state
                             except Exception:
                                 logger.exception(f"Failed to start refresh worker after cancelling job {job_id}")
                                 # Don't fail the cancellation if refresh fails

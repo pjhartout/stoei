@@ -1124,7 +1124,7 @@ class TestUpdateMyUsageSummary:
         app._current_username = "alice"
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 users = [
@@ -1146,7 +1146,7 @@ class TestUpdateMyUsageSummary:
                         total_nodes=1,
                     ),
                 ]
-                app._update_my_usage_summary(users)
+                app._tables.update_my_usage_summary(users)
                 summary = app.query_one("#my-usage-summary", Static)
                 text = summary.content
                 assert "64 CPUs" in text
@@ -1164,7 +1164,7 @@ class TestUpdateMyUsageSummary:
         app._current_username = "alice"
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 users = [
@@ -1177,7 +1177,7 @@ class TestUpdateMyUsageSummary:
                         total_nodes=1,
                     ),
                 ]
-                app._update_my_usage_summary(users)
+                app._tables.update_my_usage_summary(users)
                 summary = app.query_one("#my-usage-summary", Static)
                 assert "No running jobs" in summary.content
 
@@ -1191,7 +1191,7 @@ class TestUpdateMyUsageSummary:
         app._current_username = "alice"
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 users = [
@@ -1204,7 +1204,7 @@ class TestUpdateMyUsageSummary:
                         total_nodes=1,
                     ),
                 ]
-                app._update_my_usage_summary(users)
+                app._tables.update_my_usage_summary(users)
                 summary = app.query_one("#my-usage-summary", Static)
                 text = summary.content
                 assert "16 CPUs" in text
@@ -1222,10 +1222,10 @@ class TestUpdateMyUsageSummary:
         app._current_username = "alice"
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
-                app._update_my_usage_summary([])
+                app._tables.update_my_usage_summary([])
                 summary = app.query_one("#my-usage-summary", Static)
                 assert "No running jobs" in summary.content
 
@@ -1239,7 +1239,7 @@ class TestUpdateMyUsageSummary:
         app._current_username = "alice"
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 users = [
@@ -1254,7 +1254,7 @@ class TestUpdateMyUsageSummary:
                         plain_job_count=3,
                     ),
                 ]
-                app._update_my_usage_summary(users)
+                app._tables.update_my_usage_summary(users)
                 text = app.query_one("#my-usage-summary", Static).content
                 assert "15 tasks (2 arrays, 3 jobs)" in text
 
@@ -1268,7 +1268,7 @@ class TestUpdateMyUsageSummary:
         app._current_username = "alice"
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 users = [
@@ -1283,7 +1283,7 @@ class TestUpdateMyUsageSummary:
                         plain_job_count=0,
                     ),
                 ]
-                app._update_my_usage_summary(users)
+                app._tables.update_my_usage_summary(users)
                 text = app.query_one("#my-usage-summary", Static).content
                 assert "10 tasks (1 array, 0 jobs)" in text
 
@@ -1297,7 +1297,7 @@ class TestUpdateMyUsageSummary:
         app._current_username = "alice"
         with (
             patch("stoei.app.check_slurm_available", return_value=(True, None)),
-            patch.object(app, "_start_refresh_worker"),
+            patch.object(app._refresh, "start_refresh_worker"),
         ):
             async with app.run_test(size=(80, 24)):
                 users = [
@@ -1312,6 +1312,6 @@ class TestUpdateMyUsageSummary:
                         plain_job_count=1,
                     ),
                 ]
-                app._update_my_usage_summary(users)
+                app._tables.update_my_usage_summary(users)
                 text = app.query_one("#my-usage-summary", Static).content
                 assert "1 task (0 arrays, 1 job)" in text
