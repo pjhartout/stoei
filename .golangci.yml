@@ -1,0 +1,44 @@
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: none
+  enable:
+    - errcheck
+    - govet
+    - ineffassign
+    - staticcheck
+    - unused
+    - depguard
+
+  settings:
+    depguard:
+      # Enforce the one-way layering ui -> store -> slurm.
+      #
+      #   * internal/ui/... must NOT import internal/slurm directly; it goes
+      #     through internal/store.
+      #   * internal/slurm must NOT import internal/ui or internal/store.
+      #
+      # store is allowed to import slurm, which is why there is no rule denying
+      # that edge.
+      rules:
+        ui-not-slurm:
+          files:
+            - "**/internal/ui/**"
+          deny:
+            - pkg: github.com/pjhartout/stoei/internal/slurm
+              desc: "ui must go through internal/store, not import internal/slurm directly"
+        slurm-no-upper-layers:
+          files:
+            - "**/internal/slurm/**"
+          deny:
+            - pkg: github.com/pjhartout/stoei/internal/ui
+              desc: "slurm is the lowest layer and must not import ui"
+            - pkg: github.com/pjhartout/stoei/internal/store
+              desc: "slurm is the lowest layer and must not import store"
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
