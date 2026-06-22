@@ -20,6 +20,24 @@ func seedJobs(t *testing.T, jobs []store.RunningJob) (*Jobs, *store.Store) {
 	return j, st
 }
 
+// TestColumnsFitLongValues asserts columns grow to fit long job IDs and names so
+// they render in full rather than being truncated with "…".
+func TestColumnsFitLongValues(t *testing.T) {
+	j, _ := seedJobs(t, []store.RunningJob{
+		{ID: "5098106_[0-99%10]", Name: "very-long-experiment-name-v3", State: "PENDING", Time: "0:00", Nodes: "1", NodeList: "n01"},
+	})
+	out := j.View()
+	if !strings.Contains(out, "5098106_[0-99%10]") {
+		t.Errorf("long job id truncated:\n%s", out)
+	}
+	if !strings.Contains(out, "very-long-experiment-name-v3") {
+		t.Errorf("long job name truncated:\n%s", out)
+	}
+	if strings.Contains(out, "…") {
+		t.Errorf("unexpected ellipsis in jobs view:\n%s", out)
+	}
+}
+
 // TestCursorPreservedAcrossReorder asserts I6: after the running-jobs list is
 // reordered/changed, the cursor stays on the same job id.
 func TestCursorPreservedAcrossReorder(t *testing.T) {

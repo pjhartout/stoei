@@ -147,6 +147,27 @@ func defaultColumnWidth(key string) int {
 	}
 }
 
+// fitColumns sizes each column to the widest of its title and its cell values,
+// never below the sensible default width, so long job IDs and names render in
+// full instead of being truncated with "…". It is recomputed on every refresh
+// from the currently displayed rows; the default-width floor keeps the layout
+// from jittering as the longest value changes.
+func (j *Jobs) fitColumns(rows [][]string) {
+	cols := make([]table.Column, len(jobColumns))
+	for i, c := range jobColumns {
+		w := max(defaultColumnWidth(c.key), lipgloss.Width(c.title))
+		for _, row := range rows {
+			if i < len(row) {
+				if cw := lipgloss.Width(row[i]); cw > w {
+					w = cw
+				}
+			}
+		}
+		cols[i] = table.Column{Title: c.title, Width: w}
+	}
+	j.table.SetColumns(cols)
+}
+
 // tableStyles maps the app theme onto the bubbles table styles.
 func tableStyles(styles theme.Styles) table.Styles {
 	s := table.DefaultStyles()
@@ -260,6 +281,8 @@ func (j *Jobs) Refresh() {
 		}
 	}
 	sorted := j.sortState.sortRows(filtered)
+
+	j.fitColumns(sorted)
 
 	rows := make([]table.Row, len(sorted))
 	for i, row := range sorted {
