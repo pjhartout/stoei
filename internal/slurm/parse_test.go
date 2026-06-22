@@ -214,8 +214,8 @@ func TestParseAllUsersJobs(t *testing.T) {
 	// A multi-node running job's NodeList still expands.
 	for _, j := range jobs {
 		if j.ID == "46043" {
-			if CountNodes(j.NodeList) != 4 {
-				t.Errorf("46043 node count = %d, want 4", CountNodes(j.NodeList))
+			if got := len(ExpandNodeList(j.NodeList)); got != 4 {
+				t.Errorf("46043 node count = %d, want 4", got)
 			}
 		}
 	}

@@ -97,8 +97,12 @@ type App struct {
 	// runningInFlight guards the fast tier: while a running-jobs fetch is
 	// outstanding a fast tick skips dispatching another (but still re-arms).
 	runningInFlight bool
-	// heavyInFlight guards the slow tier the same way for the heavy batch.
+	// heavyInFlight guards the slow tier the same way for the heavy batch. It is
+	// derived from heavyPending so it clears only once all heavy fetches return,
+	// not when whichever finishes first does.
 	heavyInFlight bool
+	// heavyPending counts the outstanding heavy-wave fetches.
+	heavyPending int
 
 	// unavailable holds the Slurm-availability error; non-nil renders the
 	// full-screen unavailable screen.
@@ -242,6 +246,7 @@ func (a *App) dispatchHistory() tea.Cmd {
 // the in-flight guard, and returns a batched Cmd for the whole wave.
 func (a *App) dispatchHeavy() tea.Cmd {
 	a.heavyInFlight = true
+	a.heavyPending = heavyFetchCount
 
 	gNodes := a.store.NextGen(store.SectionNodes)
 	a.store.SetLoading(store.SectionNodes, gNodes)
@@ -269,6 +274,22 @@ func (a *App) dispatchHeavy() tea.Cmd {
 // waitTimeHours is the per-partition wait-time lookback window. It is not user
 // configurable (no Python Settings field exists for it).
 const waitTimeHours = 1
+
+// heavyFetchCount is the number of fetches dispatchHeavy batches; the slow-tier
+// in-flight guard clears only after all of them return (see heavyDone).
+const heavyFetchCount = 6
+
+// heavyDone records that one heavy-wave fetch returned, clearing heavyInFlight
+// only once all of them have. The guard must not be cleared by whichever fetch
+// finishes first — waitTime in particular returns instantly during a slurmdbd
+// cooldown — or a slow tick would re-dispatch the whole wave while the heavier
+// squeue/scontrol fetches are still running.
+func (a *App) heavyDone() {
+	if a.heavyPending > 0 {
+		a.heavyPending--
+	}
+	a.heavyInFlight = a.heavyPending > 0
+}
 
 // Update is the heart of the model: it wires window-size fanout, background
 // detection, global keys, the two tick handlers, and the async result handlers.
@@ -304,6 +325,23 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case slowTickMsg:
 		return a.handleSlowTick()
 
+	}
+
+	if m, cmd, ok := a.handleDataMsg(msg); ok {
+		return m, cmd
+	}
+	if m, cmd, ok := a.handleModalMsg(msg); ok {
+		return m, cmd
+	}
+	return a.routeToActive(msg)
+}
+
+// handleDataMsg applies an async fetch result to the store and refreshes the
+// affected views, returning handled=false for non-data messages. The six
+// heavy-wave results call heavyDone so the slow-tier guard clears only once all
+// of them return, not when whichever finishes first does.
+func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case runningJobsMsg:
 		a.runningInFlight = false
 		a.store.SetRunningJobs(msg.jobs, msg.gen, msg.err)
@@ -311,7 +349,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.jobs.Refresh()
 		a.detailCache.SyncStates(a.store.MergedJobs()) // evict on state change (77e57c3)
 		a.frame.dirty = true
-		return a, nil
+		return a, nil, true
 
 	case historyMsg:
 		a.store.SetHistory(msg.jobs, msg.stats, msg.gen, msg.err)
@@ -319,85 +357,96 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.jobs.Refresh() // Completed/failed history jobs merge into the Jobs table.
 		a.detailCache.SyncStates(a.store.MergedJobs())
 		a.frame.dirty = true
-		return a, nil
+		return a, nil, true
 
 	case nodesMsg:
+		a.heavyDone()
 		a.store.SetNodes(msg.nodes, msg.gen, msg.err)
 		a.observe(store.SectionNodes, msg.err)
 		a.nodes.Refresh()
 		a.refreshSidebar() // ClusterStats derives from nodes.
 		a.frame.dirty = true
-		return a, nil
+		return a, nil, true
 
 	case allUsersJobsMsg:
+		a.heavyDone()
 		a.store.SetAllUsersJobs(msg.jobs, msg.gen, msg.err)
 		a.observe(store.SectionAllUsersJobs, msg.err)
 		a.jobs.Refresh()   // My-Usage banner derives from all-users jobs.
 		a.users.Refresh()  // Running/Pending panes derive from all-users jobs.
 		a.refreshSidebar() // Pending resources derive from all-users jobs.
 		a.frame.dirty = true
-		return a, nil
+		return a, nil, true
 
 	case fairShareMsg:
+		a.heavyDone()
 		a.store.SetFairShare(msg.entries, msg.gen, msg.err)
 		a.observe(store.SectionFairShare, msg.err)
 		a.priority.Refresh()
 		a.frame.dirty = true
-		return a, nil
+		return a, nil, true
 
 	case pendingPrioMsg:
+		a.heavyDone()
 		a.store.SetPendingPrio(msg.entries, msg.gen, msg.err)
 		a.observe(store.SectionPendingPrio, msg.err)
 		a.priority.Refresh()
 		a.frame.dirty = true
-		return a, nil
+		return a, nil, true
 
 	case energyMsg:
+		a.heavyDone()
 		a.store.SetEnergy(msg.records, msg.gen, msg.err)
 		a.observe(store.SectionEnergy, msg.err)
 		a.users.Refresh() // Energy pane derives from energy records.
 		a.frame.dirty = true
-		return a, nil
+		return a, nil, true
 
 	case waitTimeMsg:
-		a.heavyInFlight = false
+		a.heavyDone()
 		a.store.SetWaitTime(msg.records, msg.gen, msg.err)
 		a.observe(store.SectionWaitTime, msg.err)
 		a.refreshSidebar() // Wait-time stats derive from wait-time records.
 		a.frame.dirty = true
-		return a, nil
+		return a, nil, true
+	}
+	return a, nil, false
+}
 
+// handleModalMsg processes the messages modals emit (job-id submit, log open,
+// cancel result, toasts, settings), returning handled=false otherwise.
+func (a App) handleModalMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case modals.JobIDSubmittedMsg:
-		return a, a.openJobDetail(msg.JobID, "")
+		return a, a.openJobDetail(msg.JobID, ""), true
 
 	case modals.OpenLogMsg:
 		if strings.TrimSpace(msg.Path) == "" {
 			a.pushToast("No " + msg.Label + " path available")
-			return a, nil
+			return a, nil, true
 		}
-		return a, a.pushModal(modals.NewLogViewer(a.styles, msg.Path, msg.Label, a.cfg.LogViewerLines))
+		return a, a.pushModal(modals.NewLogViewer(a.styles, msg.Path, msg.Label, a.cfg.LogViewerLines)), true
 
 	case modals.CancelRequestedMsg:
 		if msg.Err != nil {
 			a.pushToast("Cancel failed for " + msg.JobID + ": " + msg.Err.Error())
-			return a, nil
+			return a, nil, true
 		}
 		a.pushToast("Cancelled job " + msg.JobID)
-		return a, a.manualRefresh() // refresh so the job leaves the list
+		return a, a.manualRefresh(), true // refresh so the job leaves the list
 
 	case modals.LogToastMsg:
 		a.pushToast(msg.Text)
-		return a, nil
+		return a, nil, true
 
 	case modals.SettingsToastMsg:
 		a.pushToast(msg.Text)
-		return a, nil
+		return a, nil, true
 
 	case modals.SettingsAppliedMsg:
-		return a, a.applyConfig(msg.Config)
+		return a, a.applyConfig(msg.Config), true
 	}
-
-	return a.routeToActive(msg)
+	return a, nil, false
 }
 
 // handleKey processes global keys, then routes the remainder to the modal stack
@@ -429,6 +478,7 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, a.keys.Settings):
 		return a, a.pushModal(modals.NewSettings(a.styles, a.cfg))
 	case key.Matches(msg, a.keys.Refresh):
+		a.pushToast("Refreshing…")
 		return a, a.manualRefresh()
 	}
 
@@ -559,9 +609,10 @@ func tabForKey(msg tea.KeyPressMsg) (tabIndex, bool) {
 	return 0, false
 }
 
-// manualRefresh re-dispatches the minimal-critical and heavy waves on the user's
-// 'r' press, bumping every generation so superseded in-flight results are dropped
-// (I4). It always provides feedback by re-fetching regardless of in-flight state.
+// manualRefresh re-dispatches the minimal-critical and heavy waves, bumping every
+// generation so superseded in-flight results are dropped (I4). The caller owns any
+// user-visible feedback (the 'r' key pushes a toast), since re-fetching alone is
+// not visible while data is already on screen.
 func (a *App) manualRefresh() tea.Cmd {
 	a.frame.dirty = true
 	return tea.Batch(
@@ -689,12 +740,21 @@ func (a *App) observe(section store.Section, err error) {
 }
 
 // failureToastMessage returns a section-specific failure message, or "" to fall
-// back to the notifier's generic text. The history section special-cases a
-// slurmdbd "connection refused" so the user understands why the job history is
-// empty.
+// back to the notifier's generic text. The three sacct-backed sections special-
+// case a slurmdbd "connection refused" so the user understands why that data is
+// empty, rather than getting one informative and two generic toasts for the same
+// outage.
 func failureToastMessage(section store.Section, err error) string {
-	if section == store.SectionHistory && store.IsSacctUnavailable(err) {
+	if !store.IsSacctUnavailable(err) {
+		return ""
+	}
+	switch section {
+	case store.SectionHistory:
 		return "Job history unavailable: slurmdbd connection refused"
+	case store.SectionEnergy:
+		return "Energy data unavailable: slurmdbd connection refused"
+	case store.SectionWaitTime:
+		return "Wait-time data unavailable: slurmdbd connection refused"
 	}
 	return ""
 }

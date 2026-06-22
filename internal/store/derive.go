@@ -187,9 +187,9 @@ func parseNodeMemory(node slurm.Node, stats *ClusterStats, includeTotal bool) {
 		return
 	}
 	if includeTotal {
-		stats.TotalMemoryGB += float64(totalMB) / 1024.0
+		stats.TotalMemoryGB += float64(totalMB) / memoryMBToGB
 	}
-	stats.AllocatedMemoryGB += float64(allocMB) / 1024.0
+	stats.AllocatedMemoryGB += float64(allocMB) / memoryMBToGB
 }
 
 // emptyToZero returns "0" for an empty/blank string, mirroring the Python

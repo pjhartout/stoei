@@ -32,9 +32,6 @@ var sacctJobFields = []string{
 	"Submit", "Priority", "QOS",
 }
 
-// SacctJobFields returns the field list used for single-job sacct queries.
-func SacctJobFields() []string { return sacctJobFields }
-
 // Client builds Slurm commands and parses their output. It wraps a Runner (the
 // only seam to the OS) and tracks slurmdbd availability so that batch sacct calls
 // are skipped during a cooldown after a hard failure. A zero Client is not
@@ -107,7 +104,7 @@ func (c *Client) Available(ctx context.Context) error {
 
 // errSacctCooldown is returned by the batch sacct getters when slurmdbd is in the
 // post-failure cooldown window. Callers can detect it with errors.Is.
-var errSacctCooldown = errors.New("sacct unavailable: connection refused (will retry automatically)")
+var errSacctCooldown = errors.New("sacct unavailable: connection refused")
 
 // ErrSacctCooldown reports whether err indicates the sacct cooldown is active.
 func ErrSacctCooldown(err error) bool { return errors.Is(err, errSacctCooldown) }

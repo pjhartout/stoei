@@ -26,6 +26,14 @@ func TestGetGPUTDP(t *testing.T) {
 		{"MI300X", 750},
 		{"MI250X", 560},
 		{"MI100", 300},
+		{"A10", 150},
+		{"A10G", 150},
+		// Verbose gres.conf Type labels must match the specific model via the
+		// declaration-order partial scan, not the alphabetically-earlier substring
+		// (A100 -> 400, not A10 -> 150). Regression for the energy undercount.
+		{"NVIDIA_A100_SXM4_80GB", 400},
+		{"A100_SXM4", 400},
+		{"A100X", 400},
 	}
 	for _, c := range cases {
 		if got := GetGPUTDP(c.in); got != c.want {

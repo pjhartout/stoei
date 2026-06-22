@@ -192,19 +192,11 @@ func colorFieldValue(key, value string, styles theme.Styles) string {
 	}
 }
 
-// stateStyle returns the style for a job/node state, mirroring colorState in the
-// tabs package without coupling the two.
+// stateStyle returns the style for a job/node state using the shared
+// store.StateRole classification, so a state colors the same here as in the
+// tables.
 func stateStyle(state string, styles theme.Styles) lipgloss.Style {
-	switch strings.ToUpper(strings.TrimSpace(state)) {
-	case "RUNNING", "R", "COMPLETED", "CD", "IDLE", "ALLOCATED", "MIXED":
-		return styles.Success
-	case "PENDING", "PD", "CONFIGURING", "COMPLETING", "DRAINING":
-		return styles.Warning
-	case "FAILED", "F", "TIMEOUT", "TO", "NODE_FAIL", "BOOT_FAIL", "DOWN", "DRAINED", "DRAIN":
-		return styles.Error
-	default:
-		return styles.Muted
-	}
+	return styles.StateRoleStyle(store.StateRole(state))
 }
 
 // stdoutStderrPaths extracts the stdout and stderr log paths from a job detail's

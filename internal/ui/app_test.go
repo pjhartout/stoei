@@ -135,6 +135,44 @@ func TestSlowTickReArmsOwnTierExactlyOnce(t *testing.T) {
 	}
 }
 
+// TestHeavyGuardClearsOnlyAfterAllFetchesReturn asserts the in-flight guard is
+// cleared only once every heavy fetch has returned — not when whichever finishes
+// first does (waitTime returns instantly during a slurmdbd cooldown). Otherwise a
+// slow tick would re-dispatch the heavy wave while fetches are still running.
+func TestHeavyGuardClearsOnlyAfterAllFetchesReturn(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.heavyInFlight = true
+	a.heavyPending = heavyFetchCount
+
+	g := func(s store.Section) uint64 { return a.store.Gen(s) }
+	// Five of six results arrive, waitTime first. The guard must stay set, so
+	// handleSlowTick (which checks !heavyInFlight) cannot re-dispatch.
+	partial := []tea.Msg{
+		waitTimeMsg{gen: g(store.SectionWaitTime)},
+		nodesMsg{gen: g(store.SectionNodes)},
+		allUsersJobsMsg{gen: g(store.SectionAllUsersJobs)},
+		fairShareMsg{gen: g(store.SectionFairShare)},
+		pendingPrioMsg{gen: g(store.SectionPendingPrio)},
+	}
+	cur := a
+	for _, msg := range partial {
+		next, _ := cur.Update(msg)
+		cur = next.(App)
+	}
+	if !cur.heavyInFlight {
+		t.Fatal("heavyInFlight cleared after only 5/6 heavy results returned")
+	}
+	if cur.heavyPending != 1 {
+		t.Fatalf("heavyPending = %d after 5 results; want 1", cur.heavyPending)
+	}
+
+	// The sixth result clears the guard.
+	next, _ := cur.Update(energyMsg{gen: g(store.SectionEnergy)})
+	if next.(App).heavyInFlight {
+		t.Error("heavyInFlight still set after all 6 heavy results returned")
+	}
+}
+
 // TestUnavailableScreenRendered asserts that an unavailable client makes the
 // model render the full-screen unavailable screen rather than the tab bar.
 func TestUnavailableScreenRendered(t *testing.T) {

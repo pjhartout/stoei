@@ -14,15 +14,22 @@ import (
 // it (matching the Textual modal screens that did not fill the whole screen).
 const modalFraction = 0.85
 
+// modalMinWidth / modalMinHeight are the terminal dimensions below which a modal
+// fills the whole screen instead of scaling to modalFraction.
+const (
+	modalMinWidth  = 20
+	modalMinHeight = 6
+)
+
 // modalSize returns the modal's outer width/height for a terminal of w x h,
 // clamped to a sensible minimum so a tiny terminal still renders something.
 func modalSize(w, h int) (int, int) {
 	mw := int(float64(w) * modalFraction)
 	mh := int(float64(h) * modalFraction)
-	if mw < 20 {
+	if mw < modalMinWidth {
 		mw = w
 	}
-	if mh < 6 {
+	if mh < modalMinHeight {
 		mh = h
 	}
 	return mw, mh

@@ -25,11 +25,11 @@ const (
 	subtabJobs
 )
 
-// Fair-share thresholds for color coding and status labels. Ports
-// formatters._FAIR_SHARE_SUCCESS_THRESHOLD / _FAIR_SHARE_WARNING_THRESHOLD.
+// Fair-share thresholds for color coding and status labels. The values live in
+// store so the Priority tab and the detail modals share one source of truth.
 const (
-	fairShareSuccessThreshold = 0.5
-	fairShareWarningThreshold = 0.2
+	fairShareSuccessThreshold = store.FairShareSuccessThreshold
+	fairShareWarningThreshold = store.FairShareWarningThreshold
 )
 
 // userPriorityColumns are the All Users sub-tab columns. Ports

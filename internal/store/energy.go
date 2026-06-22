@@ -1,6 +1,7 @@
 package store
 
 import (
+	"bytes"
 	_ "embed"
 	"encoding/json"
 	"fmt"
@@ -37,10 +38,10 @@ const (
 // tdpTable holds the parsed TDP lookup data. It is computed once at package init
 // from the embedded JSON.
 type tdpTable struct {
-	gpu          map[string]int // upper-cased GPU model -> TDP in Watts
-	defaultGPU   int
-	cpuPerCore   int
-	sortedModels []string // keys of gpu, sorted, for deterministic partial matching
+	gpu           map[string]int // upper-cased GPU model -> TDP in Watts
+	defaultGPU    int
+	cpuPerCore    int
+	orderedModels []string // gpu keys in JSON declaration order, for partial matching
 }
 
 // tdp is the package-level parsed TDP table. It is read-only after init.
@@ -55,67 +56,94 @@ func loadTDP() tdpTable {
 		cpuPerCore: fallbackCPUTDPPerCore,
 	}
 
-	var raw map[string]json.RawMessage
-	if err := json.Unmarshal(tdpValuesJSON, &raw); err != nil {
-		return t.finalize()
-	}
-
-	if gpuRaw, ok := raw["gpu"]; ok {
-		var gpuData map[string]json.RawMessage
-		if err := json.Unmarshal(gpuRaw, &gpuData); err == nil {
-			parseGPUSection(gpuData, &t)
-		}
-	}
-
-	if cpuRaw, ok := raw["cpu"]; ok {
-		var cpuData map[string]json.RawMessage
-		if err := json.Unmarshal(cpuRaw, &cpuData); err == nil {
-			if v, ok := intValue(cpuData["_default_per_core"]); ok {
-				t.cpuPerCore = v
+	for _, top := range orderedObject(tdpValuesJSON) {
+		switch top.key {
+		case "gpu":
+			parseGPUSection(top.val, &t)
+		case "cpu":
+			for _, e := range orderedObject(top.val) {
+				if e.key == "_default_per_core" {
+					if v, ok := intValue(e.val); ok {
+						t.cpuPerCore = v
+					}
+				}
 			}
 		}
 	}
 
-	return t.finalize()
+	return t
+}
+
+// orderedKV is one key/value pair preserving JSON declaration order.
+type orderedKV struct {
+	key string
+	val json.RawMessage
+}
+
+// orderedObject decodes a JSON object preserving the declaration order of its
+// keys (a map would randomize them). It returns nil for non-objects or on error.
+func orderedObject(data []byte) []orderedKV {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	tok, err := dec.Token()
+	if err != nil {
+		return nil
+	}
+	if d, ok := tok.(json.Delim); !ok || d != '{' {
+		return nil
+	}
+	var out []orderedKV
+	for dec.More() {
+		keyTok, err := dec.Token()
+		if err != nil {
+			return nil
+		}
+		key, _ := keyTok.(string)
+		var raw json.RawMessage
+		if err := dec.Decode(&raw); err != nil {
+			return nil
+		}
+		out = append(out, orderedKV{key: key, val: raw})
+	}
+	return out
 }
 
 // parseGPUSection flattens the (possibly nested) GPU section into t.gpu and reads
-// the _default value, matching the Python loader's handling of category dicts and
-// direct model->TDP entries.
-func parseGPUSection(gpuData map[string]json.RawMessage, t *tdpTable) {
-	if v, ok := intValue(gpuData["_default"]); ok {
-		t.defaultGPU = v
-	}
-	for key, val := range gpuData {
-		if strings.HasPrefix(key, "_") {
+// the _default value, preserving JSON declaration order in t.orderedModels so the
+// partial-substring scan in GetGPUTDP matches the Python loader's insertion-order
+// iteration (e.g. A100 is tried before A10).
+func parseGPUSection(gpuRaw json.RawMessage, t *tdpTable) {
+	for _, e := range orderedObject(gpuRaw) {
+		if e.key == "_default" {
+			if v, ok := intValue(e.val); ok {
+				t.defaultGPU = v
+			}
+			continue
+		}
+		if strings.HasPrefix(e.key, "_") {
 			continue
 		}
 		// Direct model -> TDP mapping.
-		if v, ok := intValue(val); ok {
-			t.gpu[strings.ToUpper(key)] = v
+		if v, ok := intValue(e.val); ok {
+			t.addModel(e.key, v)
 			continue
 		}
-		// Category dict of model -> TDP.
-		var category map[string]json.RawMessage
-		if err := json.Unmarshal(val, &category); err != nil {
-			continue
-		}
-		for model, tdpRaw := range category {
-			if v, ok := intValue(tdpRaw); ok {
-				t.gpu[strings.ToUpper(model)] = v
+		// Category dict of model -> TDP, in declaration order.
+		for _, m := range orderedObject(e.val) {
+			if v, ok := intValue(m.val); ok {
+				t.addModel(m.key, v)
 			}
 		}
 	}
 }
 
-// finalize computes the sorted model list for deterministic partial matching.
-func (t tdpTable) finalize() tdpTable {
-	t.sortedModels = make([]string, 0, len(t.gpu))
-	for k := range t.gpu {
-		t.sortedModels = append(t.sortedModels, k)
+// addModel records a model->TDP entry, appending the upper-cased key to
+// orderedModels the first time it is seen so the partial scan honors JSON order.
+func (t *tdpTable) addModel(model string, tdpW int) {
+	key := strings.ToUpper(model)
+	if _, exists := t.gpu[key]; !exists {
+		t.orderedModels = append(t.orderedModels, key)
 	}
-	sort.Strings(t.sortedModels)
-	return t
+	t.gpu[key] = tdpW
 }
 
 // intValue reports the integer value of a JSON number that is an exact integer.
@@ -136,8 +164,9 @@ func intValue(raw json.RawMessage) (int, bool) {
 
 // GetGPUTDP returns the TDP in Watts for a GPU type, matching energy.get_gpu_tdp:
 // exact (case-insensitive) match, then prefix-stripped match, then a partial
-// substring match, then the default. The partial match scans models in sorted
-// order for determinism.
+// substring match, then the default. The partial match scans models in JSON
+// declaration order (matching Python's insertion-order iteration), so a more
+// specific model like A100 is tried before a shorter substring like A10.
 func GetGPUTDP(gpuType string) int {
 	if gpuType == "" {
 		return tdp.defaultGPU
@@ -157,7 +186,7 @@ func GetGPUTDP(gpuType string) int {
 		}
 	}
 
-	for _, model := range tdp.sortedModels {
+	for _, model := range tdp.orderedModels {
 		if strings.Contains(normalized, model) || strings.Contains(model, normalized) {
 			return tdp.gpu[model]
 		}

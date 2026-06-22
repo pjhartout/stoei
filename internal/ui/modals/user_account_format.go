@@ -10,11 +10,11 @@ import (
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
 
-// fairShareSuccess / fairShareWarning are the fair-share color thresholds. Port
-// formatters._FAIR_SHARE_SUCCESS_THRESHOLD / _WARNING_THRESHOLD.
+// fairShareSuccess / fairShareWarning are the fair-share color thresholds,
+// sourced from store so the tab and the detail modals share one definition.
 const (
-	fairShareSuccess = 0.5
-	fairShareWarning = 0.2
+	fairShareSuccess = store.FairShareSuccessThreshold
+	fairShareWarning = store.FairShareWarningThreshold
 )
 
 // maxUserPriorityJobs / maxAccountUsers / maxAccountRunningJobs cap the list
@@ -84,7 +84,7 @@ func formatUserInfo(username string, st *store.Store, styles theme.Styles) strin
 
 	if energy != nil {
 		lines = append(lines, "", styles.Title.Render(" Energy "))
-		lines = append(lines, summaryLine("Total Energy", styles.Success.Render(formatEnergyWh(energy.TotalEnergyWh)), styles))
+		lines = append(lines, summaryLine("Total Energy", styles.Success.Render(store.FormatEnergy(energy.TotalEnergyWh)), styles))
 		lines = append(lines, summaryLine("Completed Jobs", fmtInt(energy.JobCount), styles))
 		lines = append(lines, summaryLine("GPU-Hours", fmt.Sprintf("%.1f", energy.GPUHours), styles))
 		lines = append(lines, summaryLine("CPU-Hours", fmt.Sprintf("%.1f", energy.CPUHours), styles))
@@ -266,18 +266,15 @@ func countByState(jobs []store.AllUsersJob) (running, pending int) {
 	return running, pending
 }
 
-// userJobStateCell colors a state cell in a user job list, padded to width 8.
+// userJobStateCell colors a state cell in a user job list, padded to width 8,
+// using the shared store.StateRole classification so it matches the tables.
 func userJobStateCell(state string, styles theme.Styles) string {
 	cell := fmt.Sprintf("%-8s", trunc(state, 8))
-	up := strings.ToUpper(strings.TrimSpace(state))
-	switch up {
-	case "RUNNING", "R":
-		return styles.Success.Bold(true).Render(cell)
-	case "PENDING", "PD":
-		return styles.Warning.Bold(true).Render(cell)
-	default:
+	role := store.StateRole(state)
+	if role == "" {
 		return cell
 	}
+	return styles.StateRoleStyle(role).Bold(true).Render(cell)
 }
 
 func findUserStats(stats []store.UserStats, username string) store.UserStats {
@@ -375,22 +372,4 @@ func trunc(s string, width int) string {
 		return s[:width]
 	}
 	return s
-}
-
-// Energy thresholds for the Wh/kWh/MWh display. Port energy.ENERGY_*_THRESHOLD.
-const (
-	energyKWhThreshold = 1000.0
-	energyMWhThreshold = 1_000_000.0
-)
-
-// formatEnergyWh formats a Wh value as Wh/kWh/MWh. Ports formatters._format_energy_wh.
-func formatEnergyWh(wh float64) string {
-	switch {
-	case wh >= energyMWhThreshold:
-		return fmt.Sprintf("%.2f MWh", wh/energyMWhThreshold)
-	case wh >= energyKWhThreshold:
-		return fmt.Sprintf("%.2f kWh", wh/energyKWhThreshold)
-	default:
-		return fmt.Sprintf("%.1f Wh", wh)
-	}
 }

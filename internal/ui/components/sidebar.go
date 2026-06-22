@@ -227,7 +227,7 @@ func (s *Sidebar) pendingSection() []string {
 		return append(lines, "  (No partition breakdown available)")
 	}
 
-	for _, part := range sortedPartitionKeysFold(st.PendingByPartition) {
+	for _, part := range sortedKeysFold(st.PendingByPartition) {
 		ps := st.PendingByPartition[part]
 		name := part
 		if name == "" {
@@ -269,21 +269,8 @@ func formatMemoryGB(memoryGB float64) string {
 	return fmt.Sprintf("%.1f GB", memoryGB)
 }
 
-// sortedKeysFold returns the wait-stats partition keys sorted case-insensitively.
-func sortedKeysFold(m map[string]store.PartitionWaitStats) []string {
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		keys = append(keys, k)
-	}
-	sort.Slice(keys, func(i, j int) bool {
-		return strings.ToLower(keys[i]) < strings.ToLower(keys[j])
-	})
-	return keys
-}
-
-// sortedPartitionKeysFold returns the pending-partition keys sorted
-// case-insensitively.
-func sortedPartitionKeysFold(m map[string]store.PendingPartitionStats) []string {
+// sortedKeysFold returns the map's keys sorted case-insensitively.
+func sortedKeysFold[V any](m map[string]V) []string {
 	keys := make([]string, 0, len(m))
 	for k := range m {
 		keys = append(keys, k)

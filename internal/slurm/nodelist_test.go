@@ -42,20 +42,3 @@ func TestExpandNodeList(t *testing.T) {
 		})
 	}
 }
-
-func TestCountNodes(t *testing.T) {
-	tests := []struct {
-		in   string
-		want int
-	}{
-		{"gpu-node-[11-13,15]", 4},
-		{"(None)", 0},
-		{"node01,node[03-05]", 4},
-		{"", 0},
-	}
-	for _, tt := range tests {
-		if got := CountNodes(tt.in); got != tt.want {
-			t.Errorf("CountNodes(%q) = %d, want %d", tt.in, got, tt.want)
-		}
-	}
-}

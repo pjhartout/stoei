@@ -289,6 +289,24 @@ func (s Styles) PctStyle(pct, high, mid float64, invert bool) lipgloss.Style {
 	}
 }
 
+// StateRoleStyle maps a semantic state role (as returned by store.StateRole:
+// "success", "warning", "error", "muted", or "" for the default) to the matching
+// style, so the tables and detail modals color a given Slurm state identically.
+func (s Styles) StateRoleStyle(role string) lipgloss.Style {
+	switch role {
+	case "success":
+		return s.Success
+	case "warning":
+		return s.Warning
+	case "error":
+		return s.Error
+	case "muted":
+		return s.Muted
+	default:
+		return s.Text
+	}
+}
+
 // AccentGradient returns steps colors blended from Accent to AccentAlt for the
 // given mode, suitable for a per-rune gradient on the title or tab bar. It is a
 // thin wrapper over lipgloss.Blend1D, the v2 gradient primitive.

@@ -115,9 +115,3 @@ func expandBracketExpr(expr string) map[string]struct{} {
 	}
 	return result
 }
-
-// CountNodes returns the number of distinct hostnames a NodeList expression
-// expands to, without allocating the full slice. It mirrors len(expand_nodelist).
-func CountNodes(nodelist string) int {
-	return len(expandNodeListSet(nodelist))
-}
