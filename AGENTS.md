@@ -1,94 +1,85 @@
 # Project description
 
-I want to build an app that enables its users to understand their slurm jobs in a TUI. 
-
-## Start page
+stoei is a terminal UI for monitoring Slurm jobs. Users browse, filter, inspect,
+and cancel jobs, and see cluster load — all without leaving the terminal.
 
 # Tech stack
 
-- I want to use rich/Textual to build the TUI. 
-- I want to use `uv` for package management. Use the web to look for the latest uv interface. You will need to use `uv run` for executing each command in the environment.
-- I want to use `ruff` for linting. Be strict with linting unless absolutely necessary.
-- Use `ty` for type hints. Be as specific as possible, avoid Any and similarly nebulous types unless absolutely necessary.
-- In the end I want to use uvx to have the command to start the app anywhere.
+- TUI on the Charm stack: **Bubble Tea v2** (`charm.land/bubbletea/v2`), Lip Gloss
+  v2, Bubbles v2. These require **Go >= 1.25**.
+- Build and run with the Go toolchain (`go build ./...`, `go run ./cmd/stoei`).
+- Lint with `golangci-lint` (config in `.golangci.yml`); format with `gofmt`.
+- Ship as a single static binary via GoReleaser; `go install` also works.
+
+## Architecture
+
+Dependencies flow one way: `ui → store → slurm`, enforced by depguard. The store
+never imports the UI; the slurm package never imports the store. Three test seams:
+`slurm.Runner`, `store.SlurmClient`, and the UI `Modal`/`Component` interfaces.
+
+Async responsiveness is the #1 design driver. All IO happens inside `tea.Cmd`
+closures, never on the Update path. Refresh is two-tier (fast `squeue`, slow
+`sacct`/nodes); each ticker re-arms once from its own handler; store setters drop
+stale results by generation tag so the UI never blocks or shows out-of-order data.
 
 ## Maintainability
 
-I want a codebase that is easily maintainable. I want minimal coupling. If a pattern is particularly applicable in this project, apply it, otherwise focus on the functionality over the purity of how those patterns are applied.
-
+Easily maintainable, minimal coupling. If a pattern fits this project, apply it;
+otherwise favor functionality over pattern purity.
 
 ## Testing
 
-I want a full `pytest`-based test suite. I want to make extensive use of fixtures, instead of setup and teardowns.
-
-I want to run this test suite on each push and opened PR on github workflows. I also want to have precommit hook to check for uv formatting and ty respecting the project rules.
-
-Keep unit tests under `tests/unit/` and place integration/user-flow tests under `tests/integration/`. Integration tests should simulate user actions (e.g., via `app.run_test()`) and live alongside other integration helpers in that folder.
-
-**Important**: Always run tests (`uv run pytest`) after making any code changes to ensure everything still works correctly.
-
-**Important**: Do NOT run interactive commands like `stoei` itself during development/testing as it is a TUI application that requires user interaction. If you must run it for verification, always use `timeout` to interrupt it after 10 seconds (e.g., `timeout 10 stoei`). Prefer using the pytest test suite for verification instead.
-
-**Performance**: The test suite must execute in under 20 seconds. To achieve this:
-- Mock `_start_refresh_worker` and `check_slurm_available` in tests using `app.run_test()`
-- Use `size=(80, 24)` for Textual app tests to reduce rendering overhead
-- Avoid `await pilot.pause()` unless absolutely necessary
-- Do not add `pytest-timeout` as a band-aid - fix slow tests at the root cause
-
-## Logging
-
-Use loguru for logging, I want to use the logs for 1 week. I want the logs to be in a logs/ folders. I want the logs in the standard output and a file. Use f-strings for all log messages (e.g., `logger.info(f"Loaded {count} items")`) instead of loguru's deferred `{}` formatting or `%` style formatting.
+- Standard `go test ./... -race`. Tests **must never reach a real scheduler** — use
+  the `slurm.Runner` / `store.SlurmClient` fakes and the golden fixtures under
+  `internal/slurm/testdata/`.
+- No sleeps, no wall-clock; inject clocks where time matters.
+- The suite must stay fast (well under 20s) — fix slow tests at the root cause,
+  never paper over them with timeouts.
+- **Do NOT run the TUI itself** (`go run ./cmd/stoei`) in development/testing — it
+  blocks on a terminal. Verify with the test suite instead.
 
 ## Docstrings
 
-I want to use google-style docstrings.
+Use standard Go doc comments (full sentences starting with the identifier name).
+Comments explain *why*, not *what*.
 
 ## Documentation
 
-I want to have mostly self-explanatory code. Use the Readme to show the user how to get started.
-
-## Code structure
-
-I want to have a clear code structure. In the end, I want the main source code for the package repository
+Prefer self-explanatory code. The README is the user's getting-started guide.
 
 ## Notifications
 
-- **Never show the same error notification repeatedly.** If a background operation (e.g., data refresh) fails on a recurring cycle, notify the user once. Only re-notify after the operation has recovered and then failed again. Manual user-triggered actions should always provide feedback regardless.
+**Never show the same error notification repeatedly.** If a background refresh
+fails on a recurring cycle, notify the user once (edge-triggered); only re-notify
+after it recovers and then fails again. Manual user-triggered actions always get
+feedback regardless.
 
 ## Code style
 
-- **All imports must be hoisted to the top of the file** - no imports inside functions, methods, or conditional blocks. This is enforced by ruff rule PLC0415.
-- **Do not use `if TYPE_CHECKING:` blocks.** Import everything as a regular top-level runtime import. If a runtime import would be circular, fix the underlying coupling - for example, move shared data models into a small dependency-free module that both sides can import (see `stoei/usage_stats.py`). Only when neither a runtime import nor a small refactor is viable (a genuinely type-only third-party symbol, or accessing a concrete `App` subclass attribute through Textual's `self.app`), suppress the specific diagnostic inline with `# ty: ignore[<rule>]` instead of reintroducing `TYPE_CHECKING`.
+- Format with `gofmt`; keep `golangci-lint run` clean.
+- No useless comments. No section-separator comments. No dead code.
+- Imports grouped stdlib / third-party / local.
 
 ## Agent Auto-run Commands
 
-**CRITICAL: You MUST automatically run these commands after making ANY code changes:**
+**CRITICAL: After making ANY code change, automatically run:**
 
-1. **After editing Python files, ALWAYS run:**
-   ```bash
-   uv run ruff format .
-   uv run ruff check --fix .
-   uv run ty check stoei/
-   ```
+```bash
+gofmt -w .
+go vet ./...
+golangci-lint run
+go test ./... -race
+```
 
-2. **After making ANY changes, ALWAYS run:**
-   ```bash
-   uv run pytest
-   ```
-
-3. **Before completing any task, verify with:**
-   ```bash
-   uv run ruff format --check .
-   uv run ruff check .
-   uv run ty check stoei/
-   ```
-
-**Do NOT ask the user - just run these commands automatically after code changes.**
+**Do NOT ask the user — just run these after code changes.**
 
 ## Pull Requests
 
-PR descriptions should contain only a summary of the changes. Do not include a test plan, checklist, or any other sections beyond the summary.
+PR descriptions contain only a summary of the changes. No test plan, checklist, or
+any other sections beyond the summary.
 
 ## Commit Attribution
 
-**IMPORTANT**: AI agents (Claude, Cursor, etc.) should NOT add themselves as co-authors in git commits. Do not use `Co-Authored-By` trailers or any other form of AI attribution in commit messages. Commits should only attribute human contributors.
+AI agents (Claude, Cursor, etc.) must NOT add themselves as co-authors. Do not use
+`Co-Authored-By` trailers or any other form of AI attribution. Commits should only
+attribute human contributors.

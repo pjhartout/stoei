@@ -93,9 +93,9 @@ func (s Styles) TitleGradient(text string) string {
 	return GradientText(text, s.Accent, s.AccentAlt, true)
 }
 
-// DefaultThemeName is the default palette name, matching config.DefaultTheme
-// and the Python DEFAULT_THEME_NAME (oc-1).
-const DefaultThemeName = "oc-1"
+// DefaultThemeName is the default palette name, matching config.DefaultTheme.
+// nord is a calm Nord-style frost/polar-night scheme.
+const DefaultThemeName = "nord"
 
 // solid wraps a single hex color as an AdaptiveColor whose light and dark
 // variants are identical. The ported OpenCode palettes are dark-first single

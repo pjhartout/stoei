@@ -1,5 +1,5 @@
 # Default stoei configuration. Values out of range are clamped to these on load.
-theme: oc-1
+theme: nord
 refresh_interval: 5
 job_history_days: 7
 log_viewer_lines: 10000

@@ -46,9 +46,12 @@ func TestSettingsSaveEmitsApply(t *testing.T) {
 func TestSettingsCyclesEnumAndSaves(t *testing.T) {
 	s := newTestSettings()
 
-	// Theme is the first (focused) field; right cycles to the next palette.
-	first := theme.Names()[0]
-	second := theme.Names()[1]
+	// Theme is the first (focused) field; right cycles to the next palette in
+	// the field's own option list, which starts selected at the default theme.
+	themeOpts := s.fields[fThemeIdx].options
+	startIdx := s.fields[fThemeIdx].selected
+	first := themeOpts[startIdx]
+	second := themeOpts[(startIdx+1)%len(themeOpts)]
 	s.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 	if got := s.fields[fThemeIdx].options[s.fields[fThemeIdx].selected]; got == first {
 		t.Fatalf("right did not cycle theme away from %q", first)

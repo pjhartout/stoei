@@ -1,14 +1,10 @@
 # Stoei
 
-A terminal UI for monitoring Slurm jobs. It auto-refreshes every 5 seconds and summarizes jobs, nodes, and users.
+A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nodes, users, and cluster load, and lets you inspect, filter, and cancel jobs without leaving the terminal.
 
-[![GitHub release](https://img.shields.io/github/v/tag/pjhartout/stoei?label=version)](https://github.com/pjhartout/stoei/releases)
-[![Python Version](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
+[![GitHub release](https://img.shields.io/github/v/release/pjhartout/stoei?label=version)](https://github.com/pjhartout/stoei/releases)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/pjhartout/stoei)](https://go.dev/)
 [![License](https://img.shields.io/github/license/pjhartout/stoei)](https://github.com/pjhartout/stoei/blob/main/LICENSE)
-
-### Install & Launch
-
-![Install & Launch](demo/install.gif)
 
 ### Jobs
 
@@ -32,74 +28,47 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes every 5 seconds and s
 
 ## Features
 
-- Auto-refreshing job list (5s)
-- Job stats (running, pending, requeues)
-- Job history (last 24 hours)
-- Job detail view (Enter or `i`)
-- Tabs for Jobs, Nodes, Users, and Priority
-- Quick filtering (`/`)
+- Auto-refreshing job list with running/pending/requeue stats
+- Completed-job history merged into the Jobs tab
+- Job detail view (`Enter` or `i`) and a log viewer with search and `$EDITOR`
+- Tabs for Jobs, Nodes, Users, Priority, and Logs
+- Cluster-load sidebar: free vs. allocated nodes/CPU/memory/GPU, pending queue, and wait times
+- Quick filtering (`/`), sorting (`o`), and job cancellation (`c`)
+- Configurable themes and vim/emacs keybindings
 
 ## Installation
 
-### Run with uvx (no install)
+stoei is a single static binary with no runtime dependencies.
 
-Prerequisite: install [uv](https://github.com/astral-sh/uv#installation).
+### Prebuilt binary (recommended)
 
-```bash
-uvx git+https://github.com/pjhartout/stoei.git
-```
-
-Specific version:
-```bash
-uvx git+https://github.com/pjhartout/stoei.git@v0.2.7
-```
-
-Optional alias:
-```bash
-alias stoei='uvx git+https://github.com/pjhartout/stoei.git'
-```
-
-### Install as a tool (uv)
+Download the archive for your platform from the [latest release](https://github.com/pjhartout/stoei/releases/latest), extract it, and put `stoei` on your `PATH`:
 
 ```bash
-uv tool install git+https://github.com/pjhartout/stoei.git
+# Linux x86_64 example — adjust the URL for your OS/arch
+curl -L https://github.com/pjhartout/stoei/releases/latest/download/stoei_<version>_linux_amd64.tar.gz | tar xz
+sudo install stoei /usr/local/bin/
 ```
 
-Upgrade or uninstall:
+Binaries are published for Linux, macOS, and Windows (amd64 and arm64).
+
+### go install
+
+With a Go 1.25+ toolchain:
+
 ```bash
-uv tool install --upgrade git+https://github.com/pjhartout/stoei.git
-uv tool uninstall stoei
+go install github.com/pjhartout/stoei/cmd/stoei@latest
 ```
+
+This installs `stoei` into `$(go env GOPATH)/bin`.
 
 ### From source
 
 ```bash
 git clone https://github.com/pjhartout/stoei.git
 cd stoei
-uv sync
-uv run stoei
-```
-
-### Editable install (development)
-
-Install from a local checkout so source changes take effect immediately:
-
-```bash
-git clone https://github.com/pjhartout/stoei.git
-cd stoei
-uv pip install -e .
-```
-
-Or to make `stoei` available on your PATH in editable mode:
-
-```bash
-uv tool install -e .
-```
-
-### Alternative: pip
-
-```bash
-pip install git+https://github.com/pjhartout/stoei.git
+go build -o stoei ./cmd/stoei
+./stoei
 ```
 
 ## Usage
@@ -108,82 +77,59 @@ pip install git+https://github.com/pjhartout/stoei.git
 stoei
 ```
 
-If you are using `uvx` directly:
-```bash
-uvx git+https://github.com/pjhartout/stoei.git
-```
+stoei runs the Slurm CLIs (`squeue`, `sacct`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. Check the version with `stoei --version`.
 
 ### Keyboard shortcuts
 
 | Key | Action |
 |-----|--------|
+| `1`–`5` | Jobs / Nodes / Users / Priority / Logs |
+| `Tab` / `Shift+Tab` | Next / previous tab |
+| `↑` / `↓` | Navigate rows |
+| `Enter` | View selected row's details |
+| `i` | Enter a job ID to view |
+| `c` | Cancel selected job |
+| `/` | Filter (`col:value` or substring) |
+| `o` | Cycle sort order |
+| `r` | Refresh now |
+| `s` | Settings |
+| `?` | Help |
 | `q` | Quit |
-| `r` | Refresh |
-| `i` | Enter job ID |
-| `Enter` | View selected job details |
-| `↑/↓` | Navigate jobs |
-| `Tab` | Switch tables |
-| `1` | Jobs tab |
-| `2` | Nodes tab |
-| `3` | Users tab |
+
+Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refresh interval, history window, keybindings) and can be edited in-app via `s`.
 
 ## Requirements
 
-- Python 3.11+
-- Slurm commands available: `squeue`, `sacct`, `scontrol`
+- Slurm CLIs on `PATH`: `squeue`, `sacct`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
+- A login node where those commands talk to your cluster
+
+The `sacct`-backed views — job history, energy, and wait times — additionally require a reachable `slurmdbd`.
 
 ## Development
 
+See [CONTRIBUTING.md](CONTRIBUTING.md). In short:
+
 ```bash
-git clone https://github.com/pjhartout/stoei.git
-cd stoei
-uv sync --all-extras
-uv run pre-commit install
+go build ./...
+go test ./... -race
+gofmt -l .
+golangci-lint run
 ```
 
-Run tests:
-```bash
-uv run pytest
-```
-
-Lint and format:
-```bash
-uv run ruff format --check .
-uv run ruff check .
-```
-
-Type check:
-```bash
-uv run ty check stoei/
-```
-
-Mock Slurm data:
-```bash
-./scripts/run_with_mocks.sh
-```
-
-If you run the TUI during development, use `timeout 10 stoei` to avoid hanging.
-
-## Logging
-
-Logs are written to stdout and `~/.stoei/logs/`. Files rotate daily and are kept for 1 week.
+The demo GIFs in `demo/` are generated with [vhs](https://github.com/charmbracelet/vhs).
 
 ## Releases
 
-Tags on GitHub create releases. See the [releases page](https://github.com/pjhartout/stoei/releases).
+Pushing a `v*` tag runs [GoReleaser](https://goreleaser.com/) and publishes cross-platform binaries to the [releases page](https://github.com/pjhartout/stoei/releases).
 
 ## License
 
-MIT License - see LICENSE for details.
-
-## Contributing
-
-Before opening a PR, run tests, lint, format, and type checks as described in [CONTRIBUTING.md](CONTRIBUTING.md).
+MIT License — see [LICENSE](LICENSE) for details.
 
 ## Related projects
 
-GitHub is full of related projects. Fundamentally I just wanted a way to easily look at my logs, cancel and monitor requeued jobs, which I don't think is supported by existing solutions.
+GitHub is full of related projects. Fundamentally I just wanted a way to easily look at my logs, cancel, and monitor requeued jobs, which I don't think is well supported by existing solutions.
 
-## What's in a name? 
+## What's in a name?
 
 `stoei` is a Dutch verb meaning "wrestle", because that's what it feels like sometimes to manage these jobs... it's also an alternative spelling for SLURM Terminal User Interface (STUI).

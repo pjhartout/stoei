@@ -1,18 +1,22 @@
 repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.8.2
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
-        args: [--check]
-
   - repo: local
     hooks:
-      - id: ty
-        name: ty type check
-        entry: uv run ty check stoei/
+      - id: gofmt
+        name: gofmt
+        entry: gofmt -l -w
         language: system
-        types: [python]
+        types: [go]
+
+      - id: go-vet
+        name: go vet
+        entry: go vet ./...
+        language: system
+        types: [go]
         pass_filenames: false
-        always_run: true
+
+      - id: golangci-lint
+        name: golangci-lint
+        entry: golangci-lint run
+        language: system
+        types: [go]
+        pass_filenames: false

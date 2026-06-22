@@ -14,7 +14,19 @@ import (
 	"github.com/pjhartout/stoei/internal/ui/components"
 )
 
+// version is the build version, set at release time via
+// -ldflags "-X main.version=...". Local builds report "dev".
+var version = "dev"
+
 func main() {
+	if len(os.Args) > 1 {
+		switch os.Args[1] {
+		case "--version", "-v", "version":
+			fmt.Println("stoei", version)
+			return
+		}
+	}
+
 	// Wire the one-way dependency chain: an ExecRunner shells out to Slurm, the
 	// Client builds/parses commands, the Store holds the data, and the root model
 	// renders it. The alt-screen is a View field in Bubble Tea v2, so NewProgram

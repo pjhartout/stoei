@@ -45,9 +45,9 @@ const (
 	DefaultEnergyHistoryMonths = 6
 )
 
-// DefaultTheme is the default palette name (settings.py DEFAULT_THEME_NAME =
-// themes.OC1_THEME_NAME).
-const DefaultTheme = "oc-1"
+// DefaultTheme is the default palette name; nord is a calm Nord-style
+// frost/polar-night scheme. Must stay in sync with theme.DefaultThemeName.
+const DefaultTheme = "nord"
 
 // KeybindMode is the keybinding preset name. The Python keybindings module
 // defines exactly two presets.
