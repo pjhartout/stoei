@@ -17,7 +17,14 @@ go build ./...
 pre-commit install   # optional: runs gofmt/vet/golangci-lint on commit
 ```
 
-Run the app with `go run ./cmd/stoei`.
+Run the app with `go run ./cmd/stoei`. To make the `stoei` command itself a live
+debug build of your checkout, symlink the dev wrapper onto your `PATH`:
+
+```bash
+ln -sf "$(pwd)/scripts/stoei-dev" ~/.local/bin/stoei   # ~/.local/bin must be on $PATH
+```
+
+See the README "Local debug build" section for details.
 
 ## Layout
 

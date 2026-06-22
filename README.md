@@ -116,6 +116,27 @@ gofmt -l .
 golangci-lint run
 ```
 
+### Local debug build
+
+To make the `stoei` command run your working copy — a live, unstripped debug
+build that recompiles on each launch — symlink the dev wrapper onto your `PATH`:
+
+```bash
+ln -sf "$(pwd)/scripts/stoei-dev" ~/.local/bin/stoei   # ~/.local/bin must be on $PATH
+```
+
+Now typing `stoei` runs `go run ./cmd/stoei` from this checkout, so it always
+reflects your latest edits. If a release binary or the old Python tool is still
+installed, remove it or make sure `~/.local/bin` comes first on your `PATH` so
+this wrapper wins.
+
+Prefer a fast prebuilt binary over recompiling each launch? Build once (and
+rebuild after changes):
+
+```bash
+go build -o ~/.local/bin/stoei ./cmd/stoei
+```
+
 The demo GIFs in `demo/` are generated with [vhs](https://github.com/charmbracelet/vhs).
 
 ## Releases
