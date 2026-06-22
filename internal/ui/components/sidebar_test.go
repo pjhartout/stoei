@@ -72,7 +72,7 @@ func TestSidebarRendersPendingAndWaitTime(t *testing.T) {
 
 func TestSidebarLoadingPlaceholder(t *testing.T) {
 	s := NewSidebar(styles())
-	if !strings.Contains(s.View(), "Loading cluster data") {
+	if !strings.Contains(s.View(), "Loading cluster") {
 		t.Errorf("unloaded sidebar should show placeholder; view:\n%s", s.View())
 	}
 }

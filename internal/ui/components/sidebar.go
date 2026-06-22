@@ -16,10 +16,6 @@ import (
 // app's narrow-terminal behavior (the sidebar is removed on small widths).
 const SidebarMinTermWidth = 100
 
-// sidebarWidth is the fixed character width of the rendered sidebar, matching the
-// Python ClusterSidebar default width of 30.
-const sidebarWidth = 30
-
 // gbPerTB converts gigabytes to terabytes for memory display.
 const gbPerTB = 1024.0
 
@@ -42,7 +38,7 @@ func NewSidebar(styles theme.Styles) *Sidebar {
 // SetStyles re-themes the sidebar.
 func (s *Sidebar) SetStyles(styles theme.Styles) { s.styles = styles }
 
-// SetSize records the available height; the width is fixed.
+// SetSize records the available height; the width auto-fits the content.
 func (s *Sidebar) SetSize(_, height int) { s.height = height }
 
 // SetStats updates the rendered statistics. Passing loaded=false (before the
@@ -52,8 +48,8 @@ func (s *Sidebar) SetStats(stats store.ClusterStats, loaded bool) {
 	s.loaded = loaded
 }
 
-// Width returns the sidebar's render width including its border.
-func (s *Sidebar) Width() int { return sidebarWidth + 2 }
+// Width returns the sidebar's rendered width, which auto-fits its widest line.
+func (s *Sidebar) Width() int { return lipgloss.Width(s.View()) }
 
 // ShouldShow reports whether the sidebar fits at the given terminal width.
 func ShouldShow(termWidth int) bool { return termWidth >= SidebarMinTermWidth }
@@ -61,7 +57,7 @@ func ShouldShow(termWidth int) bool { return termWidth >= SidebarMinTermWidth }
 // View renders the sidebar inside a rounded border.
 func (s *Sidebar) View() string {
 	body := s.body()
-	box := s.styles.Modal.Width(sidebarWidth)
+	box := s.styles.Modal // no explicit width: the box auto-fits its content
 	if s.height > 0 {
 		box = box.Height(s.height)
 	}
@@ -74,7 +70,7 @@ func (s *Sidebar) body() string {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			s.styles.Title.Render("Cluster Load"),
 			"",
-			s.styles.Subtle.Render("Loading cluster data..."),
+			s.styles.Subtle.Render("Loading cluster…"),
 		)
 	}
 

@@ -487,6 +487,10 @@ func (a App) activeHandlesSubtabKey(k string) bool {
 func (a *App) refreshSidebar() {
 	loaded := a.store.State(store.SectionNodes) == store.StateLoaded
 	a.sidebar.SetStats(a.store.ClusterStats, loaded)
+	// The sidebar auto-fits its content, so its width can grow when new stats
+	// arrive; re-lay-out the tabs to the new split and force a re-render.
+	a.fanoutSize()
+	a.frame.dirty = true
 }
 
 // observe feeds a fetch outcome to the health notifier and appends/clears a toast
@@ -536,9 +540,10 @@ func (a *App) fanoutSize() {
 		innerH = 1
 	}
 
+	a.sidebar.SetSize(0, innerH)
 	tabW := w
 	if components.ShouldShow(w) {
-		tabW = w - a.sidebar.Width()
+		tabW = w - a.sidebar.Width() // sidebar auto-fits its content; tab takes the rest
 		if tabW < 1 {
 			tabW = 1
 		}
@@ -549,7 +554,6 @@ func (a *App) fanoutSize() {
 	a.users.SetSize(tabW, innerH)
 	a.priority.SetSize(tabW, innerH)
 	a.logsTab.SetSize(tabW, innerH)
-	a.sidebar.SetSize(a.sidebar.Width(), innerH)
 
 	for _, m := range a.modals {
 		m.SetSize(w, h)
