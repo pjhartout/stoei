@@ -69,6 +69,9 @@ jobs:
           check-latest: true
 
       - name: golangci-lint
-        uses: golangci/golangci-lint-action@v6
+        # v7+ of the action installs golangci-lint v2; v6 installs v1 (built
+        # with go1.24), which refuses our go1.25 target. Pin the lint version
+        # for reproducible runs.
+        uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2
