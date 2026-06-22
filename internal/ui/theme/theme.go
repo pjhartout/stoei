@@ -78,6 +78,11 @@ type Styles struct {
 	Warning lipgloss.Style
 	// Muted styles cancelled/inactive text.
 	Muted lipgloss.Style
+	// Selection highlights the focused table row as a filled bar: the theme's
+	// border tone as background with bright text, so the cursor is clearly
+	// visible on every palette (a foreground-only tint is nearly invisible on
+	// low-contrast themes like nord).
+	Selection lipgloss.Style
 
 	// Accent and AccentAlt are the resolved gradient stop colors for the current
 	// background, kept so the UI can render an accent gradient (GradientText)
@@ -246,6 +251,10 @@ func BuildStyles(t Theme, dark bool) Styles {
 			Foreground(warning),
 		Muted: lipgloss.NewStyle().
 			Foreground(muted),
+		Selection: lipgloss.NewStyle().
+			Foreground(text).
+			Background(border).
+			Bold(true),
 		Accent:    accent,
 		AccentAlt: accentAlt,
 	}

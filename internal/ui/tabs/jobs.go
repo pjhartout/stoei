@@ -151,7 +151,7 @@ func defaultColumnWidth(key string) int {
 func tableStyles(styles theme.Styles) table.Styles {
 	s := table.DefaultStyles()
 	s.Header = s.Header.Foreground(styles.Title.GetForeground()).Bold(true)
-	s.Selected = s.Selected.Foreground(styles.TabActive.GetForeground()).Bold(true)
+	s.Selected = styles.Selection
 	return s
 }
 
