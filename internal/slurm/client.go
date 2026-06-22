@@ -378,6 +378,33 @@ func (c *Client) JobDetail(ctx context.Context, jobID string) (JobDetail, error)
 	return JobDetail{Fields: fields, Source: "sacct"}, nil
 }
 
+// safeNodeName validates a node name before it reaches a command. Node names are
+// the same safe character class as usernames (alphanumerics, plus separators).
+var safeNodeName = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
+
+// NodeDetail returns the parsed Key=Value detail for a single node via "scontrol
+// show node <name>". It mirrors get_node_info: the node name is validated, the
+// command run through the Runner, and the output parsed into a Key=Value map. The
+// returned JobDetail.Fields carries the scontrol fields (Source is "scontrol").
+func (c *Client) NodeDetail(ctx context.Context, nodeName string) (JobDetail, error) {
+	nodeName = strings.TrimSpace(nodeName)
+	if nodeName == "" {
+		return JobDetail{}, errors.New("node name cannot be empty")
+	}
+	if !safeNodeName.MatchString(nodeName) {
+		return JobDetail{}, fmt.Errorf("unsafe characters detected in node name: %q", nodeName)
+	}
+	out, err := c.runner.Run(ctx, "scontrol", "show", "node", nodeName)
+	if err != nil {
+		return JobDetail{}, fmt.Errorf("scontrol show node %s: %w", nodeName, err)
+	}
+	fields := ParseScontrolFields(strings.TrimSpace(string(out)))
+	if len(fields) == 0 {
+		return JobDetail{}, fmt.Errorf("node %s: no information available", nodeName)
+	}
+	return JobDetail{Fields: fields, Source: "scontrol"}, nil
+}
+
 // CancelJob cancels a job via "scancel". The job ID is validated first. A nil
 // error means scancel reported success. Ports cancel_job.
 func (c *Client) CancelJob(ctx context.Context, jobID string) error {

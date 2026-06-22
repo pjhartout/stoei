@@ -220,6 +220,11 @@ func naIfEmpty(s string) string {
 // root routes raw keys (including r/p/e) into it instead of switching sub-tabs.
 func (u *Users) CapturesInput() bool { return u.active().CapturesInput() }
 
+// SelectedKey returns the username of the selected row on the active pane (the
+// first column is always the user), or "" when empty. The root uses it to open a
+// user-detail modal on Enter.
+func (u *Users) SelectedKey() string { return u.active().SelectedKey() }
+
 // View renders the sub-tab header above the active pane.
 func (u *Users) View() string {
 	header := u.subtabHeader()

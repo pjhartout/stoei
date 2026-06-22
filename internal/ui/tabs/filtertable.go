@@ -159,6 +159,22 @@ func (ft *filterTable) selectedKey() string {
 	return strings.TrimSpace(markupPattern.ReplaceAllString(row[0], ""))
 }
 
+// SelectedKey returns the stable first-column key of the selected row (markup
+// stripped), or "" when the table is empty. It is exported so the root can open a
+// detail modal for the highlighted row.
+func (ft *filterTable) SelectedKey() string { return ft.selectedKey() }
+
+// SelectedCell returns the markup-stripped value of column col in the selected
+// row, or "" when the table is empty or col is out of range. The Priority tab
+// uses it because its detail target is not always the first column.
+func (ft *filterTable) SelectedCell(col int) string {
+	row := ft.table.SelectedRow()
+	if col < 0 || col >= len(row) {
+		return ""
+	}
+	return strings.TrimSpace(markupPattern.ReplaceAllString(row[col], ""))
+}
+
 // Update handles table-local input: "/" opens the filter, "o" cycles the sort,
 // and otherwise the message is forwarded to the embedded table (navigation).
 func (ft *filterTable) Update(msg tea.Msg) tea.Cmd {

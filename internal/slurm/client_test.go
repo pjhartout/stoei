@@ -263,6 +263,43 @@ func TestClientJobDetailNormalizesArrayID(t *testing.T) {
 	}
 }
 
+// TestClientNodeDetail verifies NodeDetail runs "scontrol show node <name>" and
+// parses the Key=Value fields.
+func TestClientNodeDetail(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{
+		"scontrol": "NodeName=node01 State=IDLE CPUTot=64 RealMemory=256000",
+	}}
+	c := NewClient(r, WithUsername("alice"))
+
+	detail, err := c.NodeDetail(context.Background(), "node01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Source != "scontrol" {
+		t.Errorf("Source = %q, want scontrol", detail.Source)
+	}
+	if detail.Fields["NodeName"] != "node01" || detail.Fields["State"] != "IDLE" {
+		t.Errorf("node detail fields = %+v", detail.Fields)
+	}
+	call := lastCall(r)
+	if !argsContain(call, "node") || !argsContain(call, "node01") {
+		t.Errorf("node detail command mismatch: %v", call.Args)
+	}
+}
+
+// TestClientNodeDetailRejectsBadName verifies an unsafe node name is rejected
+// before reaching scontrol.
+func TestClientNodeDetailRejectsBadName(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{}}
+	c := NewClient(r, WithUsername("alice"))
+	if _, err := c.NodeDetail(context.Background(), "bad name; rm -rf"); err == nil {
+		t.Error("expected validation error for unsafe node name")
+	}
+	if len(r.calls) != 0 {
+		t.Errorf("runner called despite invalid node name: %v", r.calls)
+	}
+}
+
 func TestClientJobDetailRejectsBadID(t *testing.T) {
 	r := &fixtureRunner{outputs: map[string]string{}}
 	c := NewClient(r, WithUsername("alice"))

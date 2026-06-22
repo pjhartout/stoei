@@ -281,6 +281,37 @@ func (j *Jobs) displayRow(plain []string) table.Row {
 // stateColumnIndex is the index of the State column in jobColumns.
 var stateColumnIndex = columnIndex("state")
 
+// SelectedJob returns the id, state, and active flag of the currently selected
+// job, looked up in the merged job list by id. ok is false when no row is
+// selected or the id is no longer present. The root uses this to open a job
+// detail (with the live state for cache-evict) or a cancel-confirm modal.
+func (j *Jobs) SelectedJob() (id, state string, active, ok bool) {
+	id = j.selectedJobID()
+	if id == "" {
+		return "", "", false, false
+	}
+	for _, job := range j.store.MergedJobs() {
+		if job.ID == id {
+			return job.ID, job.State, job.Active, true
+		}
+	}
+	// The id is selected but no longer merged; report it with an unknown state so
+	// the caller can still attempt a fresh lookup.
+	return id, "", false, true
+}
+
+// SelectedJobName returns the name of the currently selected job (the Name
+// column, markup-stripped), or "" when no row is selected. The root passes it to
+// the cancel-confirm modal for display.
+func (j *Jobs) SelectedJobName() string {
+	row := j.table.SelectedRow()
+	nameIdx := columnIndex("name")
+	if nameIdx < 0 || nameIdx >= len(row) {
+		return ""
+	}
+	return strings.TrimSpace(markupPattern.ReplaceAllString(row[nameIdx], ""))
+}
+
 // selectedJobID returns the job id (first cell, markup-stripped) of the
 // currently selected table row, or "" when the table is empty.
 func (j *Jobs) selectedJobID() string {
@@ -295,7 +326,18 @@ func (j *Jobs) selectedJobID() string {
 // When the id is no longer present the prior cursor index is clamped into range,
 // matching filterable_table's by-key-then-by-position restoration.
 func reselect(t *table.Model, sorted [][]string, id string) {
-	if id == "" || len(sorted) == 0 {
+	if len(sorted) == 0 {
+		return
+	}
+	// A table that was previously emptied leaves the cursor at -1 (bubbles
+	// SetRows sets cursor = len-1 on an empty set and does not raise it back when
+	// rows reappear). Clamp a negative cursor up so the first row is selectable
+	// after the initial data load, even when there is no prior selection to
+	// restore.
+	if t.Cursor() < 0 {
+		t.SetCursor(0)
+	}
+	if id == "" {
 		return
 	}
 	for i, row := range sorted {

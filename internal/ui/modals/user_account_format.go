@@ -1,0 +1,352 @@
+package modals
+
+import (
+	"fmt"
+	"sort"
+	"strconv"
+	"strings"
+
+	"github.com/pjhartout/stoei/internal/store"
+	"github.com/pjhartout/stoei/internal/ui/theme"
+)
+
+// fairShareSuccess / fairShareWarning are the fair-share color thresholds. Port
+// formatters._FAIR_SHARE_SUCCESS_THRESHOLD / _WARNING_THRESHOLD.
+const (
+	fairShareSuccess = 0.5
+	fairShareWarning = 0.2
+)
+
+// maxUserPriorityJobs / maxAccountUsers / maxAccountRunningJobs cap the list
+// sections, porting the _USER_INFO_MAX_* / _ACCOUNT_INFO_MAX_* limits.
+const (
+	maxUserPriorityJobs   = 10
+	maxAccountUsers       = 15
+	maxAccountRunningJobs = 20
+)
+
+// summaryLine renders one "Label.......... value" summary row.
+func summaryLine(label, value string, styles theme.Styles) string {
+	return "  " + styles.Subtle.Render(dottedLabel(label, labelWidth)) + " " + value
+}
+
+// formatUserInfo renders a user-detail block from the store's already-fetched
+// data. Ports formatters.format_user_info: a user summary, jobs-by-state, pending
+// resources, fair-share priority, energy, and a job list. The job rows come from
+// the all-users list filtered to this user.
+func formatUserInfo(username string, st *store.Store, styles theme.Styles) string {
+	jobs := userJobs(st, username)
+	userStats := findUserStats(store.AggregateUserStats(jobs), username)
+	pending := findPendingStats(st.PendingUserStats(), username)
+	energy := findEnergyStats(st.EnergyStats(), username)
+	fair := findFairShare(st.FairShare, username)
+	prios := userPriorities(st.PendingPrio, username)
+
+	var lines []string
+
+	lines = append(lines, styles.Title.Render(" User Summary "))
+	lines = append(lines, summaryLine("Username", styles.Text.Bold(true).Render(username), styles))
+	lines = append(lines, summaryLine("Running Jobs", styles.Text.Bold(true).Render(fmtInt(userStats.JobCount)), styles))
+	lines = append(lines, summaryLine("Total CPUs", fmtInt(userStats.TotalCPUs), styles))
+	lines = append(lines, summaryLine("Total Memory (GB)", fmt.Sprintf("%.1f", userStats.TotalMemoryGB), styles))
+	lines = append(lines, summaryLine("Total GPUs", fmtInt(userStats.TotalGPUs), styles))
+	if userStats.GPUTypes != "" {
+		lines = append(lines, summaryLine("GPU Types", styles.Success.Render(userStats.GPUTypes), styles))
+	}
+	lines = append(lines, summaryLine("Unique Nodes", fmtInt(userStats.TotalNodes), styles))
+
+	running, pendingCount := countByState(jobs)
+	lines = append(lines, "", styles.Title.Render(" Jobs by State "))
+	lines = append(lines, summaryLine("Running", styles.Success.Bold(true).Render(fmtInt(running)), styles))
+	lines = append(lines, summaryLine("Pending", styles.Warning.Bold(true).Render(fmtInt(pendingCount)), styles))
+
+	if pending != nil {
+		lines = append(lines, "", styles.Title.Render(" Pending Resources "))
+		lines = append(lines, summaryLine("Pending Jobs", styles.Warning.Bold(true).Render(fmtInt(pending.PendingJobCount)), styles))
+		lines = append(lines, summaryLine("Requested CPUs", fmtInt(pending.PendingCPUs), styles))
+		lines = append(lines, summaryLine("Requested Memory (GB)", fmt.Sprintf("%.1f", pending.PendingMemoryGB), styles))
+		lines = append(lines, summaryLine("Requested GPUs", fmtInt(pending.PendingGPUs), styles))
+		if pending.PendingGPUTypes != "" {
+			lines = append(lines, summaryLine("GPU Types", styles.Success.Render(pending.PendingGPUTypes), styles))
+		}
+	}
+
+	if fair != nil {
+		lines = append(lines, "", styles.Title.Render(" Fair-Share Priority "))
+		lines = append(lines, summaryLine("Account", fair.Account, styles))
+		lines = append(lines, summaryLine("Raw Shares", fair.RawShares, styles))
+		lines = append(lines, summaryLine("Norm Shares", fair.NormShares, styles))
+		lines = append(lines, summaryLine("Raw Usage", fair.RawUsage, styles))
+		lines = append(lines, summaryLine("Effective Usage", fair.EffectvUsage, styles))
+		lines = append(lines, summaryLine("Fair-Share Factor", fairShareColored(fair.FairShare, styles), styles))
+	}
+
+	if energy != nil {
+		lines = append(lines, "", styles.Title.Render(" Energy "))
+		lines = append(lines, summaryLine("Total Energy", styles.Success.Render(formatEnergyWh(energy.TotalEnergyWh)), styles))
+		lines = append(lines, summaryLine("Completed Jobs", fmtInt(energy.JobCount), styles))
+		lines = append(lines, summaryLine("GPU-Hours", fmt.Sprintf("%.1f", energy.GPUHours), styles))
+		lines = append(lines, summaryLine("CPU-Hours", fmt.Sprintf("%.1f", energy.CPUHours), styles))
+	}
+
+	if len(prios) > 0 {
+		lines = append(lines, "", styles.Title.Render(" Pending Job Priorities "), "")
+		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-12s %-10s %-8s %-10s %-10s %-12s",
+			"JobID", "Priority", "Age", "FairShare", "JobSize", "Partition")))
+		for i, p := range prios {
+			if i >= maxUserPriorityJobs {
+				lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  ... and %d more pending jobs", len(prios)-maxUserPriorityJobs)))
+				break
+			}
+			lines = append(lines, fmt.Sprintf("  %-12s %-10s %-8s %-10s %-10s %-12s",
+				trunc(p.JobID, 12), trunc(p.Priority, 10), trunc(p.Age, 8),
+				trunc(p.FairShare, 10), trunc(p.JobSize, 10), trunc(p.Partition, 12)))
+		}
+	}
+
+	if len(jobs) > 0 {
+		lines = append(lines, "", styles.Title.Render(" Job List "), "")
+		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-12s %-15s %-8s %-12s %-10s %-6s %-20s",
+			"JobID", "Name", "State", "Partition", "Time", "Nodes", "NodeList")))
+		for _, j := range jobs {
+			lines = append(lines, fmt.Sprintf("  %-12s %-15s %s %-12s %-10s %-6s %-20s",
+				trunc(j.ID, 12), trunc(j.Name, 15), userJobStateCell(j.State, styles),
+				trunc(j.Partition, 12), trunc(j.Time, 10), trunc(j.NumNodes, 6), trunc(j.NodeList, 20)))
+		}
+	} else {
+		lines = append(lines, "", styles.Subtle.Render("No active jobs found for this user."))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// formatAccountInfo renders an account-detail block from the store's data. Ports
+// formatters.format_account_info: account summary, account fair-share priority,
+// aggregate resource usage, the users in the account, pending job priorities, and
+// the running jobs.
+func formatAccountInfo(account string, st *store.Store, styles theme.Styles) string {
+	var accountEntry *store.FairShareEntry
+	var users []store.FairShareEntry
+	for i := range st.FairShare {
+		e := st.FairShare[i]
+		if e.Account != account {
+			continue
+		}
+		if e.IsAccount() {
+			ec := e
+			accountEntry = &ec
+		} else {
+			users = append(users, e)
+		}
+	}
+
+	usernames := map[string]struct{}{}
+	for _, u := range users {
+		usernames[u.User] = struct{}{}
+	}
+
+	var running, pending []store.AllUsersJob
+	for _, j := range st.AllUsersJobs {
+		if _, ok := usernames[strings.TrimSpace(j.User)]; !ok {
+			continue
+		}
+		switch strings.ToUpper(strings.TrimSpace(j.State)) {
+		case "RUNNING", "R":
+			running = append(running, j)
+		case "PENDING", "PD":
+			pending = append(pending, j)
+		}
+	}
+
+	var lines []string
+	lines = append(lines, styles.Title.Render(" Account Summary "))
+	lines = append(lines, summaryLine("Account Name", styles.Text.Bold(true).Render(account), styles))
+	lines = append(lines, summaryLine("Users in Account", styles.Text.Bold(true).Render(fmtInt(len(users))), styles))
+	lines = append(lines, summaryLine("Running Jobs", styles.Success.Bold(true).Render(fmtInt(len(running))), styles))
+	lines = append(lines, summaryLine("Pending Jobs", styles.Warning.Bold(true).Render(fmtInt(len(pending))), styles))
+
+	if accountEntry != nil {
+		lines = append(lines, "", styles.Title.Render(" Account Fair-Share Priority "))
+		lines = append(lines, summaryLine("Raw Shares", accountEntry.RawShares, styles))
+		lines = append(lines, summaryLine("Norm Shares", accountEntry.NormShares, styles))
+		lines = append(lines, summaryLine("Raw Usage", accountEntry.RawUsage, styles))
+		lines = append(lines, summaryLine("Effective Usage", accountEntry.EffectvUsage, styles))
+		lines = append(lines, summaryLine("Fair-Share Factor", fairShareColored(accountEntry.FairShare, styles), styles))
+	}
+
+	if len(users) > 0 {
+		sort.SliceStable(users, func(i, j int) bool {
+			return parseF(users[i].FairShare) > parseF(users[j].FairShare)
+		})
+		lines = append(lines, "", styles.Title.Render(" Users in Account "), "")
+		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-15s %-12s %-12s %-12s %-10s",
+			"User", "RawShares", "NormShares", "EffectvUsage", "FairShare")))
+		for i, u := range users {
+			if i >= maxAccountUsers {
+				lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  ... and %d more users", len(users)-maxAccountUsers)))
+				break
+			}
+			lines = append(lines, fmt.Sprintf("  %-15s %-12s %-12s %-12s %s",
+				trunc(u.User, 15), trunc(u.RawShares, 12), trunc(u.NormShares, 12),
+				trunc(u.EffectvUsage, 12), fairShareColored(u.FairShare, styles)))
+		}
+	}
+
+	if len(running) > 0 {
+		lines = append(lines, "", styles.Title.Render(" Running Jobs "), "")
+		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-12s %-12s %-15s %-12s %-10s %-6s",
+			"JobID", "User", "Name", "Partition", "Time", "Nodes")))
+		for i, j := range running {
+			if i >= maxAccountRunningJobs {
+				lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  ... and %d more running jobs", len(running)-maxAccountRunningJobs)))
+				break
+			}
+			lines = append(lines, fmt.Sprintf("  %-12s %-12s %-15s %-12s %-10s %-6s",
+				trunc(j.ID, 12), trunc(j.User, 12), trunc(j.Name, 15),
+				trunc(j.Partition, 12), trunc(j.Time, 10), trunc(j.NumNodes, 6)))
+		}
+	} else {
+		lines = append(lines, "", styles.Subtle.Render("No running jobs found for this account."))
+	}
+
+	return strings.Join(lines, "\n")
+}
+
+// userJobs returns the all-users jobs belonging to username.
+func userJobs(st *store.Store, username string) []store.AllUsersJob {
+	var out []store.AllUsersJob
+	for _, j := range st.AllUsersJobs {
+		if strings.TrimSpace(j.User) == username {
+			out = append(out, j)
+		}
+	}
+	return out
+}
+
+// countByState counts running and pending jobs.
+func countByState(jobs []store.AllUsersJob) (running, pending int) {
+	for _, j := range jobs {
+		switch strings.ToUpper(strings.TrimSpace(j.State)) {
+		case "RUNNING", "R":
+			running++
+		case "PENDING", "PD":
+			pending++
+		}
+	}
+	return running, pending
+}
+
+// userJobStateCell colors a state cell in a user job list, padded to width 8.
+func userJobStateCell(state string, styles theme.Styles) string {
+	cell := fmt.Sprintf("%-8s", trunc(state, 8))
+	up := strings.ToUpper(strings.TrimSpace(state))
+	switch up {
+	case "RUNNING", "R":
+		return styles.Success.Bold(true).Render(cell)
+	case "PENDING", "PD":
+		return styles.Warning.Bold(true).Render(cell)
+	default:
+		return cell
+	}
+}
+
+func findUserStats(stats []store.UserStats, username string) store.UserStats {
+	for _, s := range stats {
+		if s.Username == username {
+			return s
+		}
+	}
+	return store.UserStats{Username: username}
+}
+
+func findPendingStats(stats []store.UserPendingStats, username string) *store.UserPendingStats {
+	for i := range stats {
+		if stats[i].Username == username {
+			return &stats[i]
+		}
+	}
+	return nil
+}
+
+func findEnergyStats(stats []store.UserEnergyStats, username string) *store.UserEnergyStats {
+	for i := range stats {
+		if stats[i].Username == username {
+			return &stats[i]
+		}
+	}
+	return nil
+}
+
+func findFairShare(entries []store.FairShareEntry, username string) *store.FairShareEntry {
+	for i := range entries {
+		if entries[i].User == username {
+			return &entries[i]
+		}
+	}
+	return nil
+}
+
+// userPriorities returns the user's pending priorities, sorted by priority desc.
+func userPriorities(entries []store.PriorityEntry, username string) []store.PriorityEntry {
+	var out []store.PriorityEntry
+	for _, e := range entries {
+		if e.User == username {
+			out = append(out, e)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return parseF(out[i].Priority) > parseF(out[j].Priority) })
+	return out
+}
+
+// fairShareColored renders a fair-share value colored by threshold. Ports
+// formatters._format_fair_share_value.
+func fairShareColored(fairShare string, styles theme.Styles) string {
+	raw := strings.TrimSpace(fairShare)
+	v, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return raw
+	}
+	switch {
+	case v >= fairShareSuccess:
+		return styles.Success.Bold(true).Render(raw)
+	case v >= fairShareWarning:
+		return styles.Warning.Bold(true).Render(raw)
+	default:
+		return styles.Error.Bold(true).Render(raw)
+	}
+}
+
+// parseF parses a float, returning 0 on failure (sort key only).
+func parseF(s string) float64 {
+	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
+	if err != nil {
+		return 0
+	}
+	return v
+}
+
+// trunc truncates s to width.
+func trunc(s string, width int) string {
+	if len(s) > width {
+		return s[:width]
+	}
+	return s
+}
+
+// Energy thresholds for the Wh/kWh/MWh display. Port energy.ENERGY_*_THRESHOLD.
+const (
+	energyKWhThreshold = 1000.0
+	energyMWhThreshold = 1_000_000.0
+)
+
+// formatEnergyWh formats a Wh value as Wh/kWh/MWh. Ports formatters._format_energy_wh.
+func formatEnergyWh(wh float64) string {
+	switch {
+	case wh >= energyMWhThreshold:
+		return fmt.Sprintf("%.2f MWh", wh/energyMWhThreshold)
+	case wh >= energyKWhThreshold:
+		return fmt.Sprintf("%.2f kWh", wh/energyKWhThreshold)
+	default:
+		return fmt.Sprintf("%.1f Wh", wh)
+	}
+}

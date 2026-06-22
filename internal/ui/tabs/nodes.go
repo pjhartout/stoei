@@ -141,6 +141,10 @@ func colorPctCell(cell string, styles theme.Styles) string {
 // CapturesInput reports whether the filter bar is open.
 func (n *Nodes) CapturesInput() bool { return n.tbl.CapturesInput() }
 
+// SelectedKey returns the node name of the selected row, or "" when empty. The
+// root uses it to open a node-detail modal on Enter.
+func (n *Nodes) SelectedKey() string { return n.tbl.SelectedKey() }
+
 // View renders the node table.
 func (n *Nodes) View() string { return n.tbl.View() }
 

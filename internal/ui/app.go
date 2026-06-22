@@ -21,6 +21,7 @@ import (
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/components"
 	"github.com/pjhartout/stoei/internal/ui/keys"
+	"github.com/pjhartout/stoei/internal/ui/modals"
 	"github.com/pjhartout/stoei/internal/ui/tabs"
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
@@ -75,9 +76,13 @@ type App struct {
 	// terminals and auto-hidden when narrow.
 	sidebar *components.Sidebar
 
-	// modals is the modal stack. It is empty in Phase 3 but the type and the
-	// push/pop helpers exist so later phases composite over the base.
-	modals []Component
+	// modals is the modal stack. The top modal consumes all input while open and
+	// is composited over the base via the lipgloss Canvas/Layer compositor.
+	modals []modals.Modal
+
+	// detailCache memoizes rendered job details, evicting an entry when that
+	// job's state changes (cache-evict-on-state-change, Python 77e57c3).
+	detailCache *modals.JobDetailCache
 
 	// runningInFlight guards the fast tier: while a running-jobs fetch is
 	// outstanding a fast tick skips dispatching another (but still re-arms).
@@ -126,23 +131,24 @@ func NewWithLogRing(s *store.Store, client store.SlurmClient, ring *components.L
 
 	username := client.Username()
 	a := App{
-		store:     s,
-		client:    client,
-		keys:      keys.Default(),
-		help:      help.New(),
-		theme:     t,
-		styles:    styles,
-		intervals: DefaultIntervals(),
-		notifier:  newHealthNotifier(),
-		logRing:   ring,
-		dark:      true,
-		frame:     &frameCache{dirty: true},
-		jobs:      tabs.NewJobs(s, username, styles),
-		nodes:     tabs.NewNodes(s, styles),
-		users:     tabs.NewUsers(s, styles, energyMonths),
-		priority:  tabs.NewPriority(s, styles, username),
-		logsTab:   tabs.NewLogs(ring, styles),
-		sidebar:   components.NewSidebar(styles),
+		store:       s,
+		client:      client,
+		keys:        keys.Default(),
+		help:        help.New(),
+		theme:       t,
+		styles:      styles,
+		intervals:   DefaultIntervals(),
+		notifier:    newHealthNotifier(),
+		logRing:     ring,
+		dark:        true,
+		frame:       &frameCache{dirty: true},
+		jobs:        tabs.NewJobs(s, username, styles),
+		nodes:       tabs.NewNodes(s, styles),
+		users:       tabs.NewUsers(s, styles, energyMonths),
+		priority:    tabs.NewPriority(s, styles, username),
+		logsTab:     tabs.NewLogs(ring, styles),
+		sidebar:     components.NewSidebar(styles),
+		detailCache: modals.NewJobDetailCache(),
 	}
 	return a
 }
@@ -261,6 +267,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.store.SetRunningJobs(msg.jobs, msg.gen, msg.err)
 		a.observe(store.SectionRunningJobs, msg.err)
 		a.jobs.Refresh()
+		a.detailCache.SyncStates(a.store.MergedJobs()) // evict on state change (77e57c3)
 		a.frame.dirty = true
 		return a, nil
 
@@ -268,6 +275,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.store.SetHistory(msg.jobs, msg.stats, msg.gen, msg.err)
 		a.observe(store.SectionHistory, msg.err)
 		a.jobs.Refresh() // Completed/failed history jobs merge into the Jobs table.
+		a.detailCache.SyncStates(a.store.MergedJobs())
 		a.frame.dirty = true
 		return a, nil
 
@@ -316,6 +324,28 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.refreshSidebar() // Wait-time stats derive from wait-time records.
 		a.frame.dirty = true
 		return a, nil
+
+	case modals.JobIDSubmittedMsg:
+		return a, a.openJobDetail(msg.JobID, "")
+
+	case modals.OpenLogMsg:
+		if strings.TrimSpace(msg.Path) == "" {
+			a.pushToast("No " + msg.Label + " path available")
+			return a, nil
+		}
+		return a, a.pushModal(modals.NewLogViewer(a.styles, msg.Path, msg.Label, logViewerLines))
+
+	case modals.CancelRequestedMsg:
+		if msg.Err != nil {
+			a.pushToast("Cancel failed for " + msg.JobID + ": " + msg.Err.Error())
+			return a, nil
+		}
+		a.pushToast("Cancelled job " + msg.JobID)
+		return a, a.manualRefresh() // refresh so the job leaves the list
+
+	case modals.LogToastMsg:
+		a.pushToast(msg.Text)
+		return a, nil
 	}
 
 	return a.routeToActive(msg)
@@ -346,11 +376,14 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		a.quitting = true
 		return a, tea.Quit
 	case key.Matches(msg, a.keys.Help):
-		a.help.ShowAll = !a.help.ShowAll
-		a.frame.dirty = true
-		return a, nil
+		return a, a.pushModal(modals.NewHelp(a.keys, a.styles))
 	case key.Matches(msg, a.keys.Refresh):
 		return a, a.manualRefresh()
+	}
+
+	// Detail/action keys open a modal for the active tab's selected row.
+	if cmd, handled := a.handleModalOpenKey(msg); handled {
+		return a, cmd
 	}
 
 	if idx, ok := tabForKey(msg); ok {
@@ -370,6 +403,96 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return a.routeToActive(msg)
+}
+
+// logViewerLines is the tail window for the log viewer. Phase 6 sources it from
+// config.
+const logViewerLines = 1000
+
+// handleModalOpenKey opens the right modal for the active tab's selected row:
+// Enter opens a detail (job/node/user/account), "i" opens the job-id prompt, and
+// "c" opens the cancel-confirm on the Jobs tab. It returns handled=false when the
+// key is not one of these so the caller can fall through to tab navigation.
+func (a *App) handleModalOpenKey(msg tea.KeyPressMsg) (tea.Cmd, bool) {
+	switch msg.String() {
+	case "enter":
+		return a.openDetailForActive(), true
+	case "i":
+		if a.active == tabJobs {
+			return a.pushModal(modals.NewJobInput(a.styles)), true
+		}
+	case "c":
+		if a.active == tabJobs {
+			return a.openCancelConfirm(), true
+		}
+	}
+	return nil, false
+}
+
+// openDetailForActive opens the detail modal appropriate to the active tab's
+// selected row.
+func (a *App) openDetailForActive() tea.Cmd {
+	switch a.active {
+	case tabJobs:
+		id, state, _, ok := a.jobs.SelectedJob()
+		if !ok {
+			a.pushToast("No job selected")
+			return nil
+		}
+		return a.openJobDetail(id, state)
+	case tabNodes:
+		name := a.nodes.SelectedKey()
+		if name == "" {
+			a.pushToast("No node selected")
+			return nil
+		}
+		return a.pushModal(modals.NewNodeDetail(a.client, a.styles, name))
+	case tabUsers:
+		user := a.users.SelectedKey()
+		if user == "" {
+			a.pushToast("No user selected")
+			return nil
+		}
+		return a.pushModal(modals.NewUserDetail(a.store, a.styles, user))
+	case tabPriority:
+		kind, k := a.priority.SelectedDetail()
+		switch kind {
+		case tabs.PriorityDetailUser:
+			if k == "" {
+				return nil
+			}
+			return a.pushModal(modals.NewUserDetail(a.store, a.styles, k))
+		case tabs.PriorityDetailAccount:
+			if k == "" {
+				return nil
+			}
+			return a.pushModal(modals.NewAccountDetail(a.store, a.styles, k))
+		}
+	}
+	return nil
+}
+
+// openJobDetail pushes a job-detail modal for jobID at the given live state,
+// consulting the detail cache (cache hit shows instantly, state change re-fetches).
+func (a *App) openJobDetail(jobID, state string) tea.Cmd {
+	return a.pushModal(modals.NewJobDetail(a.client, a.detailCache, a.styles, jobID, state))
+}
+
+// openCancelConfirm opens a cancel-confirm modal for the selected job, refusing
+// to cancel a completed/failed job (a toast, no modal). Ports the
+// active-job guard around CancelConfirmScreen.
+func (a *App) openCancelConfirm() tea.Cmd {
+	id, state, active, ok := a.jobs.SelectedJob()
+	if !ok {
+		a.pushToast("No job selected")
+		return nil
+	}
+	if !active {
+		a.pushToast("Cannot cancel " + id + ": job is not active (" + state + ")")
+		return nil
+	}
+	name := a.jobs.SelectedJobName()
+	return a.pushModal(modals.NewCancelConfirm(a.client, a.styles, id, name))
 }
 
 // tabForKey maps the number keys 1-5 to their tab, returning ok=false otherwise.
@@ -426,11 +549,15 @@ func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
 }
 
 // routeToActive forwards a message to the top modal (if any) or the active tab,
-// reassigning the returned sub-model and batching its Cmd (I3).
+// reassigning the returned sub-model and batching its Cmd (I3). When the top
+// modal reports done it is popped off the stack.
 func (a App) routeToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if n := len(a.modals); n > 0 {
-		top, cmd := a.modals[n-1].Update(msg)
+		top, cmd, done := a.modals[n-1].Update(msg)
 		a.modals[n-1] = top
+		if done {
+			a.popModal()
+		}
 		a.frame.dirty = true
 		return a, cmd
 	}
@@ -578,13 +705,15 @@ func (a *App) rebuildStyles() {
 	}
 }
 
-// pushModal pushes a modal onto the stack and sizes it. It is unused in Phase 3
-// but defines the seam Phase 5 builds on.
-func (a *App) pushModal(m Component) {
+// pushModal pushes a modal onto the stack, sizes it, and returns its Init Cmd so
+// the caller can batch any fetch/spinner the modal starts. The top modal then
+// consumes all input until it is popped.
+func (a *App) pushModal(m modals.Modal) tea.Cmd {
 	w, h := a.size()
 	m.SetSize(w, h)
 	a.modals = append(a.modals, m)
 	a.frame.dirty = true
+	return m.Init()
 }
 
 // popModal pops the top modal, if any.

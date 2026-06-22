@@ -12,6 +12,7 @@ import (
 	"github.com/charmbracelet/x/exp/teatest/v2"
 
 	"github.com/pjhartout/stoei/internal/store"
+	"github.com/pjhartout/stoei/internal/ui/modals"
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
 
@@ -177,15 +178,16 @@ func TestModalStackPushPop(t *testing.T) {
 	}
 }
 
-// fakeModal is a minimal Component used to exercise the modal stack.
+// fakeModal is a minimal modals.Modal used to exercise the modal stack.
 type fakeModal struct{ body string }
 
-func (m *fakeModal) Update(_ tea.Msg) (Component, tea.Cmd) { return m, nil }
-func (m *fakeModal) View() string                          { return m.body }
-func (m *fakeModal) SetSize(_, _ int)                      {}
-func (m *fakeModal) SetStyles(_ theme.Styles)              {}
-func (m *fakeModal) ShortHelp() []key.Binding              { return nil }
-func (m *fakeModal) FullHelp() [][]key.Binding             { return nil }
+func (m *fakeModal) Init() tea.Cmd                                  { return nil }
+func (m *fakeModal) Update(_ tea.Msg) (modals.Modal, tea.Cmd, bool) { return m, nil, false }
+func (m *fakeModal) View() string                                   { return m.body }
+func (m *fakeModal) SetSize(_, _ int)                               {}
+func (m *fakeModal) SetStyles(_ theme.Styles)                       {}
+func (m *fakeModal) ShortHelp() []key.Binding                       { return nil }
+func (m *fakeModal) FullHelp() [][]key.Binding                      { return nil }
 
 // TestSidebarShownWhenWideHiddenWhenNarrow asserts the cluster sidebar is
 // composed beside the tab on a wide terminal and auto-hidden on a narrow one.

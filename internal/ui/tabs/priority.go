@@ -513,6 +513,41 @@ func parseFloat(s string) (float64, bool) {
 // CapturesInput reports whether the active pane's filter bar is open.
 func (p *Priority) CapturesInput() bool { return p.activePane().CapturesInput() }
 
+// PriorityDetailKind identifies which detail modal the selected Priority row maps
+// to: a user, an account, a job, or none (the My pane has no row detail).
+type PriorityDetailKind int
+
+const (
+	// PriorityDetailNone means the active pane has no Enter-detail.
+	PriorityDetailNone PriorityDetailKind = iota
+	// PriorityDetailUser opens a user-detail modal.
+	PriorityDetailUser
+	// PriorityDetailAccount opens an account-detail modal.
+	PriorityDetailAccount
+)
+
+// SelectedDetail reports the detail target for the selected row on the active
+// pane: the Users pane maps to a user (column 1, after the rank), the Accounts
+// pane to an account (column 1). The Jobs and My panes have no row-detail in the
+// Python app, so they report PriorityDetailNone. The ">> " current-user/account
+// highlight prefix is stripped.
+func (p *Priority) SelectedDetail() (PriorityDetailKind, string) {
+	switch p.activeSubtab {
+	case subtabUsers:
+		return PriorityDetailUser, stripHighlightPrefix(p.users.SelectedCell(1))
+	case subtabAccounts:
+		return PriorityDetailAccount, stripHighlightPrefix(p.accounts.SelectedCell(1))
+	default:
+		return PriorityDetailNone, ""
+	}
+}
+
+// stripHighlightPrefix removes the ">> " current-row marker added by the
+// priority row builders.
+func stripHighlightPrefix(s string) string {
+	return strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(s), ">>"))
+}
+
 // View renders the sub-tab header, then either the My-Priority summary plus the
 // user's pending jobs, or the active pane.
 func (p *Priority) View() string {

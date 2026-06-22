@@ -23,6 +23,7 @@ type FakeClient struct {
 	EnergyData          []slurm.EnergyRecord
 	WaitTimeData        []slurm.WaitTimeRecord
 	JobDetailData       slurm.JobDetail
+	NodeDetailData      slurm.JobDetail
 	UsernameStr         string
 
 	AvailableErr       error
@@ -36,12 +37,15 @@ type FakeClient struct {
 	EnergyHistoryErr   error
 	WaitTimeErr        error
 	JobDetailErr       error
+	NodeDetailErr      error
 	CancelJobErr       error
 
 	// LastUserJobsUser is the username passed to the most recent UserJobs call.
 	LastUserJobsUser string
 	// LastJobDetailID is the job ID passed to the most recent JobDetail call.
 	LastJobDetailID string
+	// LastNodeDetailName is the node name passed to the most recent NodeDetail call.
+	LastNodeDetailName string
 	// LastCancelJobID is the job ID passed to the most recent CancelJob call.
 	LastCancelJobID string
 }
@@ -102,6 +106,12 @@ func (f *FakeClient) WaitTimeHistory(_ context.Context, _ int) ([]slurm.WaitTime
 func (f *FakeClient) JobDetail(_ context.Context, jobID string) (slurm.JobDetail, error) {
 	f.LastJobDetailID = jobID
 	return f.JobDetailData, f.JobDetailErr
+}
+
+// NodeDetail implements SlurmClient.
+func (f *FakeClient) NodeDetail(_ context.Context, nodeName string) (slurm.JobDetail, error) {
+	f.LastNodeDetailName = nodeName
+	return f.NodeDetailData, f.NodeDetailErr
 }
 
 // CancelJob implements SlurmClient.

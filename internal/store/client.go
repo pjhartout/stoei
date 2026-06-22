@@ -42,6 +42,8 @@ type SlurmClient interface {
 	WaitTimeHistory(ctx context.Context, hours int) ([]slurm.WaitTimeRecord, error)
 	// JobDetail returns the parsed Key=Value detail for a single job.
 	JobDetail(ctx context.Context, jobID string) (slurm.JobDetail, error)
+	// NodeDetail returns the parsed Key=Value detail for a single node.
+	NodeDetail(ctx context.Context, nodeName string) (slurm.JobDetail, error)
 	// CancelJob cancels a job via scancel.
 	CancelJob(ctx context.Context, jobID string) error
 }
