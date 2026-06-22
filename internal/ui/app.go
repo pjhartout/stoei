@@ -931,8 +931,20 @@ func (a App) View() tea.View {
 // cluster sidebar beside the tab body on wide terminals (I7 narrow auto-hide).
 func (a App) baseView() string {
 	tabBar := a.tabBar()
+	w := a.widthOrDefault()
 	body := a.activeView()
-	if components.ShouldShow(a.widthOrDefault()) {
+
+	// Constrain the active tab to its allotted width so a wide table is clipped at
+	// the panel edge (and padded to fill it) instead of rendering at its full
+	// natural width and overflowing past the sidebar / off the screen.
+	tabW := w
+	if components.ShouldShow(w) {
+		tabW = max(w-a.sidebar.Width(), 1)
+	}
+	body = lipgloss.PlaceHorizontal(tabW, lipgloss.Left,
+		lipgloss.NewStyle().MaxWidth(tabW).Render(body))
+
+	if components.ShouldShow(w) {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, a.sidebar.View())
 	}
 	footer := a.footer()
