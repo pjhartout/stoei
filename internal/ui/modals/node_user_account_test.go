@@ -62,15 +62,38 @@ func TestAccountDetailRendersFromStore(t *testing.T) {
 		{Account: "physics", User: "", RawShares: "100", FairShare: "0.6"},
 		{Account: "physics", User: "alice", RawShares: "10", FairShare: "0.4"},
 	}, st.NextGen(store.SectionFairShare), nil)
+	st.SetAllUsersJobs([]store.AllUsersJob{
+		{ID: "1", Name: "a", User: "alice", Partition: "gpu", State: "RUNNING", Time: "1:00", NumNodes: "2", NodeList: "n[01-02]", TRES: "cpu=8,mem=16G,gres/gpu:a100=2"},
+		{ID: "2", Name: "b", User: "alice", Partition: "gpu", State: "PENDING", NumNodes: "1", TRES: "cpu=4"},
+	}, st.NextGen(store.SectionAllUsersJobs), nil)
+	st.SetPendingPrio([]store.PriorityEntry{
+		{JobID: "2", User: "alice", Priority: "5000", Age: "10", FairShare: "0.4", Partition: "gpu"},
+		{JobID: "99", User: "bob", Priority: "9000", Partition: "cpu"}, // not in account: excluded
+	}, st.NextGen(store.SectionPendingPrio), nil)
 
 	d := NewAccountDetail(st, testStyles(), "physics")
-	d.SetSize(100, 30)
+	d.SetSize(120, 40)
 	view := d.View()
 	if !strings.Contains(view, "Account Summary") || !strings.Contains(view, "physics") {
 		t.Errorf("account detail missing summary, got:\n%s", view)
 	}
 	if !strings.Contains(view, "Users in Account") {
 		t.Errorf("account detail missing users section, got:\n%s", view)
+	}
+	// Current Resource Usage aggregate block (formatters.py 888-916).
+	if !strings.Contains(view, "Current Resource Usage") {
+		t.Errorf("account detail missing Current Resource Usage block, got:\n%s", view)
+	}
+	if !strings.Contains(view, "Total GPUs") || !strings.Contains(view, "Unique Nodes") {
+		t.Errorf("account detail Current Resource Usage missing fields, got:\n%s", view)
+	}
+	// Account-level Pending Job Priorities block (formatters.py 953-983), showing
+	// the account's pending job and excluding bob's out-of-account job.
+	if !strings.Contains(view, "Pending Job Priorities") {
+		t.Errorf("account detail missing Pending Job Priorities block, got:\n%s", view)
+	}
+	if strings.Contains(view, "9000") {
+		t.Errorf("account detail should exclude out-of-account pending priority, got:\n%s", view)
 	}
 }
 

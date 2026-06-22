@@ -6,6 +6,7 @@ import (
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/table"
 	tea "charm.land/bubbletea/v2"
+	"charm.land/lipgloss/v2"
 
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/theme"
@@ -41,18 +42,23 @@ var (
 // and the drain Reason. Coloring of the State and percent columns ports
 // node_overview.py (_format_state / _format_pct).
 type Nodes struct {
-	store  *store.Store
-	styles theme.Styles
-	tbl    filterTable
+	store    *store.Store
+	styles   theme.Styles
+	tbl      filterTable
+	status   sectionStatus
+	rowCount int
 }
 
 // NewNodes returns a Nodes tab bound to s.
 func NewNodes(s *store.Store, styles theme.Styles) *Nodes {
-	n := &Nodes{store: s, styles: styles}
+	n := &Nodes{store: s, styles: styles, status: newSectionStatus()}
 	n.tbl = newFilterTable(nodeColumns, styles, n.decorate)
 	n.Refresh()
 	return n
 }
+
+// SetKeyMode switches the node table's filter/sort bindings to the given preset.
+func (n *Nodes) SetKeyMode(mode string) { n.tbl.SetKeyMode(mode) }
 
 // SetStyles re-themes the tab.
 func (n *Nodes) SetStyles(styles theme.Styles) {
@@ -78,6 +84,8 @@ func (n *Nodes) Refresh() {
 		rows = append(rows, nodeRow(d))
 	}
 	n.tbl.SetRows(rows)
+	n.rowCount = len(rows)
+	n.status.observe(n.store.State(store.SectionNodes), n.rowCount > 0)
 }
 
 // nodeRow builds the plain (markup-free) cell values for one node. Ports the row
@@ -145,8 +153,17 @@ func (n *Nodes) CapturesInput() bool { return n.tbl.CapturesInput() }
 // root uses it to open a node-detail modal on Enter.
 func (n *Nodes) SelectedKey() string { return n.tbl.SelectedKey() }
 
-// View renders the node table.
-func (n *Nodes) View() string { return n.tbl.View() }
+// View renders the node table, prefixed with a debounced spinner / error badge
+// when the nodes section is loading or failed and no rows are present yet.
+func (n *Nodes) View() string {
+	if line, ok := n.status.statusLine(
+		n.store.State(store.SectionNodes), n.rowCount > 0,
+		n.store.SectionErr(store.SectionNodes), n.styles,
+	); ok {
+		return lipgloss.JoinVertical(lipgloss.Left, line, n.tbl.View())
+	}
+	return n.tbl.View()
+}
 
 // ShortHelp returns the tab-local bindings.
 func (n *Nodes) ShortHelp() []key.Binding { return n.tbl.ShortHelp() }

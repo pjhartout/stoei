@@ -194,6 +194,31 @@ func (s *Store) State(section Section) State {
 	}
 }
 
+// SectionErr returns the most recent fetch error for a section, or nil. It lets
+// a tab render an inline error badge for a failed section.
+func (s *Store) SectionErr(section Section) error {
+	switch section {
+	case SectionRunningJobs:
+		return s.RunningJobsMeta.Err
+	case SectionHistory:
+		return s.HistoryMeta.Err
+	case SectionNodes:
+		return s.NodesMeta.Err
+	case SectionAllUsersJobs:
+		return s.AllUsersJobsMeta.Err
+	case SectionFairShare:
+		return s.FairShareMeta.Err
+	case SectionPendingPrio:
+		return s.PendingPrioMeta.Err
+	case SectionEnergy:
+		return s.EnergyMeta.Err
+	case SectionWaitTime:
+		return s.WaitTimeMeta.Err
+	default:
+		return nil
+	}
+}
+
 // SetLoading marks a section as loading for the given generation, provided that
 // generation is current. It is called when a fetch is dispatched so the UI shows
 // a spinner. A stale (superseded) loading mark is ignored.

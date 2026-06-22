@@ -8,6 +8,7 @@ package theme
 
 import (
 	"image/color"
+	"strings"
 
 	"charm.land/lipgloss/v2"
 )
@@ -77,6 +78,19 @@ type Styles struct {
 	Warning lipgloss.Style
 	// Muted styles cancelled/inactive text.
 	Muted lipgloss.Style
+
+	// Accent and AccentAlt are the resolved gradient stop colors for the current
+	// background, kept so the UI can render an accent gradient (GradientText)
+	// without re-resolving the palette per frame.
+	Accent    color.Color
+	AccentAlt color.Color
+}
+
+// TitleGradient renders s with the resolved accent→accentAlt per-rune gradient,
+// bold, matching the Title style's weight. It is the convenience entry point the
+// chrome uses for the "stoei" title.
+func (s Styles) TitleGradient(text string) string {
+	return GradientText(text, s.Accent, s.AccentAlt, true)
 }
 
 // DefaultThemeName is the default palette name, matching config.DefaultTheme
@@ -232,6 +246,8 @@ func BuildStyles(t Theme, dark bool) Styles {
 			Foreground(warning),
 		Muted: lipgloss.NewStyle().
 			Foreground(muted),
+		Accent:    accent,
+		AccentAlt: accentAlt,
 	}
 }
 
@@ -278,4 +294,31 @@ func (s Styles) PctStyle(pct, high, mid float64, invert bool) lipgloss.Style {
 // thin wrapper over lipgloss.Blend1D, the v2 gradient primitive.
 func AccentGradient(t Theme, dark bool, steps int) []color.Color {
 	return lipgloss.Blend1D(steps, t.Accent.Resolve(dark), t.AccentAlt.Resolve(dark))
+}
+
+// GradientText renders s with a per-rune accent→accentAlt gradient (the
+// charm.land "rainbow title" look), preserving the runes verbatim. The gradient
+// is computed once over the rune count via lipgloss.Blend1D. When s has fewer
+// than two runes the accent color is applied flat. The text is bold to match the
+// Title style. Whitespace runes are emitted uncolored so spaces don't carry
+// stray styling.
+func GradientText(s string, accent, accentAlt color.Color, bold bool) string {
+	runes := []rune(s)
+	if len(runes) == 0 {
+		return ""
+	}
+	base := lipgloss.NewStyle().Bold(bold)
+	if len(runes) == 1 {
+		return base.Foreground(accent).Render(string(runes))
+	}
+	colors := lipgloss.Blend1D(len(runes), accent, accentAlt)
+	var b strings.Builder
+	for i, r := range runes {
+		if r == ' ' {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteString(base.Foreground(colors[i]).Render(string(r)))
+	}
+	return b.String()
 }

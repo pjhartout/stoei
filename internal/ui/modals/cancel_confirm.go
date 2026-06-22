@@ -128,13 +128,28 @@ func (c *CancelConfirm) View() string {
 	return c.styles.Modal.Render(inner)
 }
 
-// button renders one focusable button, reversed when focused.
+// button renders one focusable button with rounded chrome. The focused button
+// gets an accent-filled rounded border (charm dialog style); the unfocused one
+// keeps a subtle rounded outline so both read as buttons. Ports the
+// CancelConfirmScreen button treatment with rounded charm chrome.
 func (c *CancelConfirm) button(label string, focused bool, style lipgloss.Style) string {
-	s := style.Padding(0, 2)
+	fg := style.GetForeground()
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		Padding(0, 2)
 	if focused {
-		s = s.Reverse(true).Bold(true)
+		// Accent fill: reverse the role color into the background, bold label.
+		return box.
+			BorderForeground(fg).
+			Foreground(fg).
+			Reverse(true).
+			Bold(true).
+			Render(label)
 	}
-	return s.Render(label)
+	return box.
+		BorderForeground(c.styles.Subtle.GetForeground()).
+		Foreground(c.styles.Subtle.GetForeground()).
+		Render(label)
 }
 
 // SetSize records the terminal size (the modal is content-sized, not stretched).

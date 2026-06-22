@@ -83,7 +83,7 @@ func helpSections(km keys.KeyMap) []helpSection {
 			{"l", "Toggle line numbers"},
 			{"r", "Reload file"},
 			{"e", "Open in $EDITOR"},
-			{"c", "Show path"},
+			{"c", "Copy path"},
 			{"/", "Search"},
 			{"n / N", "Next / Previous match"},
 			{"Esc/q", "Close viewer"},

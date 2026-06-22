@@ -20,9 +20,10 @@ const (
 // maxUserPriorityJobs / maxAccountUsers / maxAccountRunningJobs cap the list
 // sections, porting the _USER_INFO_MAX_* / _ACCOUNT_INFO_MAX_* limits.
 const (
-	maxUserPriorityJobs   = 10
-	maxAccountUsers       = 15
-	maxAccountRunningJobs = 20
+	maxUserPriorityJobs    = 10
+	maxAccountUsers        = 15
+	maxAccountRunningJobs  = 20
+	maxAccountPriorityJobs = 15
 )
 
 // summaryLine renders one "Label.......... value" summary row.
@@ -174,6 +175,16 @@ func formatAccountInfo(account string, st *store.Store, styles theme.Styles) str
 		lines = append(lines, summaryLine("Fair-Share Factor", fairShareColored(accountEntry.FairShare, styles), styles))
 	}
 
+	// Current Resource Usage: aggregate CPUs/memory/GPUs and unique nodes over the
+	// account's running jobs. Ports the block in formatters.py 888-916, inserted
+	// between the fair-share and users sections to match the Python ordering.
+	usage := store.AggregateAccountResources(running)
+	lines = append(lines, "", styles.Title.Render(" Current Resource Usage "))
+	lines = append(lines, summaryLine("Total CPUs", fmtInt(usage.TotalCPUs), styles))
+	lines = append(lines, summaryLine("Total Memory (GB)", fmt.Sprintf("%.1f", usage.TotalMemoryGB), styles))
+	lines = append(lines, summaryLine("Total GPUs", fmtInt(usage.TotalGPUs), styles))
+	lines = append(lines, summaryLine("Unique Nodes", fmtInt(usage.UniqueNodes), styles))
+
 	if len(users) > 0 {
 		sort.SliceStable(users, func(i, j int) bool {
 			return parseF(users[i].FairShare) > parseF(users[j].FairShare)
@@ -189,6 +200,25 @@ func formatAccountInfo(account string, st *store.Store, styles theme.Styles) str
 			lines = append(lines, fmt.Sprintf("  %-15s %-12s %-12s %-12s %s",
 				trunc(u.User, 15), trunc(u.RawShares, 12), trunc(u.NormShares, 12),
 				trunc(u.EffectvUsage, 12), fairShareColored(u.FairShare, styles)))
+		}
+	}
+
+	// Pending Job Priorities: the account's pending sprio rows, sorted by priority
+	// descending, capped at 15. Ports formatters.py 953-983, inserted between the
+	// users and running-jobs sections to match the Python ordering.
+	prios := accountPriorities(st.PendingPrio, usernames)
+	if len(prios) > 0 {
+		lines = append(lines, "", styles.Title.Render(" Pending Job Priorities "), "")
+		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-12s %-12s %-10s %-8s %-10s %-12s",
+			"JobID", "User", "Priority", "Age", "FairShare", "Partition")))
+		for i, p := range prios {
+			if i >= maxAccountPriorityJobs {
+				lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  ... and %d more pending jobs", len(prios)-maxAccountPriorityJobs)))
+				break
+			}
+			lines = append(lines, fmt.Sprintf("  %-12s %-12s %-10s %-8s %-10s %-12s",
+				trunc(p.JobID, 12), trunc(p.User, 12), trunc(p.Priority, 10),
+				trunc(p.Age, 8), trunc(p.FairShare, 10), trunc(p.Partition, 12)))
 		}
 	}
 
@@ -291,6 +321,20 @@ func userPriorities(entries []store.PriorityEntry, username string) []store.Prio
 	var out []store.PriorityEntry
 	for _, e := range entries {
 		if e.User == username {
+			out = append(out, e)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return parseF(out[i].Priority) > parseF(out[j].Priority) })
+	return out
+}
+
+// accountPriorities returns the pending priorities whose user belongs to the
+// account (the given username set), sorted by priority descending. Ports the
+// job_priorities filtering + sort in format_account_info (formatters.py 953-968).
+func accountPriorities(entries []store.PriorityEntry, usernames map[string]struct{}) []store.PriorityEntry {
+	var out []store.PriorityEntry
+	for _, e := range entries {
+		if _, ok := usernames[strings.TrimSpace(e.User)]; ok {
 			out = append(out, e)
 		}
 	}

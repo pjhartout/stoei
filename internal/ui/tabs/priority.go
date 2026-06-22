@@ -94,6 +94,7 @@ type Priority struct {
 	myAccount string
 	summary   string
 
+	status       sectionStatus
 	activeSubtab prioritySubtab
 	width        int
 	height       int
@@ -101,7 +102,7 @@ type Priority struct {
 
 // NewPriority returns a Priority tab bound to s for the given username.
 func NewPriority(s *store.Store, styles theme.Styles, username string) *Priority {
-	p := &Priority{store: s, styles: styles, username: username}
+	p := &Priority{store: s, styles: styles, username: username, status: newSectionStatus()}
 	p.users = newFilterTable(userPriorityColumns, styles, nil)
 	p.accounts = newFilterTable(accountPriorityColumns, styles, nil)
 	p.jobs = newFilterTable(jobPriorityColumns, styles, nil)
@@ -135,6 +136,14 @@ func (p *Priority) activePane() *filterTable {
 	default:
 		return &p.myJobs
 	}
+}
+
+// SetKeyMode switches every sub-pane's filter/sort bindings to the given preset.
+func (p *Priority) SetKeyMode(mode string) {
+	p.users.SetKeyMode(mode)
+	p.accounts.SetKeyMode(mode)
+	p.jobs.SetKeyMode(mode)
+	p.myJobs.SetKeyMode(mode)
 }
 
 // SetStyles re-themes all panes and re-derives the colored rows.
@@ -177,15 +186,19 @@ func (p *Priority) Update(msg tea.Msg) (*Priority, tea.Cmd) {
 		switch km.String() {
 		case "m":
 			p.activeSubtab = subtabMine
+			p.reobserve()
 			return p, nil
 		case "u":
 			p.activeSubtab = subtabUsers
+			p.reobserve()
 			return p, nil
 		case "a":
 			p.activeSubtab = subtabAccounts
+			p.reobserve()
 			return p, nil
 		case "j":
 			p.activeSubtab = subtabJobs
+			p.reobserve()
 			return p, nil
 		}
 	}
@@ -214,6 +227,29 @@ func (p *Priority) Refresh() {
 	p.jobs.SetRows(jobPriorityRows(p.store.PendingPrio, p.username, p.styles))
 	p.myJobs.SetRows(myJobRows(p.store.PendingPrio, p.username))
 	p.summary = p.buildSummary(rankedUsers, rankedAccounts)
+	p.reobserve()
+}
+
+// activeSection returns the store section backing the active sub-pane and whether
+// that pane currently has rows. The My/Users/Accounts panes derive from the
+// fair-share section; the Jobs pane derives from the pending-priority section.
+func (p *Priority) activeSection() (store.Section, bool) {
+	switch p.activeSubtab {
+	case subtabJobs:
+		return store.SectionPendingPrio, len(p.jobs.rows) > 0
+	case subtabUsers:
+		return store.SectionFairShare, len(p.users.rows) > 0
+	case subtabAccounts:
+		return store.SectionFairShare, len(p.accounts.rows) > 0
+	default:
+		return store.SectionFairShare, len(p.myJobs.rows) > 0 || p.summary != ""
+	}
+}
+
+// reobserve refreshes the status tracker for the active sub-pane's section.
+func (p *Priority) reobserve() {
+	sec, hasData := p.activeSection()
+	p.status.observe(p.store.State(sec), hasData)
 }
 
 // splitFairShare splits sshare entries into user-level and account-level rows,
@@ -559,6 +595,12 @@ func (p *Priority) View() string {
 			p.styles.Title.Render("Your Pending Jobs"),
 			p.myJobs.View(),
 		)
+	}
+	sec, hasData := p.activeSection()
+	if line, ok := p.status.statusLine(
+		p.store.State(sec), hasData, p.store.SectionErr(sec), p.styles,
+	); ok {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", line, p.activePane().View())
 	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", p.activePane().View())
 }

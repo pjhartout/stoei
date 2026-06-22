@@ -70,6 +70,7 @@ type Users struct {
 	pending filterTable
 	energy  filterTable
 
+	status       sectionStatus
 	activeSubtab userSubtab
 	width        int
 	height       int
@@ -77,7 +78,7 @@ type Users struct {
 
 // NewUsers returns a Users tab bound to s. energyMonths labels the energy pane.
 func NewUsers(s *store.Store, styles theme.Styles, energyMonths int) *Users {
-	u := &Users{store: s, styles: styles, energyMonths: energyMonths}
+	u := &Users{store: s, styles: styles, energyMonths: energyMonths, status: newSectionStatus()}
 	u.running = newFilterTable(runningUserColumns, styles, nil)
 	u.pending = newFilterTable(pendingUserColumns, styles, nil)
 	u.energy = newFilterTable(energyUserColumns, styles, nil)
@@ -102,6 +103,13 @@ func (u *Users) active() *filterTable {
 func (u *Users) SetEnergyMonths(months int) {
 	u.energyMonths = months
 	u.Refresh()
+}
+
+// SetKeyMode switches every sub-pane's filter/sort bindings to the given preset.
+func (u *Users) SetKeyMode(mode string) {
+	u.running.SetKeyMode(mode)
+	u.pending.SetKeyMode(mode)
+	u.energy.SetKeyMode(mode)
 }
 
 // SetStyles re-themes all three panes.
@@ -137,12 +145,15 @@ func (u *Users) Update(msg tea.Msg) (*Users, tea.Cmd) {
 		switch km.String() {
 		case "r":
 			u.activeSubtab = subtabRunning
+			u.reobserve()
 			return u, nil
 		case "p":
 			u.activeSubtab = subtabPending
+			u.reobserve()
 			return u, nil
 		case "e":
 			u.activeSubtab = subtabEnergy
+			u.reobserve()
 			return u, nil
 		}
 	}
@@ -150,11 +161,28 @@ func (u *Users) Update(msg tea.Msg) (*Users, tea.Cmd) {
 	return u, cmd
 }
 
-// Refresh rebuilds all three panes from the store aggregations.
+// Refresh rebuilds all three panes from the store aggregations and updates the
+// load-status tracker for the active sub-pane's backing section.
 func (u *Users) Refresh() {
 	u.running.SetRows(runningUserRows(u.store.RunningUserStats()))
 	u.pending.SetRows(pendingUserRows(u.store.PendingUserStats()))
 	u.energy.SetRows(energyUserRows(u.store.EnergyStats()))
+	sec, hasData := u.activeSection()
+	u.status.observe(u.store.State(sec), hasData)
+}
+
+// activeSection returns the store section backing the active sub-pane and whether
+// that pane currently has rows. The Running and Pending panes both derive from
+// the all-users-jobs section; the Energy pane derives from the energy section.
+func (u *Users) activeSection() (store.Section, bool) {
+	switch u.activeSubtab {
+	case subtabEnergy:
+		return store.SectionEnergy, len(u.energy.rows) > 0
+	case subtabPending:
+		return store.SectionAllUsersJobs, len(u.pending.rows) > 0
+	default:
+		return store.SectionAllUsersJobs, len(u.running.rows) > 0
+	}
 }
 
 // runningUserRows builds the Running pane rows, sorted by total CPUs descending
@@ -232,9 +260,24 @@ func (u *Users) CapturesInput() bool { return u.active().CapturesInput() }
 // user-detail modal on Enter.
 func (u *Users) SelectedKey() string { return u.active().SelectedKey() }
 
-// View renders the sub-tab header above the active pane.
+// reobserve refreshes the status tracker for the active sub-pane's section,
+// called when the sub-pane changes without a data refresh.
+func (u *Users) reobserve() {
+	sec, hasData := u.activeSection()
+	u.status.observe(u.store.State(sec), hasData)
+}
+
+// View renders the sub-tab header above the active pane, inserting a debounced
+// spinner / error badge when the active pane's backing section is loading or
+// failed and the pane has no rows yet.
 func (u *Users) View() string {
 	header := u.subtabHeader()
+	sec, hasData := u.activeSection()
+	if line, ok := u.status.statusLine(
+		u.store.State(sec), hasData, u.store.SectionErr(sec), u.styles,
+	); ok {
+		return lipgloss.JoinVertical(lipgloss.Left, header, "", line, u.active().View())
+	}
 	return lipgloss.JoinVertical(lipgloss.Left, header, "", u.active().View())
 }
 

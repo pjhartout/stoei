@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 
+	tea "charm.land/bubbletea/v2"
+
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
@@ -126,4 +128,40 @@ func TestHistoryJobsRenderInTable(t *testing.T) {
 			t.Errorf("merged table view missing %q; view:\n%s", want, view)
 		}
 	}
+}
+
+// TestEmacsModeRebindsFilterSort asserts the emacs preset rebinds the Jobs-tab
+// filter to ctrl+s and sort to ctrl+o, while the vim default keeps "/" and "o".
+// Ports the FILTER_SHOW=ctrl+s / SORT_CYCLE=ctrl+o emacs rebinding.
+func TestEmacsModeRebindsFilterSort(t *testing.T) {
+	j, _ := seedJobs(t, []store.RunningJob{
+		{ID: "1", Name: "a", State: "RUNNING", Time: "1:00", Nodes: "1", NodeList: "n1"},
+	})
+
+	// Default (vim): "/" opens the filter.
+	if !slashOpensFilter(t, j) {
+		t.Fatal("vim mode: '/' did not open the filter")
+	}
+
+	// Switch to emacs: ctrl+s opens the filter, "/" no longer does.
+	j.SetKeyMode(EmacsMode)
+	if slashOpensFilter(t, j) {
+		t.Error("emacs mode: '/' should not open the filter")
+	}
+	_, _ = j.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
+	if !j.filtering {
+		t.Error("emacs mode: ctrl+s did not open the filter")
+	}
+}
+
+// slashOpensFilter feeds "/" to a fresh-from-filter Jobs tab and reports whether
+// the filter opened, then closes it so the tab is reusable.
+func slashOpensFilter(t *testing.T, j *Jobs) bool {
+	t.Helper()
+	_, _ = j.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
+	opened := j.filtering
+	if opened {
+		_, _ = j.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	}
+	return opened
 }

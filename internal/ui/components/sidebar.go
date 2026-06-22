@@ -54,34 +54,63 @@ func (s *Sidebar) Width() int { return lipgloss.Width(s.View()) }
 // ShouldShow reports whether the sidebar fits at the given terminal width.
 func ShouldShow(termWidth int) bool { return termWidth >= SidebarMinTermWidth }
 
-// View renders the sidebar inside a rounded border.
+// View renders the sidebar inside a rounded border tinted with the accent color,
+// distinguishing this persistent chrome from the transient (border-colored)
+// overlay modals that reuse the same Modal box.
 func (s *Sidebar) View() string {
 	body := s.body()
-	box := s.styles.Modal // no explicit width: the box auto-fits its content
+	box := lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(s.styles.Accent).
+		Foreground(s.styles.Text.GetForeground()).
+		Padding(1, 2) // no explicit width: the box auto-fits its content
 	if s.height > 0 {
 		box = box.Height(s.height)
 	}
 	return box.Render(body)
 }
 
+// titleRule renders the sidebar title with a thin underline rule beneath it,
+// visually separating the header from the stats. The rule width tracks the
+// widest body line so it spans the content.
+func (s *Sidebar) titleRule(width int) string {
+	if width < 1 {
+		width = len("Cluster Load")
+	}
+	return lipgloss.JoinVertical(lipgloss.Left,
+		s.styles.Title.Render("Cluster Load"),
+		s.styles.Subtle.Render(strings.Repeat("─", width)),
+	)
+}
+
 // body renders the sidebar content lines (without the border).
 func (s *Sidebar) body() string {
 	if !s.loaded {
 		return lipgloss.JoinVertical(lipgloss.Left,
-			s.styles.Title.Render("Cluster Load"),
+			s.titleRule(len("Cluster Load")),
 			"",
 			s.styles.Subtle.Render("Loading cluster…"),
 		)
 	}
 
-	lines := []string{s.styles.Title.Render("Cluster Load"), ""}
+	var lines []string
 	lines = append(lines, s.nodesSection()...)
 	lines = append(lines, s.cpuSection()...)
 	lines = append(lines, s.memorySection()...)
 	lines = append(lines, s.gpuSection()...)
 	lines = append(lines, s.waitTimeSection()...)
 	lines = append(lines, s.pendingSection()...)
-	return strings.Join(lines, "\n")
+
+	// Size the title rule to the widest stats line so the underline spans the
+	// content.
+	width := len("Cluster Load")
+	for _, l := range lines {
+		if w := lipgloss.Width(l); w > width {
+			width = w
+		}
+	}
+	header := []string{s.titleRule(width), ""}
+	return strings.Join(append(header, lines...), "\n")
 }
 
 // colorPct renders a "NN.N%" value colored by the inverted free-resource

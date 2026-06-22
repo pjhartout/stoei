@@ -29,22 +29,34 @@ type JobsKeyMap struct {
 	ClearFilter key.Binding
 }
 
-// defaultJobsKeys returns the Jobs-tab bindings, porting the "/" filter and "o"
-// sort bindings from filterable_table.BINDINGS.
+// EmacsMode is the emacs keybinding preset name, matching keys.Emacs. It is
+// duplicated here as a plain string so the tabs package stays decoupled from the
+// keys package while still being able to switch filter/sort bindings per preset.
+const EmacsMode = "emacs"
+
+// defaultJobsKeys returns the Jobs-tab bindings for the default (vim) preset,
+// porting the "/" filter and "o" sort bindings from filterable_table.BINDINGS.
 func defaultJobsKeys() JobsKeyMap {
+	return jobsKeysForMode("")
+}
+
+// jobsKeysForMode returns the tab-local filter/sort/clear bindings for the active
+// keybinding preset. The vim preset uses "/" filter, "o" sort, and esc clear; the
+// emacs preset rebinds FILTER_SHOW=ctrl+s, SORT_CYCLE=ctrl+o, and
+// FILTER_CLEAR=ctrl+g, porting keybindings._create_emacs_preset. Modal-internal
+// keys (log viewer, job detail) remain on their vim literals (documented).
+func jobsKeysForMode(mode string) JobsKeyMap {
+	if mode == EmacsMode {
+		return JobsKeyMap{
+			Filter:      key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("C-s", "filter")),
+			Sort:        key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("C-o", "sort")),
+			ClearFilter: key.NewBinding(key.WithKeys("ctrl+g", "esc"), key.WithHelp("C-g", "clear filter")),
+		}
+	}
 	return JobsKeyMap{
-		Filter: key.NewBinding(
-			key.WithKeys("/"),
-			key.WithHelp("/", "filter"),
-		),
-		Sort: key.NewBinding(
-			key.WithKeys("o"),
-			key.WithHelp("o", "sort"),
-		),
-		ClearFilter: key.NewBinding(
-			key.WithKeys("esc"),
-			key.WithHelp("esc", "clear filter"),
-		),
+		Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
+		Sort:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort")),
+		ClearFilter: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
 	}
 }
 
@@ -71,6 +83,11 @@ type Jobs struct {
 	filtering   bool
 	filterState filterState
 	sortState   sortState
+
+	// status renders a debounced per-section spinner / error badge in place of a
+	// bare empty table while the running-jobs section loads or fails.
+	status   sectionStatus
+	rowCount int
 
 	width  int
 	height int
@@ -102,6 +119,7 @@ func NewJobs(s *store.Store, username string, styles theme.Styles) *Jobs {
 		filter:      fi,
 		filterState: parseFilter(""),
 		sortState:   sortState{columnIdx: -1, direction: sortNone},
+		status:      newSectionStatus(),
 	}
 	j.Refresh()
 	return j
@@ -122,6 +140,8 @@ func defaultColumnWidth(key string) int {
 		return 6
 	case "nodelist":
 		return 20
+	case "timeline":
+		return 26
 	default:
 		return 10
 	}
@@ -134,6 +154,9 @@ func tableStyles(styles theme.Styles) table.Styles {
 	s.Selected = s.Selected.Foreground(styles.TabActive.GetForeground()).Bold(true)
 	return s
 }
+
+// SetKeyMode switches the Jobs tab's filter/sort bindings to the given preset.
+func (j *Jobs) SetKeyMode(mode string) { j.keys = jobsKeysForMode(mode) }
 
 // SetStyles re-themes the tab after a background/theme change.
 func (j *Jobs) SetStyles(styles theme.Styles) {
@@ -184,7 +207,7 @@ func (j *Jobs) Update(msg tea.Msg) (*Jobs, tea.Cmd) {
 			j.SetSize(j.width, j.height)
 			return j, textinput.Blink
 		case key.Matches(msg, j.keys.Sort):
-			j.sortState = j.sortState.cycle(len(jobColumns))
+			j.sortState = j.sortState.cycle(jobColumns)
 			j.Refresh()
 			return j, nil
 		}
@@ -245,6 +268,13 @@ func (j *Jobs) Refresh() {
 	j.table.SetRows(rows)
 
 	reselect(&j.table, sorted, selectedID)
+
+	// Track loading/error state of the running-jobs section so View can show a
+	// debounced spinner or error badge instead of a bare empty table. "hasData" is
+	// the unfiltered merged count so an empty-but-loaded list (the user simply has
+	// no jobs) is not mistaken for a still-loading section.
+	j.rowCount = len(plain)
+	j.status.observe(j.store.State(store.SectionRunningJobs), j.rowCount > 0)
 }
 
 // plainRows builds the markup-free cell values for the merged running-plus-history
@@ -262,6 +292,7 @@ func (j *Jobs) plainRows() [][]string {
 			job.Time,
 			job.Nodes,
 			job.NodeList,
+			job.Timeline(),
 		})
 	}
 	return rows
@@ -359,6 +390,12 @@ func (j *Jobs) View() string {
 	parts := []string{banner, ""}
 	if j.filtering {
 		parts = append(parts, j.styles.Text.Render(j.filter.View()))
+	}
+	if line, ok := j.status.statusLine(
+		j.store.State(store.SectionRunningJobs), j.rowCount > 0,
+		j.store.SectionErr(store.SectionRunningJobs), j.styles,
+	); ok {
+		parts = append(parts, line)
 	}
 	parts = append(parts, j.table.View())
 

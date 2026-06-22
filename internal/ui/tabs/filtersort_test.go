@@ -115,26 +115,57 @@ func TestSortNoneLeavesOrder(t *testing.T) {
 func TestSortCycle(t *testing.T) {
 	s := sortState{columnIdx: -1, direction: sortNone}
 
-	s = s.cycle(len(jobColumns))
+	s = s.cycle(jobColumns)
 	if s.columnIdx != 0 || s.direction != sortAsc {
 		t.Fatalf("first cycle = %+v; want col 0 asc", s)
 	}
-	s = s.cycle(len(jobColumns))
+	s = s.cycle(jobColumns)
 	if s.columnIdx != 0 || s.direction != sortDesc {
 		t.Fatalf("second cycle = %+v; want col 0 desc", s)
 	}
-	s = s.cycle(len(jobColumns))
+	s = s.cycle(jobColumns)
 	if s.columnIdx != 1 || s.direction != sortAsc {
 		t.Fatalf("third cycle = %+v; want col 1 asc", s)
 	}
 }
 
 func TestSortCycleWrapsToCleared(t *testing.T) {
-	// Starting at the last column descending, cycling clears the sort.
-	last := len(jobColumns) - 1
+	// Starting at the last SORTABLE column descending, cycling clears the sort.
+	// The Timeline column (noSort) is skipped, so the last sortable column is the
+	// one before it.
+	last := lastSortableIndex(jobColumns)
 	s := sortState{columnIdx: last, direction: sortDesc}
-	s = s.cycle(len(jobColumns))
+	s = s.cycle(jobColumns)
 	if s.columnIdx != -1 || s.direction != sortNone {
 		t.Errorf("wrap cycle = %+v; want cleared", s)
 	}
+}
+
+// TestSortCycleSkipsNonSortable verifies the "o" cycle never lands on a noSort
+// column (Timeline). Ports the [c for c in columns if c.sortable] filter in
+// filterable_table.action_cycle_sort.
+func TestSortCycleSkipsNonSortable(t *testing.T) {
+	timelineIdx := columnIndex("timeline")
+	if timelineIdx < 0 {
+		t.Fatal("timeline column missing from jobColumns")
+	}
+	s := sortState{columnIdx: -1, direction: sortNone}
+	// Walk the full cycle and assert the cursor is never the Timeline column.
+	for i := 0; i < 3*len(jobColumns); i++ {
+		s = s.cycle(jobColumns)
+		if s.direction != sortNone && s.columnIdx == timelineIdx {
+			t.Fatalf("cycle landed on non-sortable Timeline column at step %d", i)
+		}
+	}
+}
+
+// lastSortableIndex returns the index of the last sortable column.
+func lastSortableIndex(cols []column) int {
+	last := -1
+	for i, c := range cols {
+		if !c.noSort {
+			last = i
+		}
+	}
+	return last
 }

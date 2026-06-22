@@ -242,7 +242,7 @@ func (v *LogViewer) handleKey(msg tea.KeyPressMsg) (Modal, tea.Cmd, bool) {
 	case "r":
 		return v, v.reload(), false
 	case "c":
-		return v, toast("Path: " + v.path), false
+		return v, v.copyPath(), false
 	case "e":
 		return v, v.openInEditor(), false
 	case "g":
@@ -360,6 +360,23 @@ func (v *LogViewer) applyLoaded(msg logLoadedMsg) {
 	}
 }
 
+// copyPath copies the file path to the system clipboard off the main loop (I1)
+// and toasts the outcome. When no clipboard tool is on PATH it falls back to the
+// plain "Path: …" toast so the path is still surfaced. Ports
+// LogViewerScreen.action_copy_path (which calls _copy_to_clipboard in a worker).
+func (v *LogViewer) copyPath() tea.Cmd {
+	path := v.path
+	if !clipboardAvailable() {
+		return toast("Path: " + path)
+	}
+	return func() tea.Msg {
+		if copyToClipboard(path) {
+			return LogToastMsg{Text: "Copied path to clipboard"}
+		}
+		return LogToastMsg{Text: "Path: " + path}
+	}
+}
+
 // reload re-reads the file. Ports LogViewerScreen.action_reload.
 func (v *LogViewer) reload() tea.Cmd {
 	v.loading = true
@@ -423,7 +440,7 @@ func (v *LogViewer) View() string {
 	}
 
 	footer := v.styles.Subtle.Render(
-		"c path   g/G top/bot   / search   n/N next/prev   l line#   r reload   e editor   Esc close")
+		"c copy path   g/G top/bot   / search   n/N next/prev   l line#   r reload   e editor   Esc close")
 	if v.matchCount > 0 {
 		footer = v.styles.Text.Render(fmt.Sprintf("%d matches", v.matchCount)) + "   " + footer
 	}

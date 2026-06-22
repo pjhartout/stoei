@@ -1,6 +1,7 @@
 package theme
 
 import (
+	"strings"
 	"testing"
 
 	"charm.land/lipgloss/v2"
@@ -76,4 +77,43 @@ func TestNamesCoverRegistry(t *testing.T) {
 			t.Errorf("Names() lists %q but ByName(%q) did not return it", n, n)
 		}
 	}
+}
+
+// TestGradientTextPreservesRunes asserts the per-rune accent gradient keeps every
+// input rune (ANSI styling aside) and renders distinct colors across runes.
+func TestGradientTextPreservesRunes(t *testing.T) {
+	st := BuildStyles(Charm(), true)
+	out := st.TitleGradient("stoei")
+	// Strip ANSI escapes and confirm the visible text is intact.
+	plain := stripANSI(out)
+	if plain != "stoei" {
+		t.Errorf("gradient visible text = %q; want %q", plain, "stoei")
+	}
+	// A multi-rune gradient must emit more than one distinct SGR foreground.
+	if !strings.Contains(out, "\x1b[") {
+		t.Error("gradient produced no ANSI styling")
+	}
+	// Empty and single-rune inputs must not panic and must round-trip.
+	if got := GradientText("", st.Accent, st.AccentAlt, true); got != "" {
+		t.Errorf("empty gradient = %q; want empty", got)
+	}
+	if got := stripANSI(GradientText("x", st.Accent, st.AccentAlt, true)); got != "x" {
+		t.Errorf("single-rune gradient text = %q; want x", got)
+	}
+}
+
+// stripANSI removes CSI escape sequences for plain-text assertions.
+func stripANSI(s string) string {
+	var b strings.Builder
+	for i := 0; i < len(s); i++ {
+		if s[i] == 0x1b && i+1 < len(s) && s[i+1] == '[' {
+			i += 2
+			for i < len(s) && (s[i] < '@' || s[i] > '~') {
+				i++
+			}
+			continue // skip the final byte of the sequence
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

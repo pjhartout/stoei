@@ -95,6 +95,11 @@ func filterTableColumnWidth(c column) int {
 	}
 }
 
+// SetKeyMode switches the table's filter/sort/clear bindings to the given
+// keybinding preset (vim default or emacs). Ports the per-preset FILTER_SHOW /
+// SORT_CYCLE / FILTER_CLEAR rebinding for the reusable filter table.
+func (ft *filterTable) SetKeyMode(mode string) { ft.keys = jobsKeysForMode(mode) }
+
 // SetStyles re-themes the table and rebuilds the display rows.
 func (ft *filterTable) SetStyles(styles theme.Styles) {
 	ft.styles = styles
@@ -189,7 +194,7 @@ func (ft *filterTable) Update(msg tea.Msg) tea.Cmd {
 			ft.SetSize(ft.width, ft.height)
 			return textinput.Blink
 		case key.Matches(km, ft.keys.Sort):
-			ft.sortState = ft.sortState.cycle(len(ft.columns))
+			ft.sortState = ft.sortState.cycle(ft.columns)
 			ft.rebuild()
 			return nil
 		}

@@ -2,8 +2,8 @@ package store
 
 // MergedJob is one row of the Jobs tab's unified job list: the current user's
 // running/pending jobs followed by their completed/failed history jobs. It is the
-// display shape the Jobs tab renders (JobID, Name, State, Time, Nodes, NodeList),
-// mirroring cache.Job.as_row in the Python port.
+// display shape the Jobs tab renders (JobID, Name, State, Time, Nodes, NodeList,
+// Timeline), mirroring cache.Job.as_row in the Python port.
 type MergedJob struct {
 	// ID is the job id, the stable key used for filtering, sorting and cursor
 	// restoration (I6).
@@ -23,6 +23,17 @@ type MergedJob struct {
 	NodeList string
 	// Active is true for running/pending jobs and false for history jobs.
 	Active bool
+
+	// SubmitTime, StartTime, and EndTime are the raw SLURM timestamps used to
+	// render the compact Timeline cell. Active jobs (from squeue) carry submit and
+	// start but no end; history jobs (from sacct) carry all three. Ports
+	// cache.Job.submit_time/start_time/end_time.
+	SubmitTime string
+	StartTime  string
+	EndTime    string
+	// Restarts is the requeue count, parsed from sacct's Restart field for history
+	// jobs (active jobs report 0). Ports cache.Job.restarts.
+	Restarts int
 }
 
 // MergedJobs returns the unified running-plus-history job list for the Jobs tab.
@@ -40,13 +51,15 @@ func (s *Store) MergedJobs() []MergedJob {
 	for _, job := range s.RunningJobs {
 		runningIDs[job.ID] = struct{}{}
 		merged = append(merged, MergedJob{
-			ID:       job.ID,
-			Name:     job.Name,
-			State:    job.State,
-			Time:     job.Time,
-			Nodes:    job.Nodes,
-			NodeList: job.NodeList,
-			Active:   true,
+			ID:         job.ID,
+			Name:       job.Name,
+			State:      job.State,
+			Time:       job.Time,
+			Nodes:      job.Nodes,
+			NodeList:   job.NodeList,
+			Active:     true,
+			SubmitTime: job.SubmitTime,
+			StartTime:  job.StartTime,
 		})
 	}
 
@@ -57,13 +70,17 @@ func (s *Store) MergedJobs() []MergedJob {
 			continue
 		}
 		merged = append(merged, MergedJob{
-			ID:       job.ID,
-			Name:     job.Name,
-			State:    job.State,
-			Time:     job.Elapsed,
-			Nodes:    "",
-			NodeList: job.NodeList,
-			Active:   false,
+			ID:         job.ID,
+			Name:       job.Name,
+			State:      job.State,
+			Time:       job.Elapsed,
+			Nodes:      "",
+			NodeList:   job.NodeList,
+			Active:     false,
+			SubmitTime: job.Submit,
+			StartTime:  job.Start,
+			EndTime:    job.End,
+			Restarts:   parseRestarts(job.Restart),
 		})
 	}
 

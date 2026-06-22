@@ -21,10 +21,14 @@ type column struct {
 	// width is the rendered column width in characters. Zero means "derive a
 	// default from the key" (filterTableColumnWidth).
 	width int
+	// noSort marks a column the "o" sort cycle skips while it remains filterable.
+	// Ports ColumnConfig(sortable=False) (the Jobs-tab Timeline column).
+	noSort bool
 }
 
 // jobColumns are the Jobs-tab columns in render order. Ports the column set built
-// in table_controller.job_row_values / app.py jobs-table setup.
+// in table_controller.job_row_values / app.py JOB_TABLE_COLUMN_CONFIGS. Timeline
+// is filterable but not sortable (sortable=False in the Python config).
 var jobColumns = []column{
 	{key: "jobid", title: "Job ID", numeric: true},
 	{key: "name", title: "Name"},
@@ -32,6 +36,7 @@ var jobColumns = []column{
 	{key: "time", title: "Time"},
 	{key: "nodes", title: "Nodes", numeric: true},
 	{key: "nodelist", title: "Node List"},
+	{key: "timeline", title: "Timeline", noSort: true},
 }
 
 // columnIndex maps a column key to its index in jobColumns, or -1 if unknown.
@@ -166,29 +171,47 @@ type sortState struct {
 	direction sortDirection
 }
 
-// cycle advances the sort state for column o using the Python o-key cycle:
-// none -> asc on the first sortable column; asc -> desc on the same column;
-// desc -> asc on the next column; wrapping past the last column clears the sort.
-// Ports filterable_table.action_cycle_sort restricted to a single column cursor
-// driven by the active column o.
-func (s sortState) cycle(numColumns int) sortState {
-	if numColumns == 0 {
-		return s
+// cycle advances the sort state using the Python o-key cycle over the sortable
+// columns only (a noSort column such as Timeline is skipped): none -> asc on the
+// first sortable column; asc -> desc on the same column; desc -> asc on the next
+// sortable column; wrapping past the last sortable column clears the sort. Ports
+// filterable_table.action_cycle_sort, which iterates [c for c in columns if
+// c.sortable].
+func (s sortState) cycle(cols []column) sortState {
+	sortable := make([]int, 0, len(cols))
+	for i, c := range cols {
+		if !c.noSort {
+			sortable = append(sortable, i)
+		}
+	}
+	if len(sortable) == 0 {
+		return sortState{columnIdx: -1, direction: sortNone}
 	}
 	switch s.direction {
 	case sortNone:
-		return sortState{columnIdx: 0, direction: sortAsc}
+		return sortState{columnIdx: sortable[0], direction: sortAsc}
 	case sortAsc:
 		return sortState{columnIdx: s.columnIdx, direction: sortDesc}
 	case sortDesc:
-		next := s.columnIdx + 1
-		if next >= numColumns {
+		pos := indexOf(sortable, s.columnIdx)
+		next := pos + 1
+		if pos < 0 || next >= len(sortable) {
 			return sortState{columnIdx: -1, direction: sortNone}
 		}
-		return sortState{columnIdx: next, direction: sortAsc}
+		return sortState{columnIdx: sortable[next], direction: sortAsc}
 	default:
-		return sortState{columnIdx: 0, direction: sortAsc}
+		return sortState{columnIdx: sortable[0], direction: sortAsc}
 	}
+}
+
+// indexOf returns the position of v in xs, or -1 when absent.
+func indexOf(xs []int, v int) int {
+	for i, x := range xs {
+		if x == v {
+			return i
+		}
+	}
+	return -1
 }
 
 // rankedKey is a precomputed, comparable sort key for one row. rank orders

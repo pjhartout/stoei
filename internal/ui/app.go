@@ -68,7 +68,7 @@ type App struct {
 	configPath string
 
 	notifier *healthNotifier
-	toasts   []string
+	toasts   []toastItem
 
 	// logs is the in-memory ring buffer of the app's own log lines; the Logs tab
 	// renders from it and the app appends to it.
@@ -170,7 +170,21 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 		sidebar:     components.NewSidebar(styles),
 		detailCache: modals.NewJobDetailCache(),
 	}
+	// Apply the tab-local filter/sort bindings for the active preset so an
+	// emacs-mode config rebinds them (C-s filter, C-o sort) from the start.
+	a.applyKeyModeToTabs()
 	return a
+}
+
+// applyKeyModeToTabs pushes the active keybinding preset's tab-local filter/sort
+// bindings into every tab. Ports the part of the emacs preset that rebinds
+// FILTER_SHOW/SORT_CYCLE for the tab tables.
+func (a *App) applyKeyModeToTabs() {
+	mode := a.cfg.KeybindMode
+	a.jobs.SetKeyMode(mode)
+	a.nodes.SetKeyMode(mode)
+	a.users.SetKeyMode(mode)
+	a.priority.SetKeyMode(mode)
 }
 
 // intervalsFromConfig derives the two-tier refresh intervals from cfg's
@@ -564,6 +578,8 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	if !a.runningInFlight {
 		cmds = append(cmds, a.dispatchRunning())
 	}
+	// Auto-expire transient toasts each cycle so they don't linger indefinitely.
+	a.expireToasts()
 	// The log ring is appended to outside the Update loop (a logging sink), so the
 	// Logs tab is re-rendered on the fast tick to surface new lines.
 	a.logsTab.Refresh()
@@ -662,12 +678,14 @@ func (a *App) observe(section store.Section, err error) {
 	if !ok {
 		return
 	}
+	level := toastSuccess
 	if t.Kind == toastFailed {
+		level = toastErrorLevel
 		if msg := failureToastMessage(section, err); msg != "" {
 			t.Message = msg
 		}
 	}
-	a.pushToast(t.Message)
+	a.pushToastLevel(t.Message, level)
 }
 
 // failureToastMessage returns a section-specific failure message, or "" to fall
@@ -681,13 +699,41 @@ func failureToastMessage(section store.Section, err error) string {
 	return ""
 }
 
-// pushToast appends a toast message, keeping at most maxToasts most-recent lines.
+// pushToast appends a neutral (info) toast, keeping at most maxToasts most-recent
+// items. Manual user feedback uses this level.
 func (a *App) pushToast(msg string) {
-	a.toasts = append(a.toasts, msg)
+	a.pushToastLevel(msg, toastInfo)
+}
+
+// pushToastLevel appends a toast at the given severity level with a fresh TTL,
+// keeping at most maxToasts most-recent items.
+func (a *App) pushToastLevel(msg string, level toastLevel) {
+	a.toasts = append(a.toasts, toastItem{text: msg, level: level, ticks: toastTTL})
 	if len(a.toasts) > maxToasts {
 		a.toasts = a.toasts[len(a.toasts)-maxToasts:]
 	}
 	a.frame.dirty = true
+}
+
+// expireToasts decrements each toast's remaining ticks and drops expired ones. It
+// runs on every fast tick so toasts auto-dismiss after toastTTL cycles. It
+// returns whether anything was dropped so the caller can mark the frame dirty.
+func (a *App) expireToasts() bool {
+	if len(a.toasts) == 0 {
+		return false
+	}
+	kept := a.toasts[:0]
+	changed := false
+	for _, t := range a.toasts {
+		t.ticks--
+		if t.ticks > 0 {
+			kept = append(kept, t)
+		} else {
+			changed = true
+		}
+	}
+	a.toasts = kept
+	return changed
 }
 
 // fanoutSize fans the cached size out to every tab, the sidebar, and modals (I7).
@@ -720,8 +766,9 @@ func (a *App) fanoutSize() {
 	}
 }
 
-// chromeReservedRows is the vertical space the tab bar and footer occupy.
-const chromeReservedRows = 4
+// chromeReservedRows is the vertical space the tab bar, the rule beneath it, and
+// the footer occupy.
+const chromeReservedRows = 5
 
 // rebuildStyles rebuilds the styles for the current background and re-themes
 // every tab, the sidebar, and modals.
@@ -754,6 +801,7 @@ func (a *App) applyConfig(cfg config.Config) tea.Cmd {
 		a.rebuildStyles()
 	}
 	a.keys = keys.BuildKeyMap(cfg.KeybindMode)
+	a.applyKeyModeToTabs()
 	a.intervals = intervalsFromConfig(cfg)
 	a.users.SetEnergyMonths(cfg.EnergyHistoryMonths)
 
@@ -829,7 +877,7 @@ func (a App) baseView() string {
 	}
 	footer := a.footer()
 
-	sections := []string{tabBar, body, footer}
+	sections := []string{tabBar, a.tabBarRule(), body, footer}
 	if toasts := a.toastView(); toasts != "" {
 		sections = append(sections, toasts)
 	}
@@ -854,8 +902,21 @@ func (a App) tabBar() string {
 			cells = append(cells, a.styles.TabInactive.Render(label))
 		}
 	}
-	title := a.styles.Title.Render("stoei")
+	// The title carries a per-rune accent gradient for the charm.land look; pad it
+	// to match the Title style's horizontal padding without coloring the spaces.
+	title := " " + a.styles.TitleGradient("stoei") + " "
 	return lipgloss.JoinHorizontal(lipgloss.Top, append([]string{title}, cells...)...)
+}
+
+// tabBarRule renders a thin horizontal rule under the tab bar to visually group
+// the chrome from the body, spanning the full terminal width in the subtle border
+// color.
+func (a App) tabBarRule() string {
+	w, _ := a.size()
+	if w < 1 {
+		w = 1
+	}
+	return a.styles.Subtle.Render(strings.Repeat("─", w))
 }
 
 // activeView renders the active tab's body.
@@ -880,16 +941,11 @@ func (a App) footer() string {
 	return a.help.View(a)
 }
 
-// toastView renders the current toast lines, styled as errors.
+// toastView renders the current toasts as boxed, accent/error/success-bordered
+// transient notices (charm-style), with recovered toasts shown in success green
+// and failures in error red.
 func (a App) toastView() string {
-	if len(a.toasts) == 0 {
-		return ""
-	}
-	lines := make([]string, len(a.toasts))
-	for i, t := range a.toasts {
-		lines[i] = a.styles.Error.Render(t)
-	}
-	return strings.Join(lines, "\n")
+	return renderToasts(a.toasts, a.styles)
 }
 
 // unavailableView renders the full-screen Slurm-unavailable screen.
