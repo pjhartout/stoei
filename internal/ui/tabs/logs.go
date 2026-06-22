@@ -12,14 +12,13 @@ import (
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
 
-// logTimeLayout is the compact time format shown per log line, matching the
-// LogPane's "%H:%M:%S".
+// logTimeLayout is the compact HH:MM:SS time format shown per log line.
 const logTimeLayout = "15:04:05"
 
 // Logs renders the application's own log lines from an in-memory ring buffer into
-// a scrollable viewport, coloring each line by level. It is the Go analogue of
-// the Python LogPane, kept deliberately minimal. The ring is owned by the app and
-// shared by pointer; the tab only reads it.
+// a scrollable viewport, coloring each line by level. It is kept deliberately
+// minimal. The ring is owned by the app and shared by pointer; the tab only reads
+// it.
 type Logs struct {
 	ring   *components.LogRing
 	styles theme.Styles
@@ -74,8 +73,9 @@ func (l *Logs) Refresh() {
 	l.vp.GotoBottom()
 }
 
-// levelStyle returns the style for a log level. Ports colors.level_color
-// (INFO/SUCCESS green, WARNING yellow, ERROR/CRITICAL red, DEBUG muted).
+// levelStyle returns the style for a log level: INFO/SUCCESS green, WARNING
+// yellow, ERROR/CRITICAL red, DEBUG muted, and any other level the default text
+// style.
 func (l *Logs) levelStyle(level string) lipgloss.Style {
 	switch strings.ToUpper(level) {
 	case "INFO", "SUCCESS":
@@ -91,8 +91,8 @@ func (l *Logs) levelStyle(level string) lipgloss.Style {
 	}
 }
 
-// padLevel renders a centered, bracketed 8-wide level tag, matching the Python
-// "[{level:^8}]" formatting.
+// padLevel renders the level centered within a bracketed, 8-wide field (e.g.
+// "[  INFO  ]"), so the tags align in a column.
 func padLevel(level string) string {
 	const width = 8
 	if len(level) >= width {

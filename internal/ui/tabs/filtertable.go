@@ -21,7 +21,7 @@ type rowDecorator func(plain []string, styles theme.Styles) table.Row
 // filterTable is a reusable filterable, sortable bubbles/v2 table shared by the
 // Nodes, Users, and Priority tabs. It factors out the Jobs-tab pattern: a table
 // fed plain rows, a column-scoped "/" filter, an "o" sort cycle, and cursor
-// restoration by the stable first-column key (I6). Each owning tab supplies the
+// restoration by the stable first-column key. Each owning tab supplies the
 // columns, the plain rows (rebuilt from the store), and a row decorator.
 type filterTable struct {
 	styles theme.Styles
@@ -96,8 +96,7 @@ func filterTableColumnWidth(c column) int {
 }
 
 // SetKeyMode switches the table's filter/sort/clear bindings to the given
-// keybinding preset (vim default or emacs). Ports the per-preset FILTER_SHOW /
-// SORT_CYCLE / FILTER_CLEAR rebinding for the reusable filter table.
+// keybinding preset (vim default or emacs).
 func (ft *filterTable) SetKeyMode(mode string) { ft.keys = jobsKeysForMode(mode) }
 
 // SetStyles re-themes the table and rebuilds the display rows.

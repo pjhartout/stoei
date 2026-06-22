@@ -18,8 +18,8 @@ import (
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
 
-// defaultLogViewerLines is the tail window for large files. Ports the default
-// settings.log_viewer_lines.
+// defaultLogViewerLines is the tail window applied to large files when the caller
+// does not specify one.
 const defaultLogViewerLines = 1000
 
 // LogToastMsg asks the root to show a transient message from the log viewer
@@ -52,7 +52,7 @@ type editorDoneMsg struct{ err error }
 // loading, and large files are tailed to the last N lines), shows line numbers
 // via the viewport gutter, supports in-pane search (/ then n/N), reload (r), copy
 // path (c), and open in $EDITOR (e) via tea.ExecProcess. Long lines pre-wrap to
-// the viewport width (SoftWrap). Ports LogViewerScreen.
+// the viewport width (SoftWrap).
 type LogViewer struct {
 	styles theme.Styles
 
@@ -114,15 +114,14 @@ func NewLogViewer(styles theme.Styles, path, label string, maxLines int) *LogVie
 	return v
 }
 
-// Init starts the file load and the spinner. Ports LogViewerScreen.on_mount.
+// Init starts the file load and the spinner.
 func (v *LogViewer) Init() tea.Cmd {
 	v.loading = true
 	return tea.Batch(v.loadCmd(), v.spin.Tick)
 }
 
-// loadCmd reads the file off the main loop (I1). For files longer than maxLines
-// only the last maxLines lines are loaded (tail), matching
-// LogViewerScreen._load_file / _load_truncated_file.
+// loadCmd reads the file off the main loop. For files longer than maxLines only
+// the last maxLines lines are loaded (tail).
 func (v *LogViewer) loadCmd() tea.Cmd {
 	path := v.path
 	maxLines := v.maxLines
@@ -185,8 +184,8 @@ func readLogFile(path string, maxLines int) (msg logLoadedMsg) {
 
 // applyGutter wires the line-number gutter into the viewport when line numbers
 // are enabled, else clears it. The gutter renders the absolute line number
-// (offset by startLine for tailed files), porting LogViewerScreen's line-number
-// formatting.
+// (offset by startLine so tailed files still show real line numbers) and a blank
+// gutter for soft-wrapped continuation rows.
 func (v *LogViewer) applyGutter() {
 	if !v.showLineNums {
 		v.vp.LeftGutterFunc = viewport.NoGutter
@@ -298,8 +297,8 @@ func (v *LogViewer) handleSearchKey(msg tea.KeyPressMsg) (Modal, tea.Cmd, bool) 
 	return v, cmd, false
 }
 
-// performSearch finds all case-insensitive matches and highlights them in the
-// viewport. Ports LogViewerScreen._perform_search/_highlight_matches.
+// performSearch finds all case-insensitive matches of the search term and
+// highlights them in the viewport, toasting the match count (or "No matches").
 func (v *LogViewer) performSearch() tea.Cmd {
 	if v.searchTerm == "" {
 		v.vp.ClearHighlights()
@@ -325,8 +324,8 @@ func (v *LogViewer) performSearch() tea.Cmd {
 }
 
 // applyLoaded renders the loaded file (or error) into the viewport, adds a
-// truncation header when tailed, and scrolls to the bottom. Ports
-// _on_load_complete and the truncation-header text.
+// truncation header when the file was tailed, scrolls to the bottom, and
+// re-applies any active search against the new content.
 func (v *LogViewer) applyLoaded(msg logLoadedMsg) {
 	v.loading = false
 	if msg.err != "" {
@@ -360,10 +359,9 @@ func (v *LogViewer) applyLoaded(msg logLoadedMsg) {
 	}
 }
 
-// copyPath copies the file path to the system clipboard off the main loop (I1)
-// and toasts the outcome. When no clipboard tool is on PATH it falls back to the
-// plain "Path: …" toast so the path is still surfaced. Ports
-// LogViewerScreen.action_copy_path (which calls _copy_to_clipboard in a worker).
+// copyPath copies the file path to the system clipboard off the main loop and
+// toasts the outcome. When no clipboard tool is on PATH it falls back to a plain
+// "Path: …" toast so the path is still surfaced.
 func (v *LogViewer) copyPath() tea.Cmd {
 	path := v.path
 	if !clipboardAvailable() {
@@ -377,7 +375,8 @@ func (v *LogViewer) copyPath() tea.Cmd {
 	}
 }
 
-// reload re-reads the file. Ports LogViewerScreen.action_reload.
+// reload re-reads the file from disk, showing the spinner and a "Reloading…"
+// toast while the load runs.
 func (v *LogViewer) reload() tea.Cmd {
 	v.loading = true
 	v.loadErr = ""
@@ -385,9 +384,8 @@ func (v *LogViewer) reload() tea.Cmd {
 }
 
 // openInEditor launches $EDITOR on the file via tea.ExecProcess, the only place
-// in stoei that suspends the program for an interactive child. Ports
-// LogViewerScreen._open_in_editor (which wraps app.suspend()). On no editor it is
-// a toast no-op.
+// in stoei that suspends the program for an interactive child. With no resolvable
+// editor (or an unreadable file) it toasts an explanation instead.
 func (v *LogViewer) openInEditor() tea.Cmd {
 	if v.loadErr != "" {
 		return toast("Cannot open file: " + v.loadErr)
@@ -405,7 +403,7 @@ func (v *LogViewer) openInEditor() tea.Cmd {
 }
 
 // resolveEditor returns $EDITOR when set and on PATH, else the first available
-// fallback. Ports editor.get_editor.
+// fallback among vim, nano, and vi. It returns "" when none is found.
 func resolveEditor() string {
 	if ed := strings.TrimSpace(os.Getenv("EDITOR")); ed != "" {
 		if _, err := exec.LookPath(ed); err == nil {

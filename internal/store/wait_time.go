@@ -8,7 +8,8 @@ import (
 	"github.com/pjhartout/stoei/internal/slurm"
 )
 
-// Wait-time formatting constants, mirroring wait_time.py.
+// Wait-time formatting constants. integerDisplayThreshold is the value at or
+// above which FormatWaitTime drops the decimal place for a unit.
 const (
 	secondsPerMinute        = 60.0
 	minutesPerHour          = 60.0
@@ -17,9 +18,9 @@ const (
 )
 
 // FormatWaitTime renders a duration in seconds as a compact human-readable string
-// (e.g. "45s", "5m", "2.3h", "11h", "1.5d"). Values under the integer-display
-// threshold keep one decimal place; larger values are integers. Ports
-// wait_time.format_wait_time exactly.
+// (e.g. "45s", "5m", "2.3h", "11h", "1.5d"). For hour and day units, values under
+// the integer-display threshold keep one decimal place; larger values are
+// integers. Negative inputs yield "0s".
 func FormatWaitTime(seconds float64) string {
 	if seconds < 0 {
 		return "0s"
@@ -45,8 +46,7 @@ func FormatWaitTime(seconds float64) string {
 	return fmt.Sprintf("%dd", int(days))
 }
 
-// PartitionWaitStats holds wait-time statistics for one partition. Ports
-// wait_time.PartitionWaitStats.
+// PartitionWaitStats holds wait-time statistics for one partition.
 type PartitionWaitStats struct {
 	Partition     string
 	JobCount      int
@@ -60,7 +60,7 @@ type PartitionWaitStats struct {
 // wait-time records. A record contributes its (start - submit) seconds to its
 // partition only when both timestamps are valid and the difference is
 // non-negative (slurm.WaitTimeSeconds enforces this). Partitions with no valid
-// samples are omitted. Ports wait_time.calculate_partition_wait_stats.
+// samples are omitted.
 func CalculatePartitionWaitStats(records []slurm.WaitTimeRecord) map[string]PartitionWaitStats {
 	byPartition := map[string][]float64{}
 
@@ -103,7 +103,7 @@ func meanFloat(xs []float64) float64 {
 }
 
 // medianFloat returns the median of a non-empty slice, averaging the two middle
-// values for even lengths, matching Python's statistics.median.
+// values for even lengths.
 func medianFloat(xs []float64) float64 {
 	s := make([]float64, len(xs))
 	copy(s, xs)

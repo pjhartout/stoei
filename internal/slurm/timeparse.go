@@ -10,8 +10,8 @@ import (
 const slurmTimestampLayout = "2006-01-02T15:04:05"
 
 // unknownTimestamps are the values SLURM uses to mean "no timestamp". Comparison
-// is case-insensitive on the trimmed value. Ports wait_time.UNKNOWN_TIMESTAMP_VALUES
-// (extended with the lower-case variants the wait-time getter also filters on).
+// is case-insensitive on the trimmed value, so "Unknown", "None", "N/A", and the
+// empty string are all treated as absent.
 var unknownTimestamps = map[string]struct{}{
 	"unknown": {},
 	"none":    {},
@@ -28,7 +28,7 @@ func isUnknownTimestamp(s string) bool {
 
 // ParseElapsedToSeconds parses a SLURM elapsed-time string into seconds. It
 // accepts the "D-HH:MM:SS", "HH:MM:SS", "MM:SS", and "SS" forms and returns 0 for
-// empty or malformed input. Ports energy.parse_elapsed_to_seconds.
+// empty or malformed input.
 func ParseElapsedToSeconds(elapsed string) float64 {
 	elapsed = strings.TrimSpace(elapsed)
 	if elapsed == "" {
@@ -88,7 +88,7 @@ func ParseElapsedToSeconds(elapsed string) float64 {
 
 // ParseSlurmTimestamp parses a SLURM timestamp into a time.Time. It returns
 // ok=false for unknown sentinels (Unknown/None/N/A/empty) and for unparseable
-// input. Ports wait_time.parse_slurm_timestamp.
+// input.
 func ParseSlurmTimestamp(s string) (time.Time, bool) {
 	if isUnknownTimestamp(s) {
 		return time.Time{}, false
@@ -102,8 +102,7 @@ func ParseSlurmTimestamp(s string) (time.Time, bool) {
 
 // WaitTimeSeconds returns the seconds elapsed between a job's submit and start
 // timestamps. It returns ok=false when either timestamp is unknown/unparseable or
-// when the result would be negative (start before submit, a data error). Ports
-// wait_time.calculate_wait_time_seconds.
+// when the result would be negative (start before submit, a data error).
 func WaitTimeSeconds(submit, start string) (float64, bool) {
 	submitT, ok := ParseSlurmTimestamp(submit)
 	if !ok {

@@ -23,15 +23,14 @@ type helpSection struct {
 }
 
 // Help is the scrollable keybindings modal opened with "?". It lists the
-// bindings grouped by context (navigation, filter/sort, columns, sidebar, jobs,
-// nodes, details, log viewer, general), porting help_screen.HelpScreen. It is
-// dismissed with esc, q, or ?.
+// bindings grouped by context (navigation, filter/sort, jobs, nodes, details,
+// log viewer, general). It is dismissed with esc, q, or ?.
 type Help struct {
 	box scrollBox
 }
 
 // NewHelp builds the help modal from the global KeyMap so the displayed keys
-// reflect the active bindings. Ports HelpScreen._get_help_content.
+// reflect the active bindings.
 func NewHelp(km keys.KeyMap, styles theme.Styles) *Help {
 	h := &Help{box: newScrollBox(styles)}
 	h.box.SetTitle("Keyboard Shortcuts")
@@ -41,8 +40,7 @@ func NewHelp(km keys.KeyMap, styles theme.Styles) *Help {
 }
 
 // helpSections returns the grouped bindings, driven where possible by the
-// KeyMap so a rebinding is reflected here. Ports the section list in
-// HelpScreen._get_help_content.
+// KeyMap so a rebinding is reflected here.
 func helpSections(km keys.KeyMap) []helpSection {
 	return []helpSection{
 		{"Navigation", []helpBinding{
@@ -105,8 +103,9 @@ func bindingKey(b key.Binding, def string) string {
 	return def
 }
 
-// renderHelpSections renders the sections into a single scrollable string. Ports
-// HelpScreen._format_section (title, rule, right-aligned key, description).
+// renderHelpSections renders the sections into a single scrollable string: each
+// section is a title, a horizontal rule, then right-aligned key plus description
+// rows.
 func renderHelpSections(sections []helpSection, styles theme.Styles) string {
 	var blocks []string
 	for _, s := range sections {
@@ -134,7 +133,7 @@ func padLeft(s string, width int) string {
 // Init has nothing to start for the help modal.
 func (h *Help) Init() tea.Cmd { return nil }
 
-// Update handles scrolling and dismissal. Ports HelpScreen.action_close (esc/q/?).
+// Update handles scrolling and dismissal (esc, q, or ?).
 func (h *Help) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 	if km, ok := msg.(tea.KeyPressMsg); ok {
 		if isCloseKey(km) || km.String() == "?" {

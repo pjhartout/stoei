@@ -8,8 +8,8 @@ import (
 )
 
 // clipboardCmds is the ordered list of clipboard tools tried for a copy, with
-// their fixed arguments. Ports screens._copy_to_clipboard's clipboard_cmds list
-// (xclip, xsel, wl-copy, pbcopy).
+// their fixed arguments: xclip and xsel (X11), wl-copy (Wayland), and pbcopy
+// (macOS). The first one present on PATH wins.
 var clipboardCmds = []struct {
 	name string
 	args []string
@@ -21,13 +21,13 @@ var clipboardCmds = []struct {
 }
 
 // clipboardTimeout bounds each clipboard command so an unresponsive tool cannot
-// hang the copy. Ports the 2-second timeout in _copy_to_clipboard.
+// hang the copy.
 const clipboardTimeout = 2 * time.Second
 
 // copyToClipboard writes text to the system clipboard, trying each tool in
 // clipboardCmds in order and returning true on the first success. Tools missing
 // from PATH are skipped. It is pure IO with no UI dependency so it runs inside a
-// Cmd closure (I1). Ports screens._copy_to_clipboard.
+// Cmd closure, off the update loop.
 func copyToClipboard(text string) bool {
 	for _, c := range clipboardCmds {
 		if _, err := exec.LookPath(c.name); err != nil {

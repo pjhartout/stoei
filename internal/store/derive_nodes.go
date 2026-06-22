@@ -7,10 +7,9 @@ import (
 	"github.com/pjhartout/stoei/internal/slurm"
 )
 
-// NodeDisplay is the per-node view-model rendered by the Nodes tab. It ports the
-// NodeInfo dataclass in widgets/node_overview.py together with the parsing
-// app._build_node_infos performs, so the tab renders plain values without
-// touching the raw slurm.Node fields.
+// NodeDisplay is the per-node view-model rendered by the Nodes tab. It carries
+// pre-parsed values so the tab renders plain numbers and strings without touching
+// the raw slurm.Node fields.
 type NodeDisplay struct {
 	Name          string
 	State         string
@@ -26,7 +25,7 @@ type NodeDisplay struct {
 }
 
 // CPUUsagePct returns the allocated-CPU percentage, or 0 when the node has no
-// CPUs. Ports NodeInfo.cpu_usage_pct.
+// CPUs.
 func (n NodeDisplay) CPUUsagePct() float64 {
 	if n.CPUsTotal == 0 {
 		return 0
@@ -35,7 +34,7 @@ func (n NodeDisplay) CPUUsagePct() float64 {
 }
 
 // MemoryUsagePct returns the allocated-memory percentage, or 0 when the node has
-// no memory. Ports NodeInfo.memory_usage_pct.
+// no memory.
 func (n NodeDisplay) MemoryUsagePct() float64 {
 	if n.MemoryTotalGB == 0 {
 		return 0
@@ -44,7 +43,7 @@ func (n NodeDisplay) MemoryUsagePct() float64 {
 }
 
 // GPUUsagePct returns the allocated-GPU percentage, or 0 when the node has no
-// GPUs. Ports NodeInfo.gpu_usage_pct.
+// GPUs.
 func (n NodeDisplay) GPUUsagePct() float64 {
 	if n.GPUsTotal == 0 {
 		return 0
@@ -58,7 +57,7 @@ const memoryMBToGB = 1024.0
 // DeriveNodeDisplays converts raw scontrol nodes into per-node view-models. Nodes
 // with an empty name are skipped. GPU totals come from CfgTRES (preferred) or the
 // Gres fallback; allocated GPUs come from AllocTRES or, absent that, a state-based
-// estimate (ALLOCATED/MIXED imply all GPUs in use). Ports app._build_node_infos.
+// estimate (ALLOCATED/MIXED imply all GPUs in use).
 func DeriveNodeDisplays(nodes []slurm.Node) []NodeDisplay {
 	out := make([]NodeDisplay, 0, len(nodes))
 	for _, node := range nodes {
@@ -102,7 +101,7 @@ func DeriveNodeDisplays(nodes []slurm.Node) []NodeDisplay {
 
 // nodeGPUs returns the (total, allocated, formatted-types) GPU view for a node,
 // applying the CfgTRES→Gres total fallback and the AllocTRES→state-based alloc
-// fallback from app._build_node_infos.
+// fallback.
 func nodeGPUs(node slurm.Node, state string) (total, alloc int, types string) {
 	var counts map[string]int
 
@@ -130,8 +129,7 @@ func nodeGPUs(node slurm.Node, state string) (total, alloc int, types string) {
 	return total, alloc, types
 }
 
-// atoiDefault parses an integer, returning 0 for empty or unparseable input,
-// mirroring the Python int(node_data.get(key, "0") or "0") pattern.
+// atoiDefault parses an integer, returning 0 for empty or unparseable input.
 func atoiDefault(s string) int {
 	n, err := strconv.Atoi(strings.TrimSpace(s))
 	if err != nil {

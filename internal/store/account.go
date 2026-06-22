@@ -7,8 +7,7 @@ import (
 )
 
 // AccountResourceUsage is the aggregate "Current Resource Usage" of an account's
-// running jobs: summed CPUs/memory/GPUs and the count of unique nodes. Ports the
-// aggregate block in formatters.format_account_info (formatters.py 888-916).
+// running jobs: summed CPUs/memory/GPUs and the count of unique nodes.
 type AccountResourceUsage struct {
 	TotalCPUs     int
 	TotalMemoryGB float64
@@ -17,11 +16,10 @@ type AccountResourceUsage struct {
 }
 
 // AggregateAccountResources sums the CPU, memory, and GPU resources of the given
-// running jobs and counts the unique expanded node names. It mirrors the Python
-// block exactly: CPUs/memory come from parse_tres_resources on the job's TRES
-// (no node-count fallback), GPUs from calculate_total_gpus (skipping generic
-// entries when a specific model is present), and unique nodes from
-// expand_nodelist over the job's NodeList. Ports formatters.py 893-916.
+// running jobs and counts the unique expanded node names. CPUs and memory come
+// from parsing each job's TRES (no node-count fallback), GPUs from the total GPU
+// count (skipping generic entries when a specific model is present), and unique
+// nodes from expanding each job's NodeList.
 func AggregateAccountResources(jobs []AllUsersJob) AccountResourceUsage {
 	var usage AccountResourceUsage
 	unique := map[string]struct{}{}

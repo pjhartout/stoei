@@ -11,8 +11,7 @@ import (
 // bracket notation including ranges ("node[01-04]"), comma lists inside brackets
 // ("node[01,03]"), multiple prefix groups ("gpu[01-02],cpu[01-02]"), and
 // zero-padded indices. Pending-state placeholders such as "(None)" and empty
-// input yield nil. Ports nodelist.expand_nodelist (which returns a Python set;
-// here the result is sorted for determinism).
+// input yield nil. The result is sorted for deterministic output.
 func ExpandNodeList(nodelist string) []string {
 	set := expandNodeListSet(nodelist)
 	if len(set) == 0 {
@@ -51,7 +50,7 @@ func expandNodeListSet(nodelist string) map[string]struct{} {
 }
 
 // splitNodeList splits a NodeList string on commas that are not inside brackets,
-// porting nodelist._split_nodelist.
+// so a bracketed comma list ("node[01,03]") stays a single token.
 func splitNodeList(s string) []string {
 	var tokens []string
 	depth := 0
@@ -82,9 +81,8 @@ func splitNodeList(s string) []string {
 }
 
 // expandBracketExpr expands one bracket expression such as "node[01-04,07]" into
-// a set of hostnames, porting nodelist._expand_bracket_expr. A malformed
-// expression (missing bracket or bad range) yields an empty set, matching the
-// Python behavior of logging a warning and skipping.
+// a set of hostnames. A malformed expression (missing bracket or bad range)
+// yields an empty set so the caller silently skips it.
 func expandBracketExpr(expr string) map[string]struct{} {
 	open := strings.IndexByte(expr, '[')
 	closeIdx := strings.IndexByte(expr, ']')

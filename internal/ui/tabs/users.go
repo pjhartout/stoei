@@ -22,8 +22,8 @@ const (
 	subtabEnergy
 )
 
-// runningUserColumns are the Running sub-tab columns. Ports
-// UserOverviewTab.RUNNING_USERS_COLUMNS.
+// runningUserColumns are the Running sub-tab columns: per-user running totals
+// (user, jobs, CPUs, memory, GPUs, GPU types, nodes, and node list).
 var runningUserColumns = []column{
 	{key: "user", title: "User"},
 	{key: "jobs", title: "Jobs", numeric: true},
@@ -35,8 +35,8 @@ var runningUserColumns = []column{
 	{key: "nodelist", title: "NodeList"},
 }
 
-// pendingUserColumns are the Pending sub-tab columns. Ports
-// UserOverviewTab.PENDING_USERS_COLUMNS.
+// pendingUserColumns are the Pending sub-tab columns: per-user requested totals
+// for pending jobs (user, pending jobs, CPUs, memory, GPUs, GPU types).
 var pendingUserColumns = []column{
 	{key: "user", title: "User"},
 	{key: "pending_jobs", title: "Pending Jobs", numeric: true},
@@ -46,8 +46,8 @@ var pendingUserColumns = []column{
 	{key: "gpu_types", title: "GPU Types"},
 }
 
-// energyUserColumns are the Energy sub-tab columns. Ports
-// UserOverviewTab.ENERGY_USERS_COLUMNS.
+// energyUserColumns are the Energy sub-tab columns: per-user energy and
+// CPU/GPU-hour totals (user, jobs, energy, GPU-hours, CPU-hours).
 var energyUserColumns = []column{
 	{key: "user", title: "User"},
 	{key: "jobs", title: "Jobs", numeric: true},
@@ -59,8 +59,8 @@ var energyUserColumns = []column{
 // Users is the user-overview tab. It is a two-level mini-root: it owns three
 // filterable sub-pane tables (Running / Pending / Energy) and an activeSubtab,
 // switching between them on the r/p/e keys. Each pane renders from a different
-// store aggregation (running/pending per-user stats, energy stats), matching
-// UserOverviewTab. Enter→user-detail modal is deferred to Phase 5.
+// store aggregation (running/pending per-user stats, energy stats).
+// Enter→user-detail modal is deferred to Phase 5.
 type Users struct {
 	store        *store.Store
 	styles       theme.Styles
@@ -186,7 +186,7 @@ func (u *Users) activeSection() (store.Section, bool) {
 }
 
 // runningUserRows builds the Running pane rows, sorted by total CPUs descending
-// to surface the heaviest users first. Ports UserOverviewTab.update_users.
+// to surface the heaviest users first.
 func runningUserRows(users []store.UserStats) [][]string {
 	sorted := make([]store.UserStats, len(users))
 	copy(sorted, users)
@@ -209,8 +209,7 @@ func runningUserRows(users []store.UserStats) [][]string {
 }
 
 // pendingUserRows builds the Pending pane rows. The store already sorts pending
-// stats by requested CPUs descending. Ports
-// UserOverviewTab.update_pending_users.
+// stats by requested CPUs descending.
 func pendingUserRows(users []store.UserPendingStats) [][]string {
 	rows := make([][]string, 0, len(users))
 	for _, us := range users {
@@ -227,7 +226,7 @@ func pendingUserRows(users []store.UserPendingStats) [][]string {
 }
 
 // energyUserRows builds the Energy pane rows. The store already sorts energy
-// stats by total energy descending. Ports UserOverviewTab.update_energy_users.
+// stats by total energy descending.
 func energyUserRows(users []store.UserEnergyStats) [][]string {
 	rows := make([][]string, 0, len(users))
 	for _, us := range users {
@@ -242,8 +241,8 @@ func energyUserRows(users []store.UserEnergyStats) [][]string {
 	return rows
 }
 
-// naIfEmpty returns "N/A" for an empty string, matching the Python "N/A"
-// fallbacks used for GPU types and node lists.
+// naIfEmpty returns "N/A" for an empty string, used as the fallback for GPU types
+// and node lists.
 func naIfEmpty(s string) string {
 	if s == "" {
 		return "N/A"
@@ -282,7 +281,7 @@ func (u *Users) View() string {
 }
 
 // subtabHeader renders the "User Overview" header with the active sub-tab
-// highlighted, porting UserOverviewTab._update_subtab_header.
+// highlighted.
 func (u *Users) subtabHeader() string {
 	title := u.styles.Title.Render("User Overview")
 	tabs := []string{

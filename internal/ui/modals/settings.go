@@ -17,14 +17,14 @@ import (
 // SettingsAppliedMsg is emitted when the user saves the settings form. The root
 // handles it by persisting the config, swapping the theme/keymap, and updating
 // the refresh intervals, history days, energy months, and log-viewer line count
-// live. The config it carries is already clamped to the Python bounds.
+// live. The config it carries is already clamped to the config package's bounds.
 type SettingsAppliedMsg struct {
 	// Config is the new, clamped configuration to apply and persist.
 	Config config.Config
 }
 
-// SettingsToastMsg asks the root to show a toast (used for invalid-input
-// feedback, mirroring the Python app.notify on a bad field).
+// SettingsToastMsg asks the root to show a toast, used for invalid-input feedback
+// when a field cannot be parsed.
 type SettingsToastMsg struct {
 	// Text is the toast message.
 	Text string
@@ -74,8 +74,7 @@ const (
 // Settings is the hand-rolled settings form modal (huh has no v2). It edits a
 // config.Config in place: up/down move between fields, left/right cycle enum and
 // bool fields, text fields are edited inline. Save (ctrl+s or enter on the last
-// field) emits a SettingsAppliedMsg; esc cancels without applying. Ports
-// SettingsScreen.
+// field) emits a SettingsAppliedMsg; esc cancels without applying.
 type Settings struct {
 	styles theme.Styles
 	fields []settingField
@@ -139,8 +138,8 @@ func numericField(label, value string) settingField {
 	return settingField{label: label, kind: fieldText, input: ti}
 }
 
-// indexOf returns the index of v in opts, or 0 when absent (so an unknown value
-// lands on the first option, matching the Python default fallback).
+// indexOf returns the index of v in opts, or 0 when absent so an unknown value
+// lands on the first option rather than failing.
 func indexOf(opts []string, v string) int {
 	for i, o := range opts {
 		if o == v {
@@ -269,7 +268,7 @@ func (s *Settings) save() tea.Cmd {
 	cfg.EnergyHistoryMonths = months
 
 	// Clamp through the pure config path so out-of-range fields fall back to the
-	// defaults rather than persisting invalid values (settings.from_mapping).
+	// defaults rather than persisting invalid values.
 	clamped, _ := config.Load(mustMarshalRaw(cfg))
 	return func() tea.Msg { return SettingsAppliedMsg{Config: clamped} }
 }

@@ -6,8 +6,7 @@ import (
 	"time"
 )
 
-// DefaultMaxLogLines is the default ring capacity, mirroring
-// settings.DEFAULT_MAX_LOG_LINES in the Python app.
+// DefaultMaxLogLines is the default capacity of a LogRing.
 const DefaultMaxLogLines = 1000
 
 // LogEntry is one buffered application log line.
@@ -21,8 +20,8 @@ type LogEntry struct {
 }
 
 // LogRing is a fixed-capacity, goroutine-safe ring buffer of application log
-// lines. The app appends to it as a loguru-style sink; the Logs tab renders the
-// most recent lines. It replaces the Python LogPane's in-widget RichLog history.
+// lines. The app appends to it as a log sink; the Logs tab renders the most
+// recent lines.
 type LogRing struct {
 	mu      sync.Mutex
 	entries []LogEntry

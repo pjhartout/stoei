@@ -1,18 +1,18 @@
 // Package keys defines the application's keybindings. KeyMap is a struct of
 // key.Binding values that satisfies bubbles/help.KeyMap so the help bar renders
-// itself from the active bindings. Two presets are ported from the Python
-// keybindings module: vim (default) and emacs. BuildKeyMap returns a fresh
-// KeyMap for a mode so the footer/help reflect the active preset automatically.
+// itself from the active bindings. Two presets are available: vim (default) and
+// emacs. BuildKeyMap returns a fresh KeyMap for a mode so the footer/help reflect
+// the active preset automatically.
 package keys
 
 import "charm.land/bubbles/v2/key"
 
-// Mode identifies a keybinding preset. Ported from keybindings.KeybindMode.
+// Mode identifies a keybinding preset.
 type Mode = string
 
-// Keybinding modes, ported from keybindings.KEYBIND_MODES.
+// Available keybinding modes.
 const (
-	// Vim is the default preset (keybindings.DEFAULT_PRESET).
+	// Vim is the default preset.
 	Vim Mode = "vim"
 	// Emacs is the alternate preset.
 	Emacs Mode = "emacs"
@@ -37,8 +37,7 @@ type KeyMap struct {
 }
 
 // BuildKeyMap returns a fresh KeyMap for the given preset. Unknown modes fall
-// back to vim (keybindings.DEFAULT_PRESET). Ports _create_vim_preset /
-// _create_emacs_preset for the global + navigation actions the Go app uses.
+// back to the vim preset.
 func BuildKeyMap(mode Mode) KeyMap {
 	if mode == Emacs {
 		return emacsKeyMap()
@@ -50,8 +49,8 @@ func BuildKeyMap(mode Mode) KeyMap {
 // the default preset without naming a mode.
 func Default() KeyMap { return vimKeyMap() }
 
-// vimKeyMap ports the vim preset's global + navigation bindings. Navigation adds
-// arrow keys alongside the vim j/k so both work, matching the Go tabs which
+// vimKeyMap builds the vim preset's global and navigation bindings. Navigation
+// adds arrow keys alongside the vim j/k so both work, matching the tabs which
 // already accept arrows.
 func vimKeyMap() KeyMap {
 	return KeyMap{
@@ -82,7 +81,7 @@ func vimKeyMap() KeyMap {
 	}
 }
 
-// emacsKeyMap ports the emacs preset's global + navigation bindings (ctrl+p/n
+// emacsKeyMap builds the emacs preset's global and navigation bindings (ctrl+p/n
 // navigation, ctrl-prefixed globals, ctrl+comma settings). ctrl+c is kept on
 // Quit so the program is always interruptible.
 func emacsKeyMap() KeyMap {

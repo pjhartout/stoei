@@ -7,13 +7,16 @@ linters:
   default: none
   enable:
     - errcheck
+    - godot # doc comments end with a period (consistent docstrings)
     - govet
     - ineffassign
-    - staticcheck
+    - staticcheck # includes ST1020/ST1021: doc comments start with the name
     - unused
     - depguard
 
   settings:
+    godot:
+      scope: declarations
     depguard:
       # Enforce the one-way layering ui -> store -> slurm.
       #

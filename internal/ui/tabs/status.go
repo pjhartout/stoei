@@ -8,8 +8,7 @@ import (
 )
 
 // spinnerDebounce is the grace period before a loading spinner is shown, so a
-// fast squeue tick that completes quickly never flashes a spinner. Ports the
-// debounced loading-indicator behavior called for in the Phase 4 acceptance.
+// fast squeue tick that completes quickly never flashes a spinner.
 const spinnerDebounce = 100 * time.Millisecond
 
 // spinnerFrames are the braille dot frames used for the per-section loading
@@ -24,8 +23,8 @@ const spinnerInterval = 100 * time.Millisecond
 // sectionStatus tracks the load state of one (or more) store sections backing a
 // tab and renders a debounced spinner while loading-with-no-data or an inline
 // error badge on a failed fetch. It is embedded by each tab; the tab calls
-// Observe with the section's current state on every Refresh and asks Line whether
-// to render a status line in place of a bare empty table.
+// observe with the section's current state on every Refresh and asks statusLine
+// whether to render a status line in place of a bare empty table.
 type sectionStatus struct {
 	// loadingSince marks when the backing section entered loading-with-no-data, so
 	// the spinner can be debounced. Zero means "not loading".

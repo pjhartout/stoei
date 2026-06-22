@@ -34,7 +34,7 @@ const (
 // CancelConfirm is the yes/no confirmation modal opened with "c" on an active
 // job. It defaults focus to the safe option (No), refuses to cancel completed/
 // failed jobs (the root checks before opening), and on confirm issues a
-// client.CancelJob Cmd. Ports CancelConfirmScreen.
+// client.CancelJob Cmd.
 type CancelConfirm struct {
 	styles theme.Styles
 	client store.SlurmClient
@@ -48,7 +48,7 @@ type CancelConfirm struct {
 }
 
 // NewCancelConfirm builds the confirm modal for jobID/jobName. Focus defaults to
-// No (the safe option), matching CancelConfirmScreen.on_mount.
+// No, the safe option, so an accidental Enter keeps the job.
 func NewCancelConfirm(client store.SlurmClient, styles theme.Styles, jobID, jobName string) *CancelConfirm {
 	return &CancelConfirm{
 		styles:  styles,
@@ -63,8 +63,7 @@ func NewCancelConfirm(client store.SlurmClient, styles theme.Styles, jobID, jobN
 func (c *CancelConfirm) Init() tea.Cmd { return nil }
 
 // Update handles the confirm/abort navigation and activation. Esc aborts (safe),
-// left/right/tab move focus, and Enter activates the focused choice. Ports the
-// CancelConfirmScreen bindings.
+// left/right/tab move focus, and Enter activates the focused choice.
 func (c *CancelConfirm) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 	km, ok := msg.(tea.KeyPressMsg)
 	if !ok {
@@ -93,8 +92,9 @@ func (c *CancelConfirm) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 	return c, nil, false
 }
 
-// cancelCmd returns a Cmd that runs scancel for the job and reports the outcome
-// as a CancelRequestedMsg (I1: the IO happens in the Cmd closure, not Update).
+// cancelCmd returns a Cmd that cancels the job and reports the outcome as a
+// CancelRequestedMsg. The scancel IO happens in the Cmd closure, off the update
+// loop, so it never blocks the UI.
 func (c *CancelConfirm) cancelCmd() tea.Cmd {
 	client := c.client
 	jobID := c.jobID
@@ -109,8 +109,7 @@ func (c *CancelConfirm) cancelCmd() tea.Cmd {
 // cancelTimeout bounds the scancel command.
 const cancelTimeout = 10 * time.Second
 
-// View renders the confirm dialog with the focused button highlighted. Ports
-// CancelConfirmScreen.compose.
+// View renders the confirm dialog with the focused button highlighted.
 func (c *CancelConfirm) View() string {
 	title := c.styles.Error.Render("Cancel Job?")
 
@@ -130,8 +129,7 @@ func (c *CancelConfirm) View() string {
 
 // button renders one focusable button with rounded chrome. The focused button
 // gets an accent-filled rounded border (charm dialog style); the unfocused one
-// keeps a subtle rounded outline so both read as buttons. Ports the
-// CancelConfirmScreen button treatment with rounded charm chrome.
+// keeps a subtle rounded outline so both read as buttons.
 func (c *CancelConfirm) button(label string, focused bool, style lipgloss.Style) string {
 	fg := style.GetForeground()
 	box := lipgloss.NewStyle().

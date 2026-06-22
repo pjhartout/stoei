@@ -2,11 +2,10 @@
 // the wiring of tabs, modals, and components. Only this layer (and its
 // subpackages) imports Bubble Tea and lipgloss.
 //
-// This file holds the real root model (Phase 3). It owns the Store, the
-// SlurmClient, the tab sub-models, a modal stack, the two refresh tickers, the
-// help bar, a toast list fed by the health notifier, and the theme/styles. The
-// Store is mutated only here, on the main loop goroutine, and never inside a
-// fetch Cmd or View.
+// This file holds the root model. It owns the Store, the SlurmClient, the tab
+// sub-models, a modal stack, the two refresh tickers, the help bar, a toast list
+// fed by the health notifier, and the theme/styles. The Store is mutated only
+// here, on the main loop goroutine, and never inside a fetch Cmd or View.
 package ui
 
 import (
@@ -91,7 +90,7 @@ type App struct {
 	modals []modals.Modal
 
 	// detailCache memoizes rendered job details, evicting an entry when that
-	// job's state changes (cache-evict-on-state-change, Python 77e57c3).
+	// job's state changes (cache-evict-on-state-change).
 	detailCache *modals.JobDetailCache
 
 	// runningInFlight guards the fast tier: while a running-jobs fetch is
@@ -181,8 +180,8 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 }
 
 // applyKeyModeToTabs pushes the active keybinding preset's tab-local filter/sort
-// bindings into every tab. Ports the part of the emacs preset that rebinds
-// FILTER_SHOW/SORT_CYCLE for the tab tables.
+// bindings into every tab so a non-default preset (for example emacs mode, which
+// rebinds filter to C-s and sort to C-o) takes effect on the tab tables.
 func (a *App) applyKeyModeToTabs() {
 	mode := a.cfg.KeybindMode
 	a.jobs.SetKeyMode(mode)
@@ -271,8 +270,8 @@ func (a *App) dispatchHeavy() tea.Cmd {
 	)
 }
 
-// waitTimeHours is the per-partition wait-time lookback window. It is not user
-// configurable (no Python Settings field exists for it).
+// waitTimeHours is the per-partition wait-time lookback window. It is a fixed
+// constant rather than a user-configurable setting.
 const waitTimeHours = 1
 
 // heavyFetchCount is the number of fetches dispatchHeavy batches; the slow-tier
@@ -347,7 +346,7 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.store.SetRunningJobs(msg.jobs, msg.gen, msg.err)
 		a.observe(store.SectionRunningJobs, msg.err)
 		a.jobs.Refresh()
-		a.detailCache.SyncStates(a.store.MergedJobs()) // evict on state change (77e57c3)
+		a.detailCache.SyncStates(a.store.MergedJobs()) // evict cached details on state change
 		a.frame.dirty = true
 		return a, nil, true
 
@@ -464,7 +463,7 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	// Sub-tab switch keys (Users r/p/e, Priority m/u/a/j) belong to the active tab
 	// and take precedence over the global shortcuts that share a letter (e.g. the
-	// 'r' refresh), matching the Python per-tab BINDINGS overriding globals.
+	// 'r' refresh): a tab-local binding overrides the global one.
 	if a.activeHandlesSubtabKey(msg.String()) {
 		return a.routeToActive(msg)
 	}
@@ -576,8 +575,8 @@ func (a *App) openJobDetail(jobID, state string) tea.Cmd {
 }
 
 // openCancelConfirm opens a cancel-confirm modal for the selected job, refusing
-// to cancel a completed/failed job (a toast, no modal). Ports the
-// active-job guard around CancelConfirmScreen.
+// to cancel a completed/failed job (a toast, no modal): the confirm modal only
+// opens for a job that is still active.
 func (a *App) openCancelConfirm() tea.Cmd {
 	id, state, active, ok := a.jobs.SelectedJob()
 	if !ok {
@@ -851,7 +850,7 @@ func (a *App) rebuildStyles() {
 // the new energy-months label to the Users tab. The history/energy/log-line
 // windows are read from a.cfg on the next dispatch, so updating a.cfg suffices.
 // A manual refresh is triggered so the new history/energy windows take effect at
-// once. Ports the live-apply path of the Python settings flow.
+// once.
 func (a *App) applyConfig(cfg config.Config) tea.Cmd {
 	themeChanged := cfg.Theme != a.cfg.Theme
 	a.cfg = cfg

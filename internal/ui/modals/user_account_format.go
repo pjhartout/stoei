@@ -17,8 +17,8 @@ const (
 	fairShareWarning = store.FairShareWarningThreshold
 )
 
-// maxUserPriorityJobs / maxAccountUsers / maxAccountRunningJobs cap the list
-// sections, porting the _USER_INFO_MAX_* / _ACCOUNT_INFO_MAX_* limits.
+// These caps limit how many rows each list section of the user/account detail
+// blocks renders before collapsing the remainder into an "... and N more" line.
 const (
 	maxUserPriorityJobs    = 10
 	maxAccountUsers        = 15
@@ -32,9 +32,9 @@ func summaryLine(label, value string, styles theme.Styles) string {
 }
 
 // formatUserInfo renders a user-detail block from the store's already-fetched
-// data. Ports formatters.format_user_info: a user summary, jobs-by-state, pending
-// resources, fair-share priority, energy, and a job list. The job rows come from
-// the all-users list filtered to this user.
+// data, in this section order: a user summary, jobs-by-state, pending resources,
+// fair-share priority, energy, pending job priorities, and a job list. The job
+// rows come from the all-users list filtered to this user.
 func formatUserInfo(username string, st *store.Store, styles theme.Styles) string {
 	jobs := userJobs(st, username)
 	userStats := findUserStats(store.AggregateUserStats(jobs), username)
@@ -121,10 +121,10 @@ func formatUserInfo(username string, st *store.Store, styles theme.Styles) strin
 	return strings.Join(lines, "\n")
 }
 
-// formatAccountInfo renders an account-detail block from the store's data. Ports
-// formatters.format_account_info: account summary, account fair-share priority,
-// aggregate resource usage, the users in the account, pending job priorities, and
-// the running jobs.
+// formatAccountInfo renders an account-detail block from the store's data, in
+// this section order: account summary, account fair-share priority, aggregate
+// resource usage, the users in the account, pending job priorities, and the
+// running jobs.
 func formatAccountInfo(account string, st *store.Store, styles theme.Styles) string {
 	var accountEntry *store.FairShareEntry
 	var users []store.FairShareEntry
@@ -176,8 +176,7 @@ func formatAccountInfo(account string, st *store.Store, styles theme.Styles) str
 	}
 
 	// Current Resource Usage: aggregate CPUs/memory/GPUs and unique nodes over the
-	// account's running jobs. Ports the block in formatters.py 888-916, inserted
-	// between the fair-share and users sections to match the Python ordering.
+	// account's running jobs, shown between the fair-share and users sections.
 	usage := store.AggregateAccountResources(running)
 	lines = append(lines, "", styles.Title.Render(" Current Resource Usage "))
 	lines = append(lines, summaryLine("Total CPUs", fmtInt(usage.TotalCPUs), styles))
@@ -204,8 +203,8 @@ func formatAccountInfo(account string, st *store.Store, styles theme.Styles) str
 	}
 
 	// Pending Job Priorities: the account's pending sprio rows, sorted by priority
-	// descending, capped at 15. Ports formatters.py 953-983, inserted between the
-	// users and running-jobs sections to match the Python ordering.
+	// descending and capped at maxAccountPriorityJobs, shown between the users and
+	// running-jobs sections.
 	prios := accountPriorities(st.PendingPrio, usernames)
 	if len(prios) > 0 {
 		lines = append(lines, "", styles.Title.Render(" Pending Job Priorities "), "")
@@ -277,6 +276,8 @@ func userJobStateCell(state string, styles theme.Styles) string {
 	return styles.StateRoleStyle(role).Bold(true).Render(cell)
 }
 
+// findUserStats returns the stats for username, or a zero-valued entry tagged
+// with the username when the user is absent.
 func findUserStats(stats []store.UserStats, username string) store.UserStats {
 	for _, s := range stats {
 		if s.Username == username {
@@ -286,6 +287,8 @@ func findUserStats(stats []store.UserStats, username string) store.UserStats {
 	return store.UserStats{Username: username}
 }
 
+// findPendingStats returns the pending-resource stats for username, or nil when
+// the user has none.
 func findPendingStats(stats []store.UserPendingStats, username string) *store.UserPendingStats {
 	for i := range stats {
 		if stats[i].Username == username {
@@ -295,6 +298,8 @@ func findPendingStats(stats []store.UserPendingStats, username string) *store.Us
 	return nil
 }
 
+// findEnergyStats returns the energy stats for username, or nil when the user has
+// none.
 func findEnergyStats(stats []store.UserEnergyStats, username string) *store.UserEnergyStats {
 	for i := range stats {
 		if stats[i].Username == username {
@@ -304,6 +309,8 @@ func findEnergyStats(stats []store.UserEnergyStats, username string) *store.User
 	return nil
 }
 
+// findFairShare returns the fair-share entry for username, or nil when the user
+// has none.
 func findFairShare(entries []store.FairShareEntry, username string) *store.FairShareEntry {
 	for i := range entries {
 		if entries[i].User == username {
@@ -326,8 +333,7 @@ func userPriorities(entries []store.PriorityEntry, username string) []store.Prio
 }
 
 // accountPriorities returns the pending priorities whose user belongs to the
-// account (the given username set), sorted by priority descending. Ports the
-// job_priorities filtering + sort in format_account_info (formatters.py 953-968).
+// account (the given username set), sorted by priority descending.
 func accountPriorities(entries []store.PriorityEntry, usernames map[string]struct{}) []store.PriorityEntry {
 	var out []store.PriorityEntry
 	for _, e := range entries {
@@ -339,8 +345,9 @@ func accountPriorities(entries []store.PriorityEntry, usernames map[string]struc
 	return out
 }
 
-// fairShareColored renders a fair-share value colored by threshold. Ports
-// formatters._format_fair_share_value.
+// fairShareColored renders a fair-share value colored by threshold: green at or
+// above the success threshold, yellow at or above the warning threshold, red
+// below. A non-numeric value is returned uncolored.
 func fairShareColored(fairShare string, styles theme.Styles) string {
 	raw := strings.TrimSpace(fairShare)
 	v, err := strconv.ParseFloat(raw, 64)

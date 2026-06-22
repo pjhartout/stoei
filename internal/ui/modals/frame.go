@@ -11,7 +11,7 @@ import (
 // modalFraction is the share of the terminal a centered modal occupies. The
 // overlay compositor in app.go centers whatever the modal renders, so sizing the
 // modal to a fraction of the screen keeps a margin of base content visible around
-// it (matching the Textual modal screens that did not fill the whole screen).
+// it rather than letting the modal fill the whole screen.
 const modalFraction = 0.85
 
 // modalMinWidth / modalMinHeight are the terminal dimensions below which a modal

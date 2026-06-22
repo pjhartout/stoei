@@ -19,7 +19,7 @@ type JobIDSubmittedMsg struct {
 }
 
 // JobInput is the small modal that prompts for a job id, opened with "i". On
-// Enter it emits a JobIDSubmittedMsg and closes; Esc cancels. Ports JobInputScreen.
+// Enter it emits a JobIDSubmittedMsg and closes; Esc cancels.
 type JobInput struct {
 	styles theme.Styles
 	input  textinput.Model

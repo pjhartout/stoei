@@ -7,28 +7,26 @@ import (
 	"strings"
 )
 
-// column identifies a job-table column by its stable key. The order matches the
-// rendered table and the Python jobs columns (JobID, Name, State, Time, Nodes,
-// NodeList), minus the Timeline column which is deferred to a later phase.
+// column identifies a table column by its stable key. The slice order matches the
+// rendered table.
 type column struct {
 	// key is the lowercase filter token (e.g. "state").
 	key string
 	// title is the rendered header label.
 	title string
 	// numeric marks columns whose sort is numeric-aware (parsed as a float when
-	// possible). Ports the per-column sort_key choice in app.py.
+	// possible).
 	numeric bool
 	// width is the rendered column width in characters. Zero means "derive a
 	// default from the key" (filterTableColumnWidth).
 	width int
-	// noSort marks a column the "o" sort cycle skips while it remains filterable.
-	// Ports ColumnConfig(sortable=False) (the Jobs-tab Timeline column).
+	// noSort marks a column the "o" sort cycle skips while it remains filterable
+	// (the Jobs-tab Timeline column).
 	noSort bool
 }
 
-// jobColumns are the Jobs-tab columns in render order. Ports the column set built
-// in table_controller.job_row_values / app.py JOB_TABLE_COLUMN_CONFIGS. Timeline
-// is filterable but not sortable (sortable=False in the Python config).
+// jobColumns are the Jobs-tab columns in render order: JobID, Name, State, Time,
+// Nodes, NodeList, and Timeline. Timeline is filterable but not sortable.
 var jobColumns = []column{
 	{key: "jobid", title: "Job ID", numeric: true},
 	{key: "name", title: "Name"},
@@ -55,10 +53,9 @@ func columnIndexIn(cols []column, key string) int {
 	return -1
 }
 
-// filterState is the parsed form of a filter query. Ports
-// filterable_table.FilterState: column-scoped filters plus a general substring
-// applied across all columns. All values are lowercased for case-insensitive
-// matching.
+// filterState is the parsed form of a filter query: column-scoped filters plus a
+// general substring applied across all columns. All values are lowercased for
+// case-insensitive matching.
 type filterState struct {
 	// query is the raw query as typed.
 	query string
@@ -80,14 +77,12 @@ func (f filterState) cols() []column {
 	return f.columns
 }
 
-// colValuePattern matches a "column:value" token. Ports the Python
-// re.compile(r"(\w+):(\S+)").
+// colValuePattern matches a "column:value" token in a filter query.
 var colValuePattern = regexp.MustCompile(`(\w+):(\S+)`)
 
 // parseFilter parses a raw query into a filterState. Tokens of the form
 // "key:value" whose key names a known column become column filters; everything
-// else is collapsed into the general substring. Ports
-// filterable_table._parse_filter_query.
+// else is collapsed into the general substring.
 func parseFilter(query string) filterState {
 	return parseFilterWith(query, jobColumns)
 }
@@ -118,8 +113,7 @@ func parseFilterWith(query string, cols []column) filterState {
 }
 
 // matches reports whether a row (the plain, markup-free cell values in column
-// order) satisfies the filter. An empty query matches everything. Ports
-// filterable_table._row_matches_filter.
+// order) satisfies the filter. An empty query matches everything.
 func (f filterState) matches(row []string) bool {
 	if f.query == "" {
 		return true
@@ -151,8 +145,7 @@ func (f filterState) matches(row []string) bool {
 	return true
 }
 
-// sortDirection is the tri-state sort direction. Ports
-// filterable_table.SortDirection.
+// sortDirection is the tri-state sort direction.
 type sortDirection int
 
 const (
@@ -165,18 +158,16 @@ const (
 )
 
 // sortState is the current sort selection: a column index (-1 when unsorted) and
-// a direction. Ports filterable_table.SortState.
+// a direction.
 type sortState struct {
 	columnIdx int
 	direction sortDirection
 }
 
-// cycle advances the sort state using the Python o-key cycle over the sortable
-// columns only (a noSort column such as Timeline is skipped): none -> asc on the
-// first sortable column; asc -> desc on the same column; desc -> asc on the next
-// sortable column; wrapping past the last sortable column clears the sort. Ports
-// filterable_table.action_cycle_sort, which iterates [c for c in columns if
-// c.sortable].
+// cycle advances the sort state over the sortable columns only (a noSort column
+// such as Timeline is skipped): none -> asc on the first sortable column; asc ->
+// desc on the same column; desc -> asc on the next sortable column; wrapping past
+// the last sortable column clears the sort.
 func (s sortState) cycle(cols []column) sortState {
 	sortable := make([]int, 0, len(cols))
 	for i, c := range cols {
@@ -228,7 +219,7 @@ type rankedKey struct {
 // sortRows returns rows sorted per the sort state. When unsorted it returns rows
 // unchanged. The key is numeric-aware: cells that parse as floats compare
 // numerically and rank ahead of non-numeric text; empty cells sort last (or
-// first when descending). Ports filterable_table._sort_rows.get_sort_key.
+// first when descending).
 func (s sortState) sortRows(rows [][]string) [][]string {
 	if s.direction == sortNone || s.columnIdx < 0 {
 		return rows
@@ -269,7 +260,7 @@ func (s sortState) sortRows(rows [][]string) [][]string {
 	sort.SliceStable(pairs, func(a, b int) bool {
 		if reverse {
 			// Descending: compare with operands swapped so equal elements keep
-			// their input order (stable), matching Python's sorted(reverse=True).
+			// their input order under the stable sort.
 			return lessRanked(pairs[b].key, pairs[a].key)
 		}
 		return lessRanked(pairs[a].key, pairs[b].key)

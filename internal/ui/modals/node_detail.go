@@ -21,8 +21,7 @@ type nodeDetailLoadedMsg struct {
 
 // NodeDetail is the scrollable node-detail modal opened by Enter on a Nodes row.
 // It fetches client.NodeDetail in a Cmd (spinner while loading) and renders the
-// "scontrol show node" fields by category. Ports NodeInfoScreen +
-// DetailController.show_node_info.
+// "scontrol show node" fields by category.
 type NodeDetail struct {
 	styles theme.Styles
 	client store.SlurmClient
@@ -56,7 +55,8 @@ func (n *NodeDetail) Init() tea.Cmd {
 	return tea.Batch(n.fetchCmd(), n.spin.Tick)
 }
 
-// fetchCmd loads the node detail off the main loop (I1).
+// fetchCmd loads the node detail off the main loop and reports it as a
+// nodeDetailLoadedMsg.
 func (n *NodeDetail) fetchCmd() tea.Cmd {
 	client := n.client
 	node := n.node

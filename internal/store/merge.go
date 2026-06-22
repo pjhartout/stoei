@@ -3,7 +3,7 @@ package store
 // MergedJob is one row of the Jobs tab's unified job list: the current user's
 // running/pending jobs followed by their completed/failed history jobs. It is the
 // display shape the Jobs tab renders (JobID, Name, State, Time, Nodes, NodeList,
-// Timeline), mirroring cache.Job.as_row in the Python port.
+// Timeline).
 type MergedJob struct {
 	// ID is the job id, the stable key used for filtering, sorting and cursor
 	// restoration (I6).
@@ -17,7 +17,7 @@ type MergedJob struct {
 	// for history jobs.
 	Time string
 	// Nodes is the node count for active jobs; it is always empty for history jobs
-	// because sacct's history format does not carry it (cache.py sets nodes="").
+	// because sacct's history format does not carry it.
 	Nodes string
 	// NodeList is the allocated node list.
 	NodeList string
@@ -26,28 +26,26 @@ type MergedJob struct {
 
 	// SubmitTime, StartTime, and EndTime are the raw SLURM timestamps used to
 	// render the compact Timeline cell. Active jobs (from squeue) carry submit and
-	// start but no end; history jobs (from sacct) carry all three. Ports
-	// cache.Job.submit_time/start_time/end_time.
+	// start but no end; history jobs (from sacct) carry all three.
 	SubmitTime string
 	StartTime  string
 	EndTime    string
 	// Restarts is the requeue count, parsed from sacct's Restart field for history
-	// jobs (active jobs report 0). Ports cache.Job.restarts.
+	// jobs (active jobs report 0).
 	Restarts int
 }
 
 // MergedJobs returns the unified running-plus-history job list for the Jobs tab.
-// It mirrors stoei/slurm/cache.py JobCache._build_from_data exactly (cache.py
-// lines 182-238): the current user's running/pending jobs come first, tracked in
-// a running-id set; then each history job whose JobID is not already running is
-// appended (dedup) with Nodes left empty and State/Time taken from sacct. This is
-// pure (no IO) and reads only the already-fetched RunningJobs and HistoryJobs, so
-// it is safe to call from Refresh on every tick and unit-testable in isolation.
+// The current user's running/pending jobs come first, tracked in a running-id
+// set; then each history job whose JobID is not already running is appended
+// (dedup) with Nodes left empty and State/Time taken from sacct. This is pure (no
+// IO) and reads only the already-fetched RunningJobs and HistoryJobs, so it is
+// safe to call from Refresh on every tick and unit-testable in isolation.
 func (s *Store) MergedJobs() []MergedJob {
 	merged := make([]MergedJob, 0, len(s.RunningJobs)+len(s.HistoryJobs))
 	runningIDs := make(map[string]struct{}, len(s.RunningJobs))
 
-	// Running/pending jobs first (cache.py lines 186-212).
+	// Running/pending jobs first.
 	for _, job := range s.RunningJobs {
 		runningIDs[job.ID] = struct{}{}
 		merged = append(merged, MergedJob{
@@ -63,8 +61,8 @@ func (s *Store) MergedJobs() []MergedJob {
 		})
 	}
 
-	// History jobs, skipping any already present as a running job (cache.py lines
-	// 214-238). Nodes is empty because sacct's history format omits it.
+	// History jobs, skipping any already present as a running job. Nodes is empty
+	// because sacct's history format omits it.
 	for _, job := range s.HistoryJobs {
 		if _, running := runningIDs[job.ID]; running {
 			continue

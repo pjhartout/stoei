@@ -32,8 +32,8 @@ const (
 	fairShareWarningThreshold = store.FairShareWarningThreshold
 )
 
-// userPriorityColumns are the All Users sub-tab columns. Ports
-// PriorityOverviewTab.USER_PRIORITY_COLUMNS.
+// userPriorityColumns are the All Users sub-tab columns: rank, user, account, and
+// the sshare fair-share factors, ending with a derived status label.
 var userPriorityColumns = []column{
 	{key: "rank", title: "Rank", width: 6},
 	{key: "user", title: "User", width: 14},
@@ -46,8 +46,8 @@ var userPriorityColumns = []column{
 	{key: "status", title: "Status", width: 12},
 }
 
-// accountPriorityColumns are the Accounts sub-tab columns. Ports
-// PriorityOverviewTab.ACCOUNT_PRIORITY_COLUMNS.
+// accountPriorityColumns are the Accounts sub-tab columns: rank, account, and the
+// sshare fair-share factors, ending with a derived status label.
 var accountPriorityColumns = []column{
 	{key: "rank", title: "Rank", width: 6},
 	{key: "account", title: "Account", width: 16},
@@ -59,8 +59,8 @@ var accountPriorityColumns = []column{
 	{key: "status", title: "Status", width: 12},
 }
 
-// jobPriorityColumns are the Jobs sub-tab columns. Ports
-// PriorityOverviewTab.JOB_PRIORITY_COLUMNS.
+// jobPriorityColumns are the Jobs sub-tab columns: the pending-job sprio factors
+// (job id, user, account, priority, age, fair share, job size, partition, QOS).
 var jobPriorityColumns = []column{
 	{key: "job_id", title: "JobID", width: 12},
 	{key: "user", title: "User", width: 12},
@@ -78,7 +78,7 @@ var jobPriorityColumns = []column{
 // shows a summary line for the current user and their pending jobs; Users and
 // Accounts show per-user / per-account sshare with dense ranks; Jobs shows
 // pending sprio factors. The current user's and account's rows are highlighted.
-// Ports PriorityOverviewTab. Account-detail modals are deferred to Phase 5.
+// Account-detail modals are deferred to Phase 5.
 type Priority struct {
 	store    *store.Store
 	styles   theme.Styles
@@ -112,7 +112,7 @@ func NewPriority(s *store.Store, styles theme.Styles, username string) *Priority
 }
 
 // myJobPriorityColumns are the current user's pending-job columns shown on the My
-// pane. Ports PriorityOverviewTab.MY_JOB_PRIORITY_COLUMNS.
+// pane (the job sprio factors without the user/account columns).
 var myJobPriorityColumns = []column{
 	{key: "job_id", title: "JobID"},
 	{key: "priority", title: "Priority", numeric: true},
@@ -252,8 +252,8 @@ func (p *Priority) reobserve() {
 	p.status.observe(p.store.State(sec), hasData)
 }
 
-// splitFairShare splits sshare entries into user-level and account-level rows,
-// matching parse_sshare_output's account-vs-user split.
+// splitFairShare splits sshare entries into user-level and account-level rows
+// using each entry's IsAccount flag.
 func splitFairShare(entries []store.FairShareEntry) (users, accounts []store.FairShareEntry) {
 	for _, e := range entries {
 		if e.IsAccount() {
@@ -265,8 +265,8 @@ func splitFairShare(entries []store.FairShareEntry) (users, accounts []store.Fai
 	return users, accounts
 }
 
-// rankUsers sorts users by FairShare descending and assigns dense ranks. Ports
-// build_user_priority_rows' sort + compute_dense_ranks.
+// rankUsers sorts users by FairShare descending and assigns dense ranks (tied
+// values share a rank).
 func rankUsers(users []store.FairShareEntry) []userPriorityRow {
 	sorted := make([]store.FairShareEntry, len(users))
 	copy(sorted, users)
@@ -315,8 +315,8 @@ func accountFor(rows []userPriorityRow, username string) string {
 	return ""
 }
 
-// userPriorityRows builds the All Users pane rows, highlighting the current user
-// with a ">> " prefix and accent style. Ports build_user_priority_rows.
+// userPriorityRows builds the All Users pane rows, prefixing the current user's
+// row with ">> " to highlight it.
 func userPriorityRows(rows []userPriorityRow, username string, styles theme.Styles) [][]string {
 	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
@@ -340,8 +340,8 @@ func userPriorityRows(rows []userPriorityRow, username string, styles theme.Styl
 	return out
 }
 
-// accountPriorityRows builds the Accounts pane rows, highlighting the current
-// user's account. Ports build_account_priority_rows.
+// accountPriorityRows builds the Accounts pane rows, prefixing the current user's
+// account row with ">> " to highlight it.
 func accountPriorityRows(rows []userPriorityRow, myAccount string, styles theme.Styles) [][]string {
 	out := make([][]string, 0, len(rows))
 	for _, r := range rows {
@@ -365,7 +365,7 @@ func accountPriorityRows(rows []userPriorityRow, myAccount string, styles theme.
 }
 
 // jobPriorityRows builds the Jobs pane rows, sorted by priority descending and
-// highlighting the current user's jobs. Ports build_job_priority_rows.
+// prefixing the current user's jobs with ">> ".
 func jobPriorityRows(entries []store.PriorityEntry, username string, styles theme.Styles) [][]string {
 	sorted := make([]store.PriorityEntry, len(entries))
 	copy(sorted, entries)
@@ -389,7 +389,7 @@ func jobPriorityRows(entries []store.PriorityEntry, username string, styles them
 }
 
 // myJobRows builds the current user's pending-job rows for the My pane, sorted by
-// priority descending. Ports build_my_job_priority_rows.
+// priority descending.
 func myJobRows(entries []store.PriorityEntry, username string) [][]string {
 	mine := make([]store.PriorityEntry, 0)
 	for _, e := range entries {
@@ -409,8 +409,9 @@ func myJobRows(entries []store.PriorityEntry, username string) [][]string {
 	return out
 }
 
-// buildSummary renders the My-Priority summary line. Ports
-// build_my_priority_summary.
+// buildSummary renders the My-Priority summary block (fair share, status, user
+// and account ranks, shares, and pending-job count) for the current user, or an
+// explanatory note when the user has no fair-share data.
 func (p *Priority) buildSummary(users, accounts []userPriorityRow) string {
 	var mine *userPriorityRow
 	for i := range users {
@@ -463,8 +464,8 @@ func (p *Priority) buildSummary(users, accounts []userPriorityRow) string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// fairShareStyle returns the style for a fair-share value (green/yellow/red).
-// Ports formatters.fair_share_color.
+// fairShareStyle returns the style for a fair-share value: green at/above the
+// success threshold, yellow at/above the warning threshold, red below it.
 func fairShareStyle(fairShare string, styles theme.Styles) lipgloss.Style {
 	v, ok := parseFloat(fairShare)
 	if !ok {
@@ -480,7 +481,8 @@ func fairShareStyle(fairShare string, styles theme.Styles) lipgloss.Style {
 	}
 }
 
-// fairShareCell renders a bold, colored FairShare cell. Ports _format_fs_cell.
+// fairShareCell renders a bold, colored FairShare cell, passing through an
+// empty value unchanged.
 func fairShareCell(fairShare string, styles theme.Styles) string {
 	if strings.TrimSpace(fairShare) == "" {
 		return fairShare
@@ -488,8 +490,9 @@ func fairShareCell(fairShare string, styles theme.Styles) string {
 	return fairShareStyle(fairShare, styles).Bold(true).Render(fairShare)
 }
 
-// fairShareStatus returns the status label for a fair-share value. Ports
-// formatters.fair_share_status.
+// fairShareStatus returns the status label for a fair-share value:
+// "Under-served", "Fair", or "Over-served" by descending threshold, or "" when
+// the value does not parse.
 func fairShareStatus(fairShare string) string {
 	v, ok := parseFloat(fairShare)
 	if !ok {
@@ -506,7 +509,7 @@ func fairShareStatus(fairShare string) string {
 }
 
 // denseRanks assigns dense "rank/total" labels to a descending-sorted value list,
-// with tied values sharing a rank. Ports priority_overview.compute_dense_ranks.
+// with tied values sharing a rank.
 func denseRanks(values []float64) []string {
 	total := len(values)
 	if total == 0 {
@@ -527,8 +530,7 @@ func denseRanks(values []float64) []string {
 	return out
 }
 
-// safeFloat parses a float, returning 0 on failure (for sort keys). Ports
-// priority_overview._safe_float.
+// safeFloat parses a float, returning 0 on failure, for use as a sort key.
 func safeFloat(s string) float64 {
 	if v, ok := parseFloat(s); ok {
 		return v
@@ -564,9 +566,9 @@ const (
 
 // SelectedDetail reports the detail target for the selected row on the active
 // pane: the Users pane maps to a user (column 1, after the rank), the Accounts
-// pane to an account (column 1). The Jobs and My panes have no row-detail in the
-// Python app, so they report PriorityDetailNone. The ">> " current-user/account
-// highlight prefix is stripped.
+// pane to an account (column 1). The Jobs and My panes have no row-detail, so
+// they report PriorityDetailNone. The ">> " current-user/account highlight prefix
+// is stripped.
 func (p *Priority) SelectedDetail() (PriorityDetailKind, string) {
 	switch p.activeSubtab {
 	case subtabUsers:
@@ -606,7 +608,6 @@ func (p *Priority) View() string {
 }
 
 // subtabHeader renders the Priority header with the active sub-tab highlighted.
-// Ports PriorityOverviewTab._update_subtab_header.
 func (p *Priority) subtabHeader() string {
 	title := p.styles.Title.Render("Priority")
 	tabs := []string{

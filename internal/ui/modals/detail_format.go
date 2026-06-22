@@ -12,14 +12,14 @@ import (
 )
 
 // fieldCategory is a titled group of field keys rendered together in a detail
-// modal, porting the JOB_CATEGORIES / SACCT_CATEGORIES / NODE_CATEGORIES maps in
-// stoei/slurm/formatters.py.
+// modal. The category lists below define the order in which known fields appear.
 type fieldCategory struct {
 	title  string
 	fields []string
 }
 
-// scontrolJobCategories ports formatters.JOB_CATEGORIES (scontrol show jobid).
+// scontrolJobCategories groups the fields of "scontrol show jobid" output into
+// the titled sections shown in the job-detail modal.
 var scontrolJobCategories = []fieldCategory{
 	{"Identity", []string{"JobId", "JobName", "UserId", "GroupId", "Account", "QOS"}},
 	{"Status", []string{"JobState", "Reason", "ExitCode", "DerivedExitCode", "RunTime", "TimeLimit", "Restarts", "Requeue"}},
@@ -30,7 +30,8 @@ var scontrolJobCategories = []fieldCategory{
 	{"Scheduling", []string{"Priority", "Nice", "Contiguous", "Licenses", "Network", "Power", "NtasksPerN:B:S:C", "CoreSpec", "Shared", "OverSubscribe"}},
 }
 
-// sacctFieldDisplay ports formatters.SACCT_FIELD_DISPLAY (sacct -> display name).
+// sacctFieldDisplay maps raw sacct field keys to friendlier display labels for
+// the historical (completed-job) detail view.
 var sacctFieldDisplay = map[string]string{
 	"JobID": "Job ID", "JobName": "Job Name", "User": "User", "Account": "Account",
 	"Partition": "Partition", "State": "State", "ExitCode": "Exit Code",
@@ -42,7 +43,8 @@ var sacctFieldDisplay = map[string]string{
 	"Priority": "Priority", "QOS": "QOS",
 }
 
-// sacctJobCategories ports formatters.SACCT_CATEGORIES (sacct fallback).
+// sacctJobCategories groups sacct fields into titled sections, used as the
+// fallback layout when a job has completed and only historical data is available.
 var sacctJobCategories = []fieldCategory{
 	{"Identity", []string{"JobID", "JobName", "User", "Account", "QOS"}},
 	{"Status", []string{"State", "ExitCode", "Priority"}},
@@ -52,7 +54,8 @@ var sacctJobCategories = []fieldCategory{
 	{"Paths", []string{"WorkDir", "StdOut", "StdErr"}},
 }
 
-// nodeCategories ports formatters.NODE_CATEGORIES (scontrol show node).
+// nodeCategories groups the fields of "scontrol show node" output into the
+// titled sections shown in the node-detail modal.
 var nodeCategories = []fieldCategory{
 	{"Identity", []string{"NodeName", "NodeAddr", "NodeHostName", "Arch", "OS", "Version"}},
 	{"Status", []string{"State", "Reason", "Owner", "MCS_label"}},
@@ -63,12 +66,13 @@ var nodeCategories = []fieldCategory{
 	{"Power", []string{"CurrentWatts", "AveWatts"}},
 }
 
-// labelWidth is the dotted-leader field-label width, porting the ":.<24" padding
-// used throughout formatters.py.
+// labelWidth is the width each field label is padded to with trailing dots so
+// values align in a column.
 const labelWidth = 24
 
 // formatJobDetail renders a JobDetail's fields, choosing the scontrol or sacct
-// category set from its Source. Ports format_job_info / format_sacct_job_info.
+// category set from its Source. An sacct source (a completed job) gets a
+// historical-data header above the categorized fields.
 func formatJobDetail(detail store.JobDetail, styles theme.Styles) string {
 	if len(detail.Fields) == 0 {
 		return styles.Subtle.Render("No job information could be parsed.")
@@ -81,8 +85,7 @@ func formatJobDetail(detail store.JobDetail, styles theme.Styles) string {
 	return formatCategorized(detail.Fields, scontrolJobCategories, nil, styles)
 }
 
-// formatNodeDetail renders a node's scontrol fields by category. Ports
-// format_node_info.
+// formatNodeDetail renders a node's scontrol fields grouped by category.
 func formatNodeDetail(detail store.JobDetail, styles theme.Styles) string {
 	if len(detail.Fields) == 0 {
 		return styles.Subtle.Render("No node information could be parsed.")
@@ -92,8 +95,7 @@ func formatNodeDetail(detail store.JobDetail, styles theme.Styles) string {
 
 // formatCategorized renders fields grouped by category, then any remaining
 // uncategorized fields under "Other" in sorted order. display optionally maps a
-// field key to a friendlier label. Ports the shared category-rendering loop in
-// formatters.py.
+// field key to a friendlier label.
 func formatCategorized(fields map[string]string, categories []fieldCategory, display map[string]string, styles theme.Styles) string {
 	var lines []string
 	seen := map[string]struct{}{}
@@ -144,15 +146,14 @@ func formatCategorized(fields map[string]string, categories []fieldCategory, dis
 }
 
 // formatFieldLine renders one "label.......... value" line, coloring the value by
-// the field key. Ports the per-line formatting in formatters.py (the dotted
-// leader plus format_value coloring).
+// the field key via colorFieldValue.
 func formatFieldLine(label, key, value string, styles theme.Styles) string {
 	leader := dottedLabel(label, labelWidth)
 	return "  " + styles.Subtle.Render(leader) + " " + colorFieldValue(key, value, styles)
 }
 
-// dottedLabel renders a label padded out to width with trailing dots, porting the
-// Python "{label:.<24}" format spec.
+// dottedLabel renders a label left-aligned and padded out to width with trailing
+// dots (a dotted leader); labels at or over width are returned unchanged.
 func dottedLabel(label string, width int) string {
 	if len(label) >= width {
 		return label
@@ -160,7 +161,10 @@ func dottedLabel(label string, width int) string {
 	return label + strings.Repeat(".", width-len(label))
 }
 
-// colorFieldValue colors a field value by key, porting formatters.format_value.
+// colorFieldValue colors a field value by its key: states get their role color,
+// exit codes go green for 0:0 and red otherwise, paths are italicized, time
+// fields are warning-colored, counts are bolded, and TRES/Gres are green. Empty
+// or placeholder values render as a subdued "(not set)".
 func colorFieldValue(key, value string, styles theme.Styles) string {
 	if value == "" || value == "(null)" || value == "N/A" || value == "None" {
 		return styles.Subtle.Render("(not set)")
@@ -200,8 +204,8 @@ func stateStyle(state string, styles theme.Styles) lipgloss.Style {
 }
 
 // stdoutStderrPaths extracts the stdout and stderr log paths from a job detail's
-// fields, trying the scontrol keys then the sacct keys. Ports the StdOut/StdErr
-// extraction get_job_info_and_log_paths performs for the JobInfoScreen.
+// fields, preferring the scontrol keys (StdOut/StdErr) and falling back to the
+// sacct keys (StdOutPath/StdErrPath).
 func stdoutStderrPaths(fields map[string]string) (stdout, stderr string) {
 	stdout = firstNonEmpty(fields["StdOut"], fields["StdOutPath"])
 	stderr = firstNonEmpty(fields["StdErr"], fields["StdErrPath"])

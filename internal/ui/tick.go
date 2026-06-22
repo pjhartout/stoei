@@ -7,8 +7,8 @@ import (
 )
 
 // Default refresh intervals. The fast tier drives squeue-based sections; the slow
-// tier (4x the fast interval) drives the heavy batch sections. Phase 6 sources
-// these from config; here they are the locked defaults.
+// tier (4x the fast interval) drives the heavy batch sections. These are the
+// fallback defaults; the live intervals are derived from the user config.
 const (
 	defaultFastInterval = 5 * time.Second
 	slowIntervalFactor  = 4

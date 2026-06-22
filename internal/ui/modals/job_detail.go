@@ -38,10 +38,9 @@ type jobDetailLoadedMsg struct {
 // JobDetail is the scrollable job-detail modal opened by Enter on a Jobs row or
 // by the "i" job-id prompt. It fetches client.JobDetail in a Cmd (non-blocking,
 // spinner while loading), renders the scontrol/sacct fields by category, and
-// offers o/e to open the job's stdout/stderr in the log viewer. Ports
-// JobInfoScreen plus the cache-backed fetch in DetailController. The cache and
-// the live job state are supplied by the root so the modal stays a pure view of
-// one job.
+// offers o/e to open the job's stdout/stderr in the log viewer. The cache and the
+// live job state are supplied by the root so the modal stays a pure view of one
+// job.
 type JobDetail struct {
 	styles theme.Styles
 	client store.SlurmClient
@@ -63,7 +62,7 @@ type JobDetail struct {
 
 // NewJobDetail builds a job-detail modal for jobID at live state. The cache is
 // consulted on Init: a fresh entry for the same state shows instantly, otherwise
-// a fetch Cmd runs with a spinner. Ports DetailController.fetch_and_display_job_info.
+// a fetch Cmd runs with a spinner.
 func NewJobDetail(client store.SlurmClient, cache *JobDetailCache, styles theme.Styles, jobID, state string) *JobDetail {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
@@ -95,7 +94,7 @@ func (d *JobDetail) Init() tea.Cmd {
 	return tea.Batch(d.fetchCmd(), d.spin.Tick)
 }
 
-// fetchCmd loads the job detail off the main loop (I1) and reports it as a
+// fetchCmd loads the job detail off the main loop and reports it as a
 // jobDetailLoadedMsg.
 func (d *JobDetail) fetchCmd() tea.Cmd {
 	client := d.client
@@ -155,8 +154,8 @@ func (d *JobDetail) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 }
 
 // applyLoaded renders a freshly fetched detail, caches it under the live state,
-// and extracts the log paths. Ports the cache write in
-// DetailController.fetch_and_display_job_info.
+// and extracts the log paths. A fetch error is cached too (keyed by state) so a
+// failed lookup is not re-attempted on every open while the state is unchanged.
 func (d *JobDetail) applyLoaded(msg jobDetailLoadedMsg) {
 	d.loading = false
 	if msg.err != nil {
@@ -179,8 +178,9 @@ func (d *JobDetail) applyLoaded(msg jobDetailLoadedMsg) {
 	})
 }
 
-// openLog emits an OpenLogMsg for path when it is usable; otherwise it is a no-op
-// (the root toasts "no path"). Ports JobInfoScreen._open_log.
+// openLog emits an OpenLogMsg for path. When the path is empty it emits an
+// OpenLogMsg with an empty Path so the root can toast "no path" rather than
+// pushing an empty viewer.
 func (d *JobDetail) openLog(path, label string) tea.Cmd {
 	p := firstNonEmpty(path)
 	if p == "" {

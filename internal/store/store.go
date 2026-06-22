@@ -21,7 +21,8 @@ const (
 	StateError
 )
 
-// String returns the lowercase state name, matching the Python load-state labels.
+// String returns the lowercase state name ("idle", "loading", "loaded",
+// "error").
 func (s State) String() string {
 	switch s {
 	case StateIdle:
@@ -375,7 +376,7 @@ func (s *Store) EnergyStats() []UserEnergyStats {
 }
 
 // RunningUserStats returns the per-user running-job summary derived from the
-// all-users jobs, excluding pending jobs to match app.py's running aggregation.
+// all-users jobs, excluding pending jobs.
 func (s *Store) RunningUserStats() []UserStats {
 	return AggregateUserStats(RunningUserJobs(s.AllUsersJobs))
 }

@@ -7,16 +7,15 @@ import (
 	"github.com/pjhartout/stoei/internal/slurm"
 )
 
-// runningStates classifies whether a job state is a running (non-pending) state.
-// Ports the PENDING/PD exclusion used by app._compute_user_overview_cache before
-// calling aggregate_user_stats.
+// isPendingState reports whether a job state is pending, recognizing both the
+// long form "PENDING" and squeue's "PD" abbreviation.
 func isPendingState(state string) bool {
 	s := strings.ToUpper(strings.TrimSpace(state))
 	return s == "PENDING" || s == "PD"
 }
 
 // RunningUserJobs returns the all-users jobs filtered to running (non-pending)
-// states, matching the filter app.py applies before aggregate_user_stats.
+// states, the input expected by the running-job aggregation.
 func RunningUserJobs(jobs []slurm.AllUsersJob) []slurm.AllUsersJob {
 	out := make([]slurm.AllUsersJob, 0, len(jobs))
 	for _, j := range jobs {
@@ -28,8 +27,7 @@ func RunningUserJobs(jobs []slurm.AllUsersJob) []slurm.AllUsersJob {
 	return out
 }
 
-// UserPendingStats is per-user pending-job resource usage, array-expanded. Ports
-// usage_stats.UserPendingStats.
+// UserPendingStats is per-user pending-job resource usage, array-expanded.
 type UserPendingStats struct {
 	Username        string
 	PendingJobCount int
@@ -50,8 +48,7 @@ type pendingAccumulator struct {
 
 // AggregatePendingUserStats aggregates pending jobs into per-user statistics,
 // expanding array jobs so each task counts once, sorted by pending CPUs
-// descending (ties broken by username for determinism). Ports
-// UserOverviewTab.aggregate_pending_user_stats.
+// descending (ties broken by username for determinism).
 func AggregatePendingUserStats(jobs []slurm.AllUsersJob) []UserPendingStats {
 	byUser := map[string]*pendingAccumulator{}
 

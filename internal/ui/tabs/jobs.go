@@ -34,17 +34,15 @@ type JobsKeyMap struct {
 // keys package while still being able to switch filter/sort bindings per preset.
 const EmacsMode = "emacs"
 
-// defaultJobsKeys returns the Jobs-tab bindings for the default (vim) preset,
-// porting the "/" filter and "o" sort bindings from filterable_table.BINDINGS.
+// defaultJobsKeys returns the Jobs-tab bindings for the default (vim) preset:
+// "/" to filter and "o" to cycle the sort.
 func defaultJobsKeys() JobsKeyMap {
 	return jobsKeysForMode("")
 }
 
 // jobsKeysForMode returns the tab-local filter/sort/clear bindings for the active
 // keybinding preset. The vim preset uses "/" filter, "o" sort, and esc clear; the
-// emacs preset rebinds FILTER_SHOW=ctrl+s, SORT_CYCLE=ctrl+o, and
-// FILTER_CLEAR=ctrl+g, porting keybindings._create_emacs_preset. Modal-internal
-// keys (log viewer, job detail) remain on their vim literals (documented).
+// emacs preset rebinds them to ctrl+s filter, ctrl+o sort, and ctrl+g clear.
 func jobsKeysForMode(mode string) JobsKeyMap {
 	if mode == EmacsMode {
 		return JobsKeyMap{
@@ -60,8 +58,8 @@ func jobsKeysForMode(mode string) JobsKeyMap {
 	}
 }
 
-// markupPattern strips any leftover bracket markup from a cell before it is used
-// for filtering or sorting, mirroring filterable_table._RICH_MARKUP_PATTERN.
+// markupPattern strips any leftover bracket markup (e.g. "[red]…[/red]") from a
+// cell before it is used for filtering, sorting, or cursor restoration.
 var markupPattern = regexp.MustCompile(`\[.*?\]`)
 
 // Jobs is the live running-jobs tab. It renders a bubbles/v2 table from the
@@ -387,9 +385,9 @@ func (j *Jobs) selectedJobID() string {
 	return strings.TrimSpace(markupPattern.ReplaceAllString(row[0], ""))
 }
 
-// reselect restores the table cursor to the row whose job id matches id (I6).
-// When the id is no longer present the prior cursor index is clamped into range,
-// matching filterable_table's by-key-then-by-position restoration.
+// reselect restores the table cursor to the row whose stable first-column key
+// matches id. When the id is no longer present the prior cursor index is clamped
+// into range, so restoration falls back from by-key to by-position.
 func reselect(t *table.Model, sorted [][]string, id string) {
 	if len(sorted) == 0 {
 		return
@@ -437,7 +435,7 @@ func (j *Jobs) View() string {
 }
 
 // banner renders the "My Usage" summary line for the current user from the
-// store's running-user statistics. Ports TableController.update_my_usage_summary.
+// store's running-user statistics.
 func (j *Jobs) banner() string {
 	return store.MyUsageSummary(j.store.RunningUserStats(), j.username)
 }

@@ -12,14 +12,13 @@ import (
 	"github.com/pjhartout/stoei/internal/slurm"
 )
 
-// tdpValuesJSON is the embedded copy of stoei/data/tdp_values.json. Keeping a
-// copy in the package keeps the binary self-contained and the derive logic pure.
+// tdpValuesJSON is the embedded copy of the TDP lookup table. Keeping a copy in
+// the package keeps the binary self-contained and the derive logic pure.
 //
 //go:embed tdp_values.json
 var tdpValuesJSON []byte
 
-// Fallback TDP values, used if the embedded JSON cannot be parsed. They mirror
-// energy._FALLBACK_DEFAULT_GPU_TDP and _FALLBACK_CPU_TDP_PER_CORE.
+// Fallback TDP values, used if the embedded JSON cannot be parsed.
 const (
 	fallbackDefaultGPUTDP = 300
 	fallbackCPUTDPPerCore = 10
@@ -28,7 +27,8 @@ const (
 // secondsPerHour is the conversion factor used by the energy calculations.
 const secondsPerHour = 3600.0
 
-// Energy unit thresholds in Watt-hours, matching energy.ENERGY_*_THRESHOLD.
+// Energy unit thresholds in Watt-hours, at or above which FormatEnergy scales the
+// value into GWh / MWh / kWh respectively.
 const (
 	energyGWhThreshold = 1_000_000_000.0
 	energyMWhThreshold = 1_000_000.0
@@ -48,7 +48,7 @@ type tdpTable struct {
 var tdp = loadTDP()
 
 // loadTDP parses the embedded tdp_values.json into a tdpTable, falling back to
-// the constant defaults on any error. It ports energy._load_tdp_values.
+// the constant defaults on any error.
 func loadTDP() tdpTable {
 	t := tdpTable{
 		gpu:        map[string]int{},
@@ -109,8 +109,8 @@ func orderedObject(data []byte) []orderedKV {
 
 // parseGPUSection flattens the (possibly nested) GPU section into t.gpu and reads
 // the _default value, preserving JSON declaration order in t.orderedModels so the
-// partial-substring scan in GetGPUTDP matches the Python loader's insertion-order
-// iteration (e.g. A100 is tried before A10).
+// partial-substring scan in GetGPUTDP tries a more specific model before a shorter
+// substring (e.g. A100 before A10).
 func parseGPUSection(gpuRaw json.RawMessage, t *tdpTable) {
 	for _, e := range orderedObject(gpuRaw) {
 		if e.key == "_default" {
@@ -147,9 +147,8 @@ func (t *tdpTable) addModel(model string, tdpW int) {
 }
 
 // intValue reports the integer value of a JSON number that is an exact integer.
-// Floats and non-numbers return ok=false, matching the Python loader's
-// isinstance(value, int) check (Python bools would also pass isinstance int, but
-// the data never contains bools).
+// Floats and non-numbers return ok=false, so only whole-Watt TDP entries are
+// accepted.
 func intValue(raw json.RawMessage) (int, bool) {
 	if len(raw) == 0 {
 		return 0, false
@@ -162,11 +161,11 @@ func intValue(raw json.RawMessage) (int, bool) {
 	return n, true
 }
 
-// GetGPUTDP returns the TDP in Watts for a GPU type, matching energy.get_gpu_tdp:
-// exact (case-insensitive) match, then prefix-stripped match, then a partial
+// GetGPUTDP returns the TDP in Watts for a GPU type, resolved in order: exact
+// (case-insensitive) match, then vendor-prefix-stripped match, then a partial
 // substring match, then the default. The partial match scans models in JSON
-// declaration order (matching Python's insertion-order iteration), so a more
-// specific model like A100 is tried before a shorter substring like A10.
+// declaration order, so a more specific model like A100 is tried before a shorter
+// substring like A10.
 func GetGPUTDP(gpuType string) int {
 	if gpuType == "" {
 		return tdp.defaultGPU
@@ -195,12 +194,11 @@ func GetGPUTDP(gpuType string) int {
 	return tdp.defaultGPU
 }
 
-// CPUTDPPerCore returns the per-core CPU TDP in Watts. Ports
-// energy.get_cpu_tdp_per_core.
+// CPUTDPPerCore returns the per-core CPU TDP in Watts.
 func CPUTDPPerCore() int { return tdp.cpuPerCore }
 
 // CalculateJobEnergyWh estimates a job's energy use in Watt-hours assuming 100%
-// utilization for the whole duration. Ports energy.calculate_job_energy_wh.
+// utilization for the whole duration. A non-positive duration yields 0.
 func CalculateJobEnergyWh(gpuCount int, gpuType string, cpuCount int, durationSeconds float64) float64 {
 	if durationSeconds <= 0 {
 		return 0
@@ -216,9 +214,10 @@ func CalculateJobEnergyWh(gpuCount int, gpuType string, cpuCount int, durationSe
 	return gpuEnergy + cpuEnergy
 }
 
-// FormatEnergy renders a Watt-hour value with auto-scaling units, matching
-// energy.format_energy exactly (Wh / kWh / MWh / GWh, with the same precision per
-// tier and the "0 Wh" clamp for negatives).
+// FormatEnergy renders a Watt-hour value with auto-scaling units (Wh / kWh / MWh /
+// GWh). Each tier has its own precision (two decimals for GWh and MWh, one for
+// kWh, none for whole Wh and two for sub-Wh values), and negatives clamp to
+// "0 Wh".
 func FormatEnergy(wh float64) string {
 	if wh < 0 {
 		return "0 Wh"
@@ -237,8 +236,7 @@ func FormatEnergy(wh float64) string {
 	}
 }
 
-// UserEnergyStats is per-user energy usage over a historical period. Ports the
-// usage_stats.UserEnergyStats dataclass.
+// UserEnergyStats is per-user energy usage over a historical period.
 type UserEnergyStats struct {
 	Username      string
 	TotalEnergyWh float64
@@ -249,7 +247,7 @@ type UserEnergyStats struct {
 
 // AggregateEnergyStats aggregates energy-history records into per-user energy
 // statistics, sorted by total energy descending (ties broken by username for
-// determinism). Ports UserOverviewTab.aggregate_energy_stats.
+// determinism).
 //
 // For each record: parse elapsed -> seconds (skip if <= 0); CPU count from NCPUS
 // with a TRES fallback; total GPUs from TRES (skipping generic "gpu" when a

@@ -12,8 +12,7 @@ import (
 )
 
 // SidebarMinTermWidth is the terminal-width threshold below which the cluster
-// sidebar auto-hides so the active tab keeps the full frame. Mirrors the Python
-// app's narrow-terminal behavior (the sidebar is removed on small widths).
+// sidebar auto-hides so the active tab keeps the full frame on narrow terminals.
 const SidebarMinTermWidth = 100
 
 // gbPerTB converts gigabytes to terabytes for memory display.
@@ -22,7 +21,7 @@ const gbPerTB = 1024.0
 // Sidebar renders cluster-wide load statistics from the store's derived
 // ClusterStats: free-vs-allocated nodes/CPU/memory/GPU by type, array-expanded
 // pending resources per partition, and per-partition wait-time stats. It renders
-// from data only and never fetches. Ports widgets/cluster_sidebar.py.
+// from data only and never fetches.
 type Sidebar struct {
 	styles theme.Styles
 	stats  store.ClusterStats
@@ -114,7 +113,8 @@ func (s *Sidebar) body() string {
 }
 
 // colorPct renders a "NN.N%" value colored by the inverted free-resource
-// thresholds (high free is good). Ports ClusterSidebar._color_pct.
+// thresholds (high free is good: green at/above the green threshold, yellow
+// above the yellow threshold, red below).
 func (s *Sidebar) colorPct(pct float64) string {
 	style := s.styles.PctStyle(pct, theme.SidebarGreenThreshold, theme.SidebarYellowThreshold, true)
 	return style.Render(fmt.Sprintf("%.1f%%", pct))
@@ -156,8 +156,9 @@ func (s *Sidebar) memorySection() []string {
 	}
 }
 
-// gpuSection renders the GPUs block, by type when types are known. Ports
-// ClusterSidebar._append_gpu_section.
+// gpuSection renders the GPUs block, broken down by GPU type when types are
+// known and falling back to a single total otherwise. The "gpu" type is
+// relabeled "generic".
 func (s *Sidebar) gpuSection() []string {
 	st := s.stats
 	if len(st.GPUsByType) > 0 {
@@ -190,8 +191,8 @@ func (s *Sidebar) gpuSection() []string {
 	return nil
 }
 
-// waitTimeSection renders the per-partition wait-time block. Ports
-// ClusterSidebar._append_wait_time_section.
+// waitTimeSection renders the per-partition wait-time block (mean/median/range
+// for jobs started in the recent window), or nothing when no stats are present.
 func (s *Sidebar) waitTimeSection() []string {
 	st := s.stats
 	if len(st.WaitStatsByPartition) == 0 {
@@ -215,8 +216,8 @@ func (s *Sidebar) waitTimeSection() []string {
 	return append(lines, "")
 }
 
-// pendingSection renders the per-partition pending-queue block. Ports
-// ClusterSidebar._append_pending_queue_section.
+// pendingSection renders the per-partition pending-queue block (job counts and
+// requested CPUs/memory/GPUs), or nothing when there are no pending jobs.
 func (s *Sidebar) pendingSection() []string {
 	st := s.stats
 	if st.PendingJobsCount <= 0 {
@@ -261,7 +262,8 @@ func (s *Sidebar) pendingSection() []string {
 	return lines
 }
 
-// formatMemoryGB renders memory in GB or TB. Ports cluster_sidebar.format_memory_gb.
+// formatMemoryGB renders a memory amount in GB, switching to TB once it reaches
+// one terabyte.
 func formatMemoryGB(memoryGB float64) string {
 	if memoryGB >= gbPerTB {
 		return fmt.Sprintf("%.1f TB", memoryGB/gbPerTB)

@@ -19,7 +19,7 @@ const fetchTimeout = 30 * time.Second
 // Result messages. There is one per dataset; each carries the request generation
 // it was dispatched with (so the store can drop stale results, I4) and an error
 // (so a failure is delivered as data, never a panic, I8). These are tea.Msgs
-// handled by the root model's Update in Phase 3.
+// handled by the root model's Update.
 
 // availabilityMsg carries the result of the one-shot Slurm-availability check
 // fired at startup. A non-nil err means the controller commands are missing and

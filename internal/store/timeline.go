@@ -8,12 +8,11 @@ import (
 
 // timelineNow is the clock used to decide whether a timestamp falls on "today"
 // for the compact format. It is a package var so tests can pin it; production
-// uses time.Now. Ports the datetime.now() call in formatters._format_compact_time.
+// uses time.Now.
 var timelineNow = time.Now
 
 // parseRestarts parses the sacct Restart field into an int, returning 0 when it
-// is not a plain non-negative integer. Ports cache.py's
-// "int(restarts_str) if restarts_str.isdigit() else 0".
+// is not a plain non-negative integer.
 func parseRestarts(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" {
@@ -33,8 +32,7 @@ func parseRestarts(s string) int {
 
 // formatCompactTime formats a SLURM timestamp ("2024-01-15T14:30:00") to a
 // compact display: "HH:MM" if it is today, "MM-DD HH:MM" otherwise. Empty or
-// unparseable input (including the sentinels Unknown/N/A/None) yields "". Ports
-// formatters._format_compact_time.
+// unparseable input (including the sentinels Unknown/N/A/None) yields "".
 func formatCompactTime(ts string) string {
 	t := strings.TrimSpace(ts)
 	switch strings.ToLower(t) {
@@ -60,7 +58,7 @@ func sameDay(a, b time.Time) bool {
 
 // FormatCompactTimeline renders the submit/start/end timestamps into a compact
 // timeline cell for the Jobs table, with a pending hourglass and a "↻ N" requeue
-// indicator. Ports formatters.format_compact_timeline exactly:
+// indicator:
 //   - no submit time -> "—"
 //   - PENDING        -> "submit ⏳"
 //   - RUNNING        -> "submit → start" (or "submit ⏳" when start unknown)

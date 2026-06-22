@@ -3,10 +3,13 @@ package store
 import "strings"
 
 // Fair-share color thresholds shared by the Priority tab and the user/account
-// detail modals so the two views never drift. Port
-// formatters._FAIR_SHARE_SUCCESS_THRESHOLD / _FAIR_SHARE_WARNING_THRESHOLD.
+// detail modals so the two views never drift.
 const (
+	// FairShareSuccessThreshold is the fair-share factor at or above which the
+	// value is colored as healthy ("success").
 	FairShareSuccessThreshold = 0.5
+	// FairShareWarningThreshold is the fair-share factor at or above which the
+	// value is colored as a warning; below it the value is colored as an error.
 	FairShareWarningThreshold = 0.2
 )
 

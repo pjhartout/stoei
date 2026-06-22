@@ -33,8 +33,9 @@ type Modal interface {
 	FullHelp() [][]key.Binding
 }
 
-// closeKeys are the keys that dismiss a simple modal (esc and q). Search-aware
-// modals (the log viewer) handle esc specially and do not use this directly.
+// isCloseKey reports whether a key press dismisses a simple modal (esc or q).
+// Search-aware modals (the log viewer) handle esc specially and do not use this
+// directly.
 func isCloseKey(msg tea.KeyPressMsg) bool {
 	switch msg.String() {
 	case "esc", "q":

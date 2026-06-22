@@ -9,7 +9,6 @@ import (
 )
 
 // PendingPartitionStats holds aggregated pending resources for one partition.
-// Ports cluster_stats.PendingPartitionStats.
 type PendingPartitionStats struct {
 	JobsCount  int
 	CPUs       int
@@ -19,15 +18,14 @@ type PendingPartitionStats struct {
 }
 
 // GPUTotalAlloc is the (total, allocated) GPU count pair stored per GPU type in
-// ClusterStats. It replaces the Python tuple[int, int].
+// ClusterStats.
 type GPUTotalAlloc struct {
 	Total     int
 	Allocated int
 }
 
-// ClusterStats is the derived cluster-wide resource summary. Ports
-// cluster_stats.ClusterStats. The percentage helpers mirror the Python
-// properties.
+// ClusterStats is the derived cluster-wide resource summary. The percentage
+// helper methods compute free-resource ratios from its totals.
 type ClusterStats struct {
 	TotalNodes        int
 	FreeNodes         int
@@ -94,7 +92,7 @@ func (s ClusterStats) GPUTypeFreePct(gpuType string) float64 {
 }
 
 // newClusterStats returns a ClusterStats with all maps initialised and the
-// wait-stats window defaulting to 1 hour, matching the Python dataclass defaults.
+// wait-stats window defaulting to 1 hour.
 func newClusterStats() ClusterStats {
 	return ClusterStats{
 		GPUsByType:           map[string]GPUTotalAlloc{},
@@ -106,10 +104,9 @@ func newClusterStats() ClusterStats {
 }
 
 // DeriveClusterStats computes cluster statistics from nodes, all-users jobs (for
-// pending resources), and wait-time records. It ports
-// cluster_stats.calculate_cluster_stats, preserving the draining-node handling,
-// the CfgTRES/AllocTRES GPU accounting with the Gres fallback, the array-expanded
-// pending aggregation, and the per-partition wait-time stats.
+// pending resources), and wait-time records. It handles draining nodes, GPU
+// accounting from CfgTRES/AllocTRES with a Gres fallback, array-expanded pending
+// aggregation, and per-partition wait-time stats.
 func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob, waitTimeJobs []slurm.WaitTimeRecord) ClusterStats {
 	stats := newClusterStats()
 
@@ -145,7 +142,7 @@ func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob, wa
 }
 
 // parseNodeState updates node counts and returns whether the node is draining
-// (and therefore excluded from totals). Ports cluster_stats.parse_node_state.
+// (and therefore excluded from totals).
 func parseNodeState(state string, stats *ClusterStats) bool {
 	if strings.Contains(state, "DRAIN") {
 		stats.DrainingNodes++
@@ -164,8 +161,7 @@ func parseNodeState(state string, stats *ClusterStats) bool {
 	return false
 }
 
-// parseNodeCPUs adds the node's CPU totals/allocation. Ports
-// cluster_stats.parse_node_cpus.
+// parseNodeCPUs adds the node's CPU totals/allocation.
 func parseNodeCPUs(node slurm.Node, stats *ClusterStats, includeTotal bool) {
 	total, errT := strconv.Atoi(strings.TrimSpace(emptyToZero(node.CPUTot)))
 	alloc, errA := strconv.Atoi(strings.TrimSpace(emptyToZero(node.CPUAlloc)))
@@ -178,8 +174,7 @@ func parseNodeCPUs(node slurm.Node, stats *ClusterStats, includeTotal bool) {
 	stats.AllocatedCPUs += alloc
 }
 
-// parseNodeMemory adds the node's memory totals/allocation in GB. Ports
-// cluster_stats.parse_node_memory.
+// parseNodeMemory adds the node's memory totals/allocation in GB.
 func parseNodeMemory(node slurm.Node, stats *ClusterStats, includeTotal bool) {
 	totalMB, errT := strconv.Atoi(strings.TrimSpace(emptyToZero(node.RealMem)))
 	allocMB, errA := strconv.Atoi(strings.TrimSpace(emptyToZero(node.AllocMem)))
@@ -192,8 +187,8 @@ func parseNodeMemory(node slurm.Node, stats *ClusterStats, includeTotal bool) {
 	stats.AllocatedMemoryGB += float64(allocMB) / memoryMBToGB
 }
 
-// emptyToZero returns "0" for an empty/blank string, mirroring the Python
-// node_data.get(key, "0") default so int parsing succeeds.
+// emptyToZero returns "0" for an empty/blank string so that integer parsing of
+// a missing node field succeeds with a zero value.
 func emptyToZero(s string) string {
 	if strings.TrimSpace(s) == "" {
 		return "0"
@@ -202,8 +197,7 @@ func emptyToZero(s string) string {
 }
 
 // processGPUEntries folds GPU entries into the per-type totals/allocations,
-// skipping generic "gpu" entries when specific models are present. Ports
-// cluster_stats.process_gpu_entries_for_stats.
+// skipping generic "gpu" entries when specific models are present.
 func processGPUEntries(entries []slurm.GPUEntry, stats *ClusterStats, isAllocated bool) {
 	hasSpecific := slurm.HasSpecificGPUTypes(entries)
 	for _, e := range entries {
@@ -223,8 +217,8 @@ func processGPUEntries(entries []slurm.GPUEntry, stats *ClusterStats, isAllocate
 }
 
 // parseGPUsFromGres is the fallback GPU accounting from the Gres field used when
-// TRES data is absent. It estimates allocation from node state. Ports
-// cluster_stats.parse_gpus_from_gres.
+// TRES data is absent. It estimates allocation from node state (an ALLOCATED or
+// MIXED node is treated as having all its GPUs in use).
 func parseGPUsFromGres(node slurm.Node, state string, stats *ClusterStats, includeTotal bool) {
 	entries := slurm.ParseGPUFromGres(node.Gres)
 	for _, e := range entries {
@@ -244,8 +238,7 @@ func parseGPUsFromGres(node slurm.Node, state string, stats *ClusterStats, inclu
 }
 
 // aggregatePending computes pending-job resources, expanding array jobs so that a
-// pending array's resources count once per task. Ports
-// cluster_stats.calculate_pending_resources (including aggregate_pending_gpus).
+// pending array's resources count once per task.
 func aggregatePending(allUsersJobs []slurm.AllUsersJob, stats *ClusterStats) {
 	pendingCPUs := 0
 	pendingMemoryGB := 0.0
@@ -304,7 +297,7 @@ func aggregatePending(allUsersJobs []slurm.AllUsersJob, stats *ClusterStats) {
 	stats.PendingByPartition = pendingByPartition
 }
 
-// UserStats is per-user running-job resource usage. Ports usage_stats.UserStats.
+// UserStats is per-user running-job resource usage.
 type UserStats struct {
 	Username      string
 	JobCount      int
@@ -330,11 +323,9 @@ type userAccumulator struct {
 	plainJobCount int
 }
 
-// AggregateUserStats aggregates running/all-users job rows into per-user
-// statistics. Ports UserOverviewTab.aggregate_user_stats and its
-// _process_job_for_user / _convert_to_user_stats helpers. The job rows use the
-// AllUsersJob nine-field shape (id, name, user, partition, state, time, nodes,
-// nodelist, tres).
+// AggregateUserStats aggregates all-users job rows into per-user statistics,
+// folding each job's CPU/memory/GPU/node usage into its owner's totals and
+// classifying it as an array task or a plain job.
 func AggregateUserStats(jobs []slurm.AllUsersJob) []UserStats {
 	byUser := map[string]*userAccumulator{}
 
@@ -373,8 +364,7 @@ func AggregateUserStats(jobs []slurm.AllUsersJob) []UserStats {
 	return out
 }
 
-// processJobForUser folds a single job row into a user's accumulator. Ports
-// UserOverviewTab._process_job_for_user.
+// processJobForUser folds a single job row into a user's accumulator.
 func processJobForUser(acc *userAccumulator, job slurm.AllUsersJob) {
 	acc.jobCount++
 
@@ -410,7 +400,7 @@ func processJobForUser(acc *userAccumulator, job slurm.AllUsersJob) {
 }
 
 // parseNodeCount parses a node count that may be a single number ("4") or a
-// range ("4-8", meaning 5 nodes). Ports UserOverviewTab._parse_node_count.
+// range ("4-8", meaning 5 nodes).
 func parseNodeCount(nodesStr string) int {
 	if strings.Contains(nodesStr, "-") {
 		parts := strings.Split(nodesStr, "-")
@@ -441,8 +431,7 @@ func joinSorted(set map[string]struct{}) string {
 }
 
 // MyUsageSummary renders the Jobs-tab "My Usage" banner for the given username
-// from the running-job user statistics. Ports
-// TableController.update_my_usage_summary. When the user has no running jobs it
+// from the running-job user statistics. When the user has no running jobs it
 // returns the "No running jobs" message.
 func MyUsageSummary(users []UserStats, username string) string {
 	var mine *UserStats

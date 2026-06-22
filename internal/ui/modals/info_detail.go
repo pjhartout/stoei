@@ -10,14 +10,14 @@ import (
 
 // InfoDetail is a generic scrollable detail modal whose content is rendered
 // synchronously from the store (no async fetch). It backs the user and account
-// detail modals, porting GenericInfoScreen / UserInfoScreen / AccountInfoScreen.
+// detail modals.
 type InfoDetail struct {
 	box scrollBox
 }
 
-// NewUserDetail builds a user-detail modal from the store. Ports UserInfoScreen +
-// DetailController.show_user_info (the aggregation is done against the store's
-// already-fetched all-users / fair-share / energy / priority data).
+// NewUserDetail builds a user-detail modal from the store. The content is
+// aggregated against the store's already-fetched all-users, fair-share, energy,
+// and priority data, so no further IO is needed.
 func NewUserDetail(st *store.Store, styles theme.Styles, username string) *InfoDetail {
 	d := &InfoDetail{box: newScrollBox(styles)}
 	d.box.SetTitle("User Details — " + username)
@@ -26,8 +26,8 @@ func NewUserDetail(st *store.Store, styles theme.Styles, username string) *InfoD
 	return d
 }
 
-// NewAccountDetail builds an account-detail modal from the store. Ports
-// AccountInfoScreen + DetailController.show_account_info.
+// NewAccountDetail builds an account-detail modal from the store's already-fetched
+// data.
 func NewAccountDetail(st *store.Store, styles theme.Styles, account string) *InfoDetail {
 	d := &InfoDetail{box: newScrollBox(styles)}
 	d.box.SetTitle("Account Details — " + account)

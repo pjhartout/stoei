@@ -13,8 +13,7 @@ type GPUEntry struct {
 }
 
 // AllUsersJob is one RUNNING or PENDING job across all users, as returned by the
-// fixed-width "squeue -O" command. It mirrors the nine-tuple produced by the
-// Python parser in commands.py (_parse_fixed_width_squeue_line).
+// fixed-width "squeue -O" command and parsed by ParseAllUsersJobs.
 type AllUsersJob struct {
 	ID        string
 	Name      string
@@ -28,8 +27,8 @@ type AllUsersJob struct {
 }
 
 // UserJob is one RUNNING or PENDING job for a single user, as returned by the
-// fixed-width "squeue -O" command without the UserName column. It mirrors the
-// eight-tuple produced by get_user_jobs in commands.py.
+// fixed-width "squeue -O" command without the UserName column and parsed by
+// ParseUserJobs.
 type UserJob struct {
 	ID        string
 	Name      string
@@ -76,7 +75,7 @@ type HistoryJob struct {
 }
 
 // HistoryStats are the aggregate requeue counters derived from a job-history
-// query, matching the trailing return values of Python's parse_sacct_output.
+// query, returned alongside the parsed jobs by ParseHistory.
 type HistoryStats struct {
 	TotalJobs     int
 	TotalRequeues int
@@ -108,9 +107,9 @@ type JobDetail struct {
 	Source string
 }
 
-// FairShareEntry is one row of "sshare" output. It mirrors the eight SSHARE_FIELDS
-// columns. An entry with an empty User is an account-level row; otherwise it is a
-// user-level row.
+// FairShareEntry is one row of "sshare" output, holding its eight columns. An
+// entry with an empty User is an account-level row; otherwise it is a user-level
+// row.
 type FairShareEntry struct {
 	Account      string
 	User         string
@@ -122,12 +121,11 @@ type FairShareEntry struct {
 	FairShare    string
 }
 
-// IsAccount reports whether the entry is an account-level row (no User set),
-// matching the split performed by parse_sshare_output in parser.py.
+// IsAccount reports whether the entry is an account-level row (no User set).
 func (e FairShareEntry) IsAccount() bool { return e.User == "" }
 
-// PriorityEntry is one pending job's priority breakdown from "sprio". It mirrors
-// the nine SPRIO_FIELDS columns.
+// PriorityEntry is one pending job's priority breakdown from "sprio", holding its
+// nine columns.
 type PriorityEntry struct {
 	JobID     string
 	User      string
@@ -140,9 +138,9 @@ type PriorityEntry struct {
 	QOS       string
 }
 
-// EnergyRecord is one completed job from the energy-history sacct query. It
-// mirrors the six ENERGY_HISTORY_FIELDS columns. Only jobs whose base state is in
-// EnergyValidStates are returned.
+// EnergyRecord is one completed job from the energy-history sacct query, holding
+// its six columns. Only jobs whose base state is in energyValidStates are
+// returned.
 type EnergyRecord struct {
 	JobID     string
 	User      string
@@ -153,8 +151,8 @@ type EnergyRecord struct {
 }
 
 // WaitTimeRecord is one job from the wait-time sacct query with usable submit and
-// start timestamps. It mirrors the five WAIT_TIME_FIELDS columns. Pending jobs
-// (those without a real Start time) are filtered out before this is produced.
+// start timestamps, holding its five columns. Pending jobs (those without a real
+// Start time) are filtered out before this is produced.
 type WaitTimeRecord struct {
 	JobID     string
 	Partition string

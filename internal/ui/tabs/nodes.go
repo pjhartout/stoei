@@ -12,8 +12,9 @@ import (
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
 
-// nodeColumns are the Nodes-tab columns in render order. Ports
-// NodeOverviewTab.NODE_TABLE_COLUMN_CONFIGS.
+// nodeColumns are the Nodes-tab columns in render order: node name, state, CPU
+// allocation and percent, memory allocation and percent, GPU allocation, percent
+// and types, partitions, and the drain reason.
 var nodeColumns = []column{
 	{key: "node", title: "Node", width: 12},
 	{key: "state", title: "State", width: 9},
@@ -39,8 +40,7 @@ var (
 // Nodes is the per-node overview tab. It renders a filterable, sortable table of
 // every cluster node from the store's derived NodeDisplays: CPU/memory/GPU
 // allocation versus total with colored usage percentages, GPU types, partitions,
-// and the drain Reason. Coloring of the State and percent columns ports
-// node_overview.py (_format_state / _format_pct).
+// and the drain Reason. The State and percent columns are colored by their value.
 type Nodes struct {
 	store    *store.Store
 	styles   theme.Styles
@@ -88,9 +88,9 @@ func (n *Nodes) Refresh() {
 	n.status.observe(n.store.State(store.SectionNodes), n.rowCount > 0)
 }
 
-// nodeRow builds the plain (markup-free) cell values for one node. Ports the row
-// formatting in NodeOverviewTab.update_nodes, including the "N/A" GPU display for
-// GPU-less nodes.
+// nodeRow builds the plain (markup-free) cell values for one node, formatting
+// allocation/total fractions and showing "N/A" for the GPU columns on GPU-less
+// nodes.
 func nodeRow(d store.NodeDisplay) []string {
 	cpuDisplay := fmt.Sprintf("%d/%d", d.CPUsAlloc, d.CPUsTotal)
 	memDisplay := fmt.Sprintf("%.1f/%.1f GB", d.MemoryAllocGB, d.MemoryTotalGB)
@@ -120,7 +120,7 @@ func nodeRow(d store.NodeDisplay) []string {
 }
 
 // decorate colors the State cell and the three percent cells. Percent coloring
-// uses the high-is-bad thresholds (90/70) from node_overview._format_pct.
+// uses the high-is-bad thresholds (red at/above 90, yellow at/above 70).
 func (n *Nodes) decorate(plain []string, styles theme.Styles) table.Row {
 	row := make(table.Row, len(plain))
 	copy(row, plain)

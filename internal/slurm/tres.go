@@ -6,8 +6,8 @@ import (
 	"strings"
 )
 
-// tresCPU and tresMem port the pre-compiled patterns in parser.py. tresMem
-// captures the numeric value and a G/M/T unit.
+// tresCPU matches the CPU count in a TRES string; tresMem captures the memory's
+// numeric value and a G/M/T unit.
 var (
 	tresCPU = regexp.MustCompile(`(?i)cpu=(\d+)`)
 	tresMem = regexp.MustCompile(`(?i)mem=(\d+)([GMT])`)
@@ -22,8 +22,7 @@ type TRESResources struct {
 
 // ParseTRESResources extracts CPU count, memory in GB, and GPU entries from a
 // TRES string such as "cpu=32,mem=256G,node=4,gres/gpu:h200=8". It is the
-// canonical TRES parser, porting parser.parse_tres_resources. Missing or
-// unparseable fields default to zero values.
+// canonical TRES parser. Missing or unparseable fields default to zero values.
 func ParseTRESResources(tres string) TRESResources {
 	res := TRESResources{}
 	if strings.TrimSpace(tres) == "" {
@@ -54,7 +53,7 @@ func ParseTRESResources(tres string) TRESResources {
 }
 
 // ParseCPUCountFromTRES returns just the CPU count from a TRES string, or 0 if
-// absent. It ports energy.parse_cpu_count_from_tres.
+// absent.
 func ParseCPUCountFromTRES(tres string) int {
 	if tres == "" {
 		return 0

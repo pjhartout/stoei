@@ -98,22 +98,22 @@ func (s Styles) TitleGradient(text string) string {
 	return GradientText(text, s.Accent, s.AccentAlt, true)
 }
 
-// DefaultThemeName is the default palette name, matching config.DefaultTheme.
-// nord is a calm Nord-style frost/polar-night scheme.
+// DefaultThemeName is the palette used when no theme is configured or a
+// requested name is unknown. nord is a calm Nord-style frost/polar-night scheme.
 const DefaultThemeName = "nord"
 
 // solid wraps a single hex color as an AdaptiveColor whose light and dark
-// variants are identical. The ported OpenCode palettes are dark-first single
-// colors (themes.py uses dark=True with one value per role), so light and dark
-// resolve to the same color; the charm palette keeps distinct light/dark pairs.
+// variants are identical. The OpenCode palettes are dark-first single colors
+// (one value per role), so light and dark resolve to the same color; the charm
+// palette keeps distinct light/dark pairs.
 func solid(hex string) AdaptiveColor {
 	c := lipgloss.Color(hex)
 	return AdaptiveColor{Light: c, Dark: c}
 }
 
 // palettes is the registry of named themes, keyed by theme id. It is built from
-// the OpenCode palettes ported from themes.py plus the original charm palette.
-// Roles map from the OpenCode palette: Accent←primary, AccentAlt←accent,
+// the OpenCode palettes plus the original charm palette. Each OpenCode palette
+// maps its source roles onto Theme roles: Accent←primary, AccentAlt←accent,
 // Text←text_base, Subtle←text_muted, Border←border, Error/Success/Warning from
 // the semantic colors, Muted←secondary.
 var palettes = func() map[string]Theme {
@@ -141,8 +141,8 @@ var palettes = func() map[string]Theme {
 }()
 
 // opencode builds a Theme from an OpenCode-style palette of single hex colors
-// (dark-first; light and dark variants are identical). Ports
-// themes.OpencodeThemePalette → role mapping.
+// (dark-first; light and dark variants are identical), mapping the palette's
+// roles onto the Theme fields.
 func opencode(name, primary, accent, text, muted, border, errc, success, warning, secondary string) Theme {
 	return Theme{
 		Name:      name,
@@ -158,9 +158,8 @@ func opencode(name, primary, accent, text, muted, border, errc, success, warning
 	}
 }
 
-// ByName returns the named palette, falling back to the default (oc-1) for an
-// unknown name. Ports the THEME_LABELS lookup with the DEFAULT_THEME_NAME
-// fallback in settings.from_mapping.
+// ByName returns the named palette, falling back to DefaultThemeName for an
+// unknown name.
 func ByName(name string) Theme {
 	if t, ok := palettes[name]; ok {
 		return t
@@ -168,8 +167,8 @@ func ByName(name string) Theme {
 	return palettes[DefaultThemeName]
 }
 
-// Names returns the registered theme names in a stable, registry-insertion-free
-// order matching the config ValidThemes/cycling order the settings form uses.
+// Names returns the registered theme names in a stable order independent of map
+// iteration, matching the cycling order the settings form uses.
 func Names() []string {
 	return []string{
 		"oc-1",
@@ -190,8 +189,8 @@ func Names() []string {
 }
 
 // Charm returns the default charm.land-flavored palette. It retains distinct
-// light/dark variants (the only adaptive palette); the ported OpenCode palettes
-// are dark-first.
+// light/dark variants (the only adaptive palette); the OpenCode palettes are
+// dark-first.
 func Charm() Theme {
 	return Theme{
 		Name:      "charm",
@@ -260,7 +259,7 @@ func BuildStyles(t Theme, dark bool) Styles {
 	}
 }
 
-// Default percent-color thresholds, mirroring colors.ThemeColors.pct_color.
+// Default percent-color thresholds used by PctStyle.
 const (
 	// PctHighThreshold is the high/critical threshold (default 90%).
 	PctHighThreshold = 90.0
@@ -275,8 +274,7 @@ const (
 
 // PctStyle returns the style for a percentage given high/mid thresholds. When
 // invert is false high values are bad (>=high error, >=mid warning, else
-// success); when invert is true high values are good (the reverse). Ports
-// colors.ThemeColors.pct_color.
+// success); when invert is true high values are good (the reverse).
 func (s Styles) PctStyle(pct, high, mid float64, invert bool) lipgloss.Style {
 	if invert {
 		switch {
