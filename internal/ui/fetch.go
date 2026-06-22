@@ -21,6 +21,13 @@ const fetchTimeout = 30 * time.Second
 // (so a failure is delivered as data, never a panic, I8). These are tea.Msgs
 // handled by the root model's Update in Phase 3.
 
+// availabilityMsg carries the result of the one-shot Slurm-availability check
+// fired at startup. A non-nil err means the controller commands are missing and
+// the root model renders the full-screen unavailable screen.
+type availabilityMsg struct {
+	err error
+}
+
 // runningJobsMsg carries a running-jobs fetch result.
 type runningJobsMsg struct {
 	gen  uint64
@@ -86,6 +93,30 @@ func runFetch[T any](fn func(ctx context.Context) (T, error)) (data T, err error
 		if r := recover(); r != nil {
 			var zero T
 			data = zero
+			err = fmt.Errorf("panic in fetch: %v", r)
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+	defer cancel()
+	return fn(ctx)
+}
+
+// checkAvailability returns a Cmd that probes Slurm availability once at startup
+// and reports the outcome as an availabilityMsg. It is part of the
+// minimal-critical first wave so the unavailable screen appears immediately when
+// Slurm is missing.
+func checkAvailability(client store.SlurmClient) tea.Cmd {
+	return func() tea.Msg {
+		err := runFetchErr(client.Available)
+		return availabilityMsg{err: err}
+	}
+}
+
+// runFetchErr is the error-only analogue of runFetch for Cmds that return no
+// data; it applies the same timeout and panic-recovery guarantees (I8).
+func runFetchErr(fn func(ctx context.Context) error) (err error) {
+	defer func() {
+		if r := recover(); r != nil {
 			err = fmt.Errorf("panic in fetch: %v", r)
 		}
 	}()

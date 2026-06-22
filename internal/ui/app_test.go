@@ -2,76 +2,227 @@ package ui
 
 import (
 	"bytes"
-	"io"
-	"strings"
+	"errors"
 	"testing"
 	"time"
 
+	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"github.com/charmbracelet/x/exp/teatest/v2"
+
+	"github.com/pjhartout/stoei/internal/store"
+	"github.com/pjhartout/stoei/internal/ui/theme"
 )
 
-// TestSmokeAppRendersAndQuits drives the Phase 0 smoke model through the v2
-// program loop: it sends a window size, opens the modal with "m", then quits
-// with "q" and asserts on the final output. This locks the v2 teatest API
-// (NewTestModel / Send(tea.KeyPressMsg) / WaitFinished / FinalOutput) and proves
-// the model satisfies tea.Model end to end.
-func TestSmokeAppRendersAndQuits(t *testing.T) {
-	tm := teatest.NewTestModel(
-		t, New(),
-		teatest.WithInitialTermSize(80, 24),
-	)
+// newTestApp builds a root model over a FakeClient seeded with jobs and a known
+// username, with a fixed clock so LastUpdated is deterministic.
+func newTestApp(t *testing.T, fc *store.FakeClient) App {
+	t.Helper()
+	st := store.New()
+	st.SetClock(func() time.Time { return time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) })
+	a := New(st, fc)
+	// Use a negligible tick interval so re-arm timer Cmds fire immediately when a
+	// test drains them; the assertions only inspect the produced message types,
+	// never real timing.
+	a.intervals = Intervals{Fast: time.Nanosecond, Slow: time.Nanosecond}
+	return a
+}
 
-	// Open the modal and wait for the composited box to appear.
-	tm.Send(tea.KeyPressMsg{Code: 'm', Text: "m"})
-	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
-		return bytes.Contains(out, []byte("composited over the base"))
-	}, teatest.WithDuration(3*time.Second), teatest.WithCheckInterval(10*time.Millisecond))
+// drainCmd runs a Cmd and returns the messages it produced. tea.Batch returns a
+// BatchMsg whose children are themselves Cmds; we flatten one level, which is
+// enough for the tick/dispatch batches asserted here.
+func drainCmd(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		out = append(out, c())
+	}
+	return out
+}
 
-	// Quit and confirm the program drains to the farewell view.
-	tm.Send(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+// countTickMsgs counts how many fast and slow tick messages appear in msgs.
+func countTickMsgs(msgs []tea.Msg) (fast, slow int) {
+	for _, m := range msgs {
+		switch m.(type) {
+		case fastTickMsg:
+			fast++
+		case slowTickMsg:
+			slow++
+		}
+	}
+	return fast, slow
+}
 
-	out := readAll(t, tm.FinalOutput(t, teatest.WithFinalTimeout(time.Second)))
-	if !bytes.Contains(out, []byte("bye")) {
-		t.Fatalf("final output missing farewell, got:\n%s", out)
+// TestFastTickReArmsOwnTierExactlyOnce asserts I2 for the fast tier: handling a
+// fastTickMsg returns a batch that includes a running-jobs fetch and re-arms the
+// fast tier exactly once, never the slow tier.
+func TestFastTickReArmsOwnTierExactlyOnce(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.runningInFlight = false
+
+	model, cmd := a.Update(fastTickMsg{at: time.Now()})
+	if _, ok := model.(App); !ok {
+		t.Fatalf("model type = %T; want App", model)
+	}
+
+	msgs := drainCmd(cmd)
+	fast, slow := countTickMsgs(msgs)
+	if fast != 1 {
+		t.Errorf("fast re-arms = %d; want exactly 1", fast)
+	}
+	if slow != 0 {
+		t.Errorf("slow re-arms = %d; want 0 (own tier only)", slow)
+	}
+
+	var sawRunningFetch bool
+	for _, m := range msgs {
+		if _, ok := m.(runningJobsMsg); ok {
+			sawRunningFetch = true
+		}
+	}
+	if !sawRunningFetch {
+		t.Error("fast tick did not dispatch a running-jobs fetch")
 	}
 }
 
-// TestSmokeAppQuitsOnCtrlC confirms ctrl+c also quits via the Quit binding.
-func TestSmokeAppQuitsOnCtrlC(t *testing.T) {
-	tm := teatest.NewTestModel(
-		t, New(),
-		teatest.WithInitialTermSize(80, 24),
-	)
+// TestFastTickReArmsButSkipsFetchWhenInFlight asserts that a fast tick with a
+// running-jobs fetch already outstanding still re-arms the fast tier exactly once
+// but does not dispatch a second fetch.
+func TestFastTickReArmsButSkipsFetchWhenInFlight(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.runningInFlight = true
 
-	tm.Send(tea.KeyPressMsg{Mod: tea.ModCtrl, Code: 'c'})
-	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	_, cmd := a.Update(fastTickMsg{at: time.Now()})
+	msgs := drainCmd(cmd)
+
+	fast, slow := countTickMsgs(msgs)
+	if fast != 1 || slow != 0 {
+		t.Errorf("re-arms fast=%d slow=%d; want fast=1 slow=0", fast, slow)
+	}
+	for _, m := range msgs {
+		if _, ok := m.(runningJobsMsg); ok {
+			t.Error("dispatched a running-jobs fetch while one was in flight")
+		}
+	}
 }
 
-// TestOverlayModalCompositesBox checks the lipgloss v2 Canvas/Layer compositor
-// directly (no program loop): the rendered overlay must contain the modal's
-// rounded border and its label, proving a centered box is drawn over the base.
-func TestOverlayModalCompositesBox(t *testing.T) {
-	a := New()
+// TestSlowTickReArmsOwnTierExactlyOnce asserts I2 for the slow tier.
+func TestSlowTickReArmsOwnTierExactlyOnce(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.heavyInFlight = false
+
+	_, cmd := a.Update(slowTickMsg{at: time.Now()})
+	msgs := drainCmd(cmd)
+
+	fast, slow := countTickMsgs(msgs)
+	if slow != 1 {
+		t.Errorf("slow re-arms = %d; want exactly 1", slow)
+	}
+	if fast != 0 {
+		t.Errorf("fast re-arms = %d; want 0 (own tier only)", fast)
+	}
+}
+
+// TestUnavailableScreenRendered asserts that an unavailable client makes the
+// model render the full-screen unavailable screen rather than the tab bar.
+func TestUnavailableScreenRendered(t *testing.T) {
+	fc := &store.FakeClient{AvailableErr: errors.New("squeue not found on PATH")}
+	a := newTestApp(t, fc)
 	a.width, a.height = 80, 24
 
-	out := a.overlayModal("base-content")
+	model, _ := a.Update(availabilityMsg{err: fc.AvailableErr})
+	out := model.(App).View().Content
 
-	// Rounded border corner from lipgloss.RoundedBorder.
-	if !strings.Contains(out, "╮") {
-		t.Errorf("overlay missing rounded border corner, got:\n%s", out)
+	if !bytes.Contains([]byte(out), []byte("SLURM unavailable")) {
+		t.Errorf("expected unavailable screen, got:\n%s", out)
 	}
-	if !strings.Contains(out, "composited over the base") {
-		t.Errorf("overlay missing modal body text, got:\n%s", out)
+	if !bytes.Contains([]byte(out), []byte("squeue not found on PATH")) {
+		t.Errorf("expected the availability error text, got:\n%s", out)
 	}
 }
 
-func readAll(tb testing.TB, r io.Reader) []byte {
-	tb.Helper()
-	b, err := io.ReadAll(r)
-	if err != nil {
-		tb.Fatal(err)
+// TestModalStackPushPop exercises the modal stack helpers and that a non-empty
+// stack composites over the base.
+func TestModalStackPushPop(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.width, a.height = 80, 24
+
+	if len(a.modals) != 0 {
+		t.Fatalf("new model has %d modals; want 0", len(a.modals))
 	}
-	return b
+	a.pushModal(&fakeModal{body: "MODAL-BODY"})
+	if len(a.modals) != 1 {
+		t.Fatalf("after push: %d modals; want 1", len(a.modals))
+	}
+
+	out := a.View().Content
+	if !bytes.Contains([]byte(out), []byte("MODAL-BODY")) {
+		t.Errorf("modal not composited over base, got:\n%s", out)
+	}
+
+	a.popModal()
+	if len(a.modals) != 0 {
+		t.Fatalf("after pop: %d modals; want 0", len(a.modals))
+	}
+}
+
+// fakeModal is a minimal Component used to exercise the modal stack.
+type fakeModal struct{ body string }
+
+func (m *fakeModal) Update(_ tea.Msg) (Component, tea.Cmd) { return m, nil }
+func (m *fakeModal) View() string                          { return m.body }
+func (m *fakeModal) SetSize(_, _ int)                      {}
+func (m *fakeModal) SetStyles(_ theme.Styles)              {}
+func (m *fakeModal) ShortHelp() []key.Binding              { return nil }
+func (m *fakeModal) FullHelp() [][]key.Binding             { return nil }
+
+// TestTeatestJobsFlow drives the real program loop with teatest: jobs render
+// from the seeded store, "/" opens the filter and narrows the view, and "q"
+// quits. This is the single end-to-end smoke flow for Phase 3.
+func TestTeatestJobsFlow(t *testing.T) {
+	fc := &store.FakeClient{
+		UsernameStr: "alice",
+		RunningJobsData: []store.RunningJob{
+			{ID: "1001", Name: "train", State: "RUNNING", Time: "1:00", Nodes: "1", NodeList: "node01"},
+			{ID: "1002", Name: "eval", State: "PENDING", Time: "0:00", Nodes: "2", NodeList: ""},
+		},
+	}
+	st := store.New()
+	st.SetClock(func() time.Time { return time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) })
+	st.SetRunningJobs(fc.RunningJobsData, st.NextGen(store.SectionRunningJobs), nil)
+
+	tm := teatest.NewTestModel(t, New(st, fc), teatest.WithInitialTermSize(100, 30))
+
+	// Jobs render from the seeded store: both rows and the My-Usage banner appear.
+	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+		return bytes.Contains(out, []byte("train")) &&
+			bytes.Contains(out, []byte("eval")) &&
+			bytes.Contains(out, []byte("My Usage"))
+	}, teatest.WithDuration(3*time.Second), teatest.WithCheckInterval(10*time.Millisecond))
+
+	// Open the filter and type a column-scoped query; the filter prompt reflects
+	// the typed text (the row-narrowing behavior is unit-tested separately, as the
+	// diff-based terminal stream splits cell text across cursor moves).
+	tm.Send(tea.KeyPressMsg{Code: '/', Text: "/"})
+	for _, r := range "state" {
+		tm.Send(tea.KeyPressMsg{Code: r, Text: string(r)})
+	}
+	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+		return bytes.Contains(out, []byte("state"))
+	}, teatest.WithDuration(3*time.Second), teatest.WithCheckInterval(10*time.Millisecond))
+
+	// Close the filter (Enter), then q quits cleanly.
+	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
+	tm.Send(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
 }

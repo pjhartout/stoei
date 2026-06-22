@@ -3,8 +3,6 @@ package ui
 import (
 	"testing"
 	"time"
-
-	tea "charm.land/bubbletea/v2"
 )
 
 func TestDefaultIntervals(t *testing.T) {
@@ -44,29 +42,7 @@ func TestSlowTickProducesSlowTickMsg(t *testing.T) {
 	}
 }
 
-// rearmFromFastTick models the Phase-3 invariant I2: a fastTickMsg handler
-// dispatches work and re-arms exactly its own tier, never the slow tier. This
-// drives the re-arm decision with an injected tick msg (no real timer) and a
-// fixed clock, asserting the returned Cmd is a fast re-arm.
-func rearmFromFastTick(iv Intervals, _ fastTickMsg, now func() time.Time) tea.Cmd {
-	_ = now // clock is injectable for elapsed/age rendering in later phases
-	return fastTick(iv.Fast)
-}
-
-func TestFastTickHandlerReArmsOwnTierOnly(t *testing.T) {
-	iv := DefaultIntervals()
-	fixed := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
-	clock := func() time.Time { return fixed }
-
-	// Inject a fastTickMsg; the handler must return a fast re-arm Cmd.
-	cmd := rearmFromFastTick(iv, fastTickMsg{at: fixed}, clock)
-	if cmd == nil {
-		t.Fatal("handler returned nil re-arm Cmd")
-	}
-	// The re-arm must itself be a fast tick (assert via the produced msg type
-	// using a negligible interval).
-	rearm := fastTick(time.Nanosecond)
-	if _, ok := rearm().(fastTickMsg); !ok {
-		t.Fatalf("re-arm produced %T; want fastTickMsg", rearm())
-	}
-}
+// The real I2 re-arm invariant (a fastTickMsg / slowTickMsg handler re-arms
+// exactly its own tier and dispatches the right fetch) is asserted against the
+// root model in app_test.go, which replaces the Phase-2 placeholder that lived
+// here.

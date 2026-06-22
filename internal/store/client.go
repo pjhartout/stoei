@@ -14,6 +14,11 @@ import (
 // Every method takes a context so the caller (a tea.Cmd in the ui layer) can
 // impose a timeout and cancel a superseded fetch.
 type SlurmClient interface {
+	// Available reports whether the Slurm controller commands are usable; a
+	// non-nil error means the UI should show the full-screen unavailable screen.
+	Available(ctx context.Context) error
+	// Username returns the resolved current user the per-user getters query for.
+	Username() string
 	// RunningJobs returns the current user's running and pending jobs.
 	RunningJobs(ctx context.Context) ([]slurm.RunningJob, error)
 	// AllUsersJobs returns every RUNNING and PENDING job across all users.

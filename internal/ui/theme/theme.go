@@ -45,6 +45,12 @@ type Theme struct {
 	Border AdaptiveColor
 	// Error is the foreground used for error states.
 	Error AdaptiveColor
+	// Success is the foreground for healthy/running states (green).
+	Success AdaptiveColor
+	// Warning is the foreground for pending/transitional states (yellow).
+	Warning AdaptiveColor
+	// Muted is the dimmed foreground for cancelled/inactive states.
+	Muted AdaptiveColor
 }
 
 // Styles holds prebuilt lipgloss styles with all adaptive colors already
@@ -65,6 +71,12 @@ type Styles struct {
 	Modal lipgloss.Style
 	// Error styles error messages.
 	Error lipgloss.Style
+	// Success styles healthy/running text (green).
+	Success lipgloss.Style
+	// Warning styles pending/transitional text (yellow).
+	Warning lipgloss.Style
+	// Muted styles cancelled/inactive text.
+	Muted lipgloss.Style
 }
 
 // Charm returns the default charm.land-flavored palette.
@@ -77,6 +89,9 @@ func Charm() Theme {
 		Subtle:    AdaptiveColor{Light: lipgloss.Color("#6C6C6C"), Dark: lipgloss.Color("#9B9B9B")},
 		Border:    AdaptiveColor{Light: lipgloss.Color("#B0B0B0"), Dark: lipgloss.Color("#3A3A3A")},
 		Error:     AdaptiveColor{Light: lipgloss.Color("#D7263D"), Dark: lipgloss.Color("#FF5C72")},
+		Success:   AdaptiveColor{Light: lipgloss.Color("#43BF6D"), Dark: lipgloss.Color("#A3BE8C")},
+		Warning:   AdaptiveColor{Light: lipgloss.Color("#C7951B"), Dark: lipgloss.Color("#EBCB8B")},
+		Muted:     AdaptiveColor{Light: lipgloss.Color("#8A8A8A"), Dark: lipgloss.Color("#6C7086")},
 	}
 }
 
@@ -90,6 +105,9 @@ func BuildStyles(t Theme, dark bool) Styles {
 	subtle := t.Subtle.Resolve(dark)
 	border := t.Border.Resolve(dark)
 	errc := t.Error.Resolve(dark)
+	success := t.Success.Resolve(dark)
+	warning := t.Warning.Resolve(dark)
+	muted := t.Muted.Resolve(dark)
 
 	return Styles{
 		Title: lipgloss.NewStyle().
@@ -115,6 +133,12 @@ func BuildStyles(t Theme, dark bool) Styles {
 		Error: lipgloss.NewStyle().
 			Bold(true).
 			Foreground(errc),
+		Success: lipgloss.NewStyle().
+			Foreground(success),
+		Warning: lipgloss.NewStyle().
+			Foreground(warning),
+		Muted: lipgloss.NewStyle().
+			Foreground(muted),
 	}
 }
 

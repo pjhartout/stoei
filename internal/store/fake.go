@@ -23,7 +23,9 @@ type FakeClient struct {
 	EnergyData          []slurm.EnergyRecord
 	WaitTimeData        []slurm.WaitTimeRecord
 	JobDetailData       slurm.JobDetail
+	UsernameStr         string
 
+	AvailableErr       error
 	RunningJobsErr     error
 	AllUsersJobsErr    error
 	UserJobsErr        error
@@ -43,6 +45,12 @@ type FakeClient struct {
 	// LastCancelJobID is the job ID passed to the most recent CancelJob call.
 	LastCancelJobID string
 }
+
+// Available implements SlurmClient.
+func (f *FakeClient) Available(_ context.Context) error { return f.AvailableErr }
+
+// Username implements SlurmClient.
+func (f *FakeClient) Username() string { return f.UsernameStr }
 
 // RunningJobs implements SlurmClient.
 func (f *FakeClient) RunningJobs(_ context.Context) ([]slurm.RunningJob, error) {

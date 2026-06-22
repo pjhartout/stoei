@@ -83,6 +83,28 @@ func NewClient(r Runner, opts ...Option) *Client {
 	return c
 }
 
+// Username returns the resolved current user the per-user getters query for.
+func (c *Client) Username() string { return c.username }
+
+// requiredCommands are the Slurm binaries Available probes; their absence means
+// stoei cannot function. Ports validation.check_slurm_available.
+var requiredCommands = []string{"squeue", "scontrol", "sacct"}
+
+// Available reports whether the Slurm controller commands are usable by probing
+// each required binary with "<cmd> --version" through the Runner. A nil return
+// means Slurm is available; a non-nil error describes which command failed and is
+// rendered on the full-screen unavailable screen. It mirrors the Python
+// check_slurm_available presence check while going through the Runner seam so it
+// stays subprocess-free in tests.
+func (c *Client) Available(ctx context.Context) error {
+	for _, cmd := range requiredCommands {
+		if _, err := c.runner.Run(ctx, cmd, "--version"); err != nil {
+			return fmt.Errorf("SLURM command %q not available: %w", cmd, err)
+		}
+	}
+	return nil
+}
+
 // errSacctCooldown is returned by the batch sacct getters when slurmdbd is in the
 // post-failure cooldown window. Callers can detect it with errors.Is.
 var errSacctCooldown = errors.New("sacct unavailable: connection refused (will retry automatically)")
