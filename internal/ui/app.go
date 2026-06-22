@@ -479,6 +479,8 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, a.keys.Refresh):
 		a.pushToast("Refreshing…")
 		return a, a.manualRefresh()
+	case msg.String() == "L":
+		return a, a.openClusterLoad()
 	}
 
 	// Detail/action keys open a modal for the active tab's selected row.
@@ -706,6 +708,14 @@ func (a App) activeHandlesSubtabKey(k string) bool {
 	default:
 		return false
 	}
+}
+
+// openClusterLoad opens the cluster-load statistics as a scrollable modal, so the
+// full content is reachable even when it is taller than the sidebar can show (or
+// the sidebar is hidden on a narrow terminal).
+func (a *App) openClusterLoad() tea.Cmd {
+	loaded := a.store.State(store.SectionNodes) == store.StateLoaded
+	return a.pushModal(modals.NewClusterLoad(a.store.ClusterStats, loaded, a.styles))
 }
 
 // refreshSidebar pushes the current cluster stats into the sidebar, marking it

@@ -88,6 +88,7 @@ func helpSections(km keys.KeyMap) []helpSection {
 		}},
 		{"General", []helpBinding{
 			{bindingKey(km.Refresh, "r"), "Refresh data now"},
+			{"L", "View cluster load (scrollable)"},
 			{bindingKey(km.Settings, "s"), "Open settings"},
 			{bindingKey(km.Help, "?"), "Show this help screen"},
 			{bindingKey(km.Quit, "q"), "Quit application"},

@@ -92,6 +92,7 @@ stoei runs the Slurm CLIs (`squeue`, `sacct`, `scontrol`, `sshare`, `sprio`, `sc
 | `/` | Filter (`col:value` or substring) |
 | `o` | Cycle sort order |
 | `r` | Refresh now |
+| `L` | Cluster load (scrollable popup) |
 | `s` | Settings |
 | `?` | Help |
 | `q` | Quit |

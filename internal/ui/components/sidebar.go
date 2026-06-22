@@ -82,6 +82,13 @@ func (s *Sidebar) titleRule(width int) string {
 	)
 }
 
+// ClusterLoadContent renders the cluster-load sections without the sidebar's
+// border box, so a scrollable modal can show the same content when the sidebar
+// is too tall to fit. loaded=false yields the loading placeholder.
+func ClusterLoadContent(stats store.ClusterStats, styles theme.Styles, loaded bool) string {
+	return (&Sidebar{styles: styles, stats: stats, loaded: loaded}).body()
+}
+
 // body renders the sidebar content lines (without the border).
 func (s *Sidebar) body() string {
 	if !s.loaded {
