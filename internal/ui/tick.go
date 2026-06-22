@@ -1,0 +1,52 @@
+package ui
+
+import (
+	"time"
+
+	tea "charm.land/bubbletea/v2"
+)
+
+// Default refresh intervals. The fast tier drives squeue-based sections; the slow
+// tier (4x the fast interval) drives the heavy batch sections. Phase 6 sources
+// these from config; here they are the locked defaults.
+const (
+	defaultFastInterval = 5 * time.Second
+	slowIntervalFactor  = 4
+)
+
+// Intervals holds the two refresh-tier durations. A zero Intervals is invalid;
+// use DefaultIntervals or build one explicitly.
+type Intervals struct {
+	Fast time.Duration
+	Slow time.Duration
+}
+
+// DefaultIntervals returns the locked default refresh intervals (5s fast, 20s
+// slow).
+func DefaultIntervals() Intervals {
+	return Intervals{
+		Fast: defaultFastInterval,
+		Slow: defaultFastInterval * slowIntervalFactor,
+	}
+}
+
+// fastTickMsg fires on the fast refresh tier. It carries the time it fired so
+// elapsed/age rendering can use the loop's clock.
+type fastTickMsg struct{ at time.Time }
+
+// slowTickMsg fires on the slow refresh tier.
+type slowTickMsg struct{ at time.Time }
+
+// fastTick returns a Cmd that fires a single fastTickMsg after d. Each tier
+// re-arms only from its own handler (I2): the root model, on receiving a
+// fastTickMsg, dispatches the fast fetches and calls fastTick again. It is never
+// re-armed from resize/keypress, which would geometrically multiply timers.
+func fastTick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return fastTickMsg{at: t} })
+}
+
+// slowTick returns a Cmd that fires a single slowTickMsg after d. Like fastTick,
+// it is re-armed only from the slowTickMsg handler.
+func slowTick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return slowTickMsg{at: t} })
+}

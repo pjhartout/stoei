@@ -1,0 +1,106 @@
+package store
+
+import (
+	"context"
+
+	"github.com/pjhartout/stoei/internal/slurm"
+)
+
+// FakeClient is a test double for SlurmClient. Each method returns its canned
+// value and, if the matching error field is set, that error instead. It records
+// the username passed to UserJobs and the job ID passed to JobDetail/CancelJob so
+// tests can assert call arguments. A zero FakeClient returns empty data and nil
+// errors for every method.
+type FakeClient struct {
+	RunningJobsData     []slurm.RunningJob
+	AllUsersJobsData    []slurm.AllUsersJob
+	UserJobsData        []slurm.UserJob
+	HistoryJobsData     []slurm.HistoryJob
+	HistoryStatsData    slurm.HistoryStats
+	NodesData           []slurm.Node
+	FairShareData       []slurm.FairShareEntry
+	PendingPriorityData []slurm.PriorityEntry
+	EnergyData          []slurm.EnergyRecord
+	WaitTimeData        []slurm.WaitTimeRecord
+	JobDetailData       slurm.JobDetail
+
+	RunningJobsErr     error
+	AllUsersJobsErr    error
+	UserJobsErr        error
+	JobHistoryErr      error
+	ClusterNodesErr    error
+	FairShareErr       error
+	PendingPriorityErr error
+	EnergyHistoryErr   error
+	WaitTimeErr        error
+	JobDetailErr       error
+	CancelJobErr       error
+
+	// LastUserJobsUser is the username passed to the most recent UserJobs call.
+	LastUserJobsUser string
+	// LastJobDetailID is the job ID passed to the most recent JobDetail call.
+	LastJobDetailID string
+	// LastCancelJobID is the job ID passed to the most recent CancelJob call.
+	LastCancelJobID string
+}
+
+// RunningJobs implements SlurmClient.
+func (f *FakeClient) RunningJobs(_ context.Context) ([]slurm.RunningJob, error) {
+	return f.RunningJobsData, f.RunningJobsErr
+}
+
+// AllUsersJobs implements SlurmClient.
+func (f *FakeClient) AllUsersJobs(_ context.Context) ([]slurm.AllUsersJob, error) {
+	return f.AllUsersJobsData, f.AllUsersJobsErr
+}
+
+// UserJobs implements SlurmClient.
+func (f *FakeClient) UserJobs(_ context.Context, username string) ([]slurm.UserJob, error) {
+	f.LastUserJobsUser = username
+	return f.UserJobsData, f.UserJobsErr
+}
+
+// JobHistory implements SlurmClient.
+func (f *FakeClient) JobHistory(_ context.Context, _ int) ([]slurm.HistoryJob, slurm.HistoryStats, error) {
+	return f.HistoryJobsData, f.HistoryStatsData, f.JobHistoryErr
+}
+
+// ClusterNodes implements SlurmClient.
+func (f *FakeClient) ClusterNodes(_ context.Context) ([]slurm.Node, error) {
+	return f.NodesData, f.ClusterNodesErr
+}
+
+// FairShare implements SlurmClient.
+func (f *FakeClient) FairShare(_ context.Context) ([]slurm.FairShareEntry, error) {
+	return f.FairShareData, f.FairShareErr
+}
+
+// PendingPriority implements SlurmClient.
+func (f *FakeClient) PendingPriority(_ context.Context) ([]slurm.PriorityEntry, error) {
+	return f.PendingPriorityData, f.PendingPriorityErr
+}
+
+// EnergyHistory implements SlurmClient.
+func (f *FakeClient) EnergyHistory(_ context.Context, _ int) ([]slurm.EnergyRecord, error) {
+	return f.EnergyData, f.EnergyHistoryErr
+}
+
+// WaitTimeHistory implements SlurmClient.
+func (f *FakeClient) WaitTimeHistory(_ context.Context, _ int) ([]slurm.WaitTimeRecord, error) {
+	return f.WaitTimeData, f.WaitTimeErr
+}
+
+// JobDetail implements SlurmClient.
+func (f *FakeClient) JobDetail(_ context.Context, jobID string) (slurm.JobDetail, error) {
+	f.LastJobDetailID = jobID
+	return f.JobDetailData, f.JobDetailErr
+}
+
+// CancelJob implements SlurmClient.
+func (f *FakeClient) CancelJob(_ context.Context, jobID string) error {
+	f.LastCancelJobID = jobID
+	return f.CancelJobErr
+}
+
+// Compile-time assertion that FakeClient satisfies the interface.
+var _ SlurmClient = (*FakeClient)(nil)
