@@ -1,0 +1,4 @@
+12345                         train_model                                       gpu            RUNNING   2:34:56     4     gpu-node-[01-04]                                                                cpu=32,mem=256G,node=4,gres/gpu=16
+12346                         preprocess                                        cpu            RUNNING   0:45:12     1     cpu-node-05                                                                     cpu=8,mem=64G,node=1
+12347                         evaluate                                          gpu            PENDING   0:00        2     (Priority)                                                                      cpu=16,mem=128G,node=2,gres/gpu=4
+12349                         data_load                                         gpu            RUNNING   1:23:45     1     gpu-node-08                                                                     cpu=192,mem=2000G,node=1,gres/gpu=8

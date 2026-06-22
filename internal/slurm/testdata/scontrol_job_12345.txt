@@ -1,0 +1,27 @@
+JobId=12345 JobName=train_model
+   UserId=testuser(1000) GroupId=researchers(1000)
+   MCS_label=N/A
+   Priority=4294901730 Nice=0 Account=ml_research QOS=normal
+   JobState=RUNNING Reason=None Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=02:34:56 TimeLimit=7-00:00:00 TimeMin=N/A
+   SubmitTime=2024-01-15T08:00:00 EligibleTime=2024-01-15T08:00:00
+   AccrueTime=2024-01-15T08:00:00
+   StartTime=2024-01-15T08:01:00 EndTime=2024-01-22T08:01:00 Deadline=N/A
+   SuspendTime=None SecsPreSuspend=0 LastSchedEval=2024-01-15T08:00:30
+   Partition=gpu NumNodes=4 NumCPUs=32 NumTasks=4 CPUs/Task=8 ReqB:S:C:T=0:0:*:*
+   TRES=cpu=32,mem=256G,node=4,gres/gpu=16
+   Socks/Node=* NtasksPerN:B:S:C=0:0:*:* CoreSpec=*
+   MinCPUsNode=8 MinMemoryNode=64G MinTmpDiskNode=0
+   Features=a100 DelayBoot=00:00:00
+   OverSubscribe=OK Contiguous=0 Licenses=(null) Network=(null)
+   Command=/home/testuser/projects/ml/train.sh
+   WorkDir=/home/testuser/projects/ml
+   StdErr=/home/testuser/projects/ml/logs/train_%j.err
+   StdOut=/home/testuser/projects/ml/logs/train_%j.out
+   Power=
+   TresPerNode=gres:gpu:4
+   NtasksPerTRES:0
+   NodeList=gpu-node-[01-04]
+   BatchHost=gpu-node-01
+   ReqNodeList=(null) ExcNodeList=(null)

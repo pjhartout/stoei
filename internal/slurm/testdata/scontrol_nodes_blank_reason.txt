@@ -1,0 +1,12 @@
+NodeName=hpcl8010 Arch=x86_64 CoresPerSocket=12
+   CPUAlloc=0 CPUTot=24
+   State=IDLE+DRAIN
+   AllocTRES=
+   CurrentWatts=0 AveWatts=0
+
+   Reason=bbusch [root@2026-02-19T05:04:42]
+
+NodeName=node02
+   State=ALLOCATED
+   CPUTot=16 CPUAlloc=8
+   Gres=gpu:a100:4
