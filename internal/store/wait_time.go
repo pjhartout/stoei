@@ -1,11 +1,49 @@
 package store
 
 import (
+	"fmt"
 	"sort"
 	"strings"
 
 	"github.com/pjhartout/stoei/internal/slurm"
 )
+
+// Wait-time formatting constants, mirroring wait_time.py.
+const (
+	secondsPerMinute        = 60.0
+	minutesPerHour          = 60.0
+	hoursPerDay             = 24.0
+	integerDisplayThreshold = 10.0
+)
+
+// FormatWaitTime renders a duration in seconds as a compact human-readable string
+// (e.g. "45s", "5m", "2.3h", "11h", "1.5d"). Values under the integer-display
+// threshold keep one decimal place; larger values are integers. Ports
+// wait_time.format_wait_time exactly.
+func FormatWaitTime(seconds float64) string {
+	if seconds < 0 {
+		return "0s"
+	}
+	if seconds < secondsPerMinute {
+		return fmt.Sprintf("%ds", int(seconds))
+	}
+	minutes := seconds / secondsPerMinute
+	if minutes < minutesPerHour {
+		return fmt.Sprintf("%dm", int(minutes))
+	}
+	hours := minutes / minutesPerHour
+	if hours < hoursPerDay {
+		if hours < integerDisplayThreshold {
+			return fmt.Sprintf("%.1fh", hours)
+		}
+		return fmt.Sprintf("%dh", int(hours))
+	}
+	days := hours / hoursPerDay
+	if days < integerDisplayThreshold {
+		return fmt.Sprintf("%.1fd", days)
+	}
+	return fmt.Sprintf("%dd", int(days))
+}
 
 // PartitionWaitStats holds wait-time statistics for one partition. Ports
 // wait_time.PartitionWaitStats.

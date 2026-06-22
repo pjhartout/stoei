@@ -18,6 +18,9 @@ type column struct {
 	// numeric marks columns whose sort is numeric-aware (parsed as a float when
 	// possible). Ports the per-column sort_key choice in app.py.
 	numeric bool
+	// width is the rendered column width in characters. Zero means "derive a
+	// default from the key" (filterTableColumnWidth).
+	width int
 }
 
 // jobColumns are the Jobs-tab columns in render order. Ports the column set built
@@ -33,7 +36,13 @@ var jobColumns = []column{
 
 // columnIndex maps a column key to its index in jobColumns, or -1 if unknown.
 func columnIndex(key string) int {
-	for i, c := range jobColumns {
+	return columnIndexIn(jobColumns, key)
+}
+
+// columnIndexIn maps a column key to its index in the given column set, or -1 if
+// unknown. It is the column-set-aware form used by the reusable filter table.
+func columnIndexIn(cols []column, key string) int {
+	for i, c := range cols {
 		if c.key == key {
 			return i
 		}
@@ -52,6 +61,18 @@ type filterState struct {
 	columnFilters map[string]string
 	// general is the lowercased substring that must appear in some column.
 	general string
+	// columns is the column set this filter resolves keys against. When nil it
+	// defaults to jobColumns so the Jobs tab keeps working unchanged.
+	columns []column
+}
+
+// cols returns the column set the filter resolves against, defaulting to
+// jobColumns for the Jobs tab.
+func (f filterState) cols() []column {
+	if f.columns == nil {
+		return jobColumns
+	}
+	return f.columns
 }
 
 // colValuePattern matches a "column:value" token. Ports the Python
@@ -63,13 +84,19 @@ var colValuePattern = regexp.MustCompile(`(\w+):(\S+)`)
 // else is collapsed into the general substring. Ports
 // filterable_table._parse_filter_query.
 func parseFilter(query string) filterState {
+	return parseFilterWith(query, jobColumns)
+}
+
+// parseFilterWith parses a raw query against an explicit column set, so tabs
+// other than Jobs can reuse the column-scoped filter logic.
+func parseFilterWith(query string, cols []column) filterState {
 	columnFilters := map[string]string{}
 	remaining := query
 
 	for _, m := range colValuePattern.FindAllStringSubmatch(query, -1) {
 		colName := strings.ToLower(m[1])
 		colValue := m[2]
-		if columnIndex(colName) >= 0 {
+		if columnIndexIn(cols, colName) >= 0 {
 			columnFilters[colName] = strings.ToLower(colValue)
 			remaining = strings.Replace(remaining, m[0], "", 1)
 		}
@@ -81,6 +108,7 @@ func parseFilter(query string) filterState {
 		query:         query,
 		columnFilters: columnFilters,
 		general:       general,
+		columns:       cols,
 	}
 }
 
@@ -93,7 +121,7 @@ func (f filterState) matches(row []string) bool {
 	}
 
 	for colKey, want := range f.columnFilters {
-		idx := columnIndex(colKey)
+		idx := columnIndexIn(f.cols(), colKey)
 		if idx < 0 || idx >= len(row) {
 			continue
 		}

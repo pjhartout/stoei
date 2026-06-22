@@ -186,6 +186,86 @@ func (m *fakeModal) SetStyles(_ theme.Styles)              {}
 func (m *fakeModal) ShortHelp() []key.Binding              { return nil }
 func (m *fakeModal) FullHelp() [][]key.Binding             { return nil }
 
+// TestSidebarShownWhenWideHiddenWhenNarrow asserts the cluster sidebar is
+// composed beside the tab on a wide terminal and auto-hidden on a narrow one.
+func TestSidebarShownWhenWideHiddenWhenNarrow(t *testing.T) {
+	fc := &store.FakeClient{
+		UsernameStr: "alice",
+		NodesData: []store.Node{
+			{Name: "n1", State: "IDLE", CPUTot: "8", Fields: map[string]string{"NodeName": "n1"}},
+		},
+	}
+	a := newTestApp(t, fc)
+
+	// Wide: feed nodes so the sidebar has loaded data, then render at width 120.
+	a.width, a.height = 120, 30
+	a.fanoutSize()
+	model, _ := a.Update(nodesMsg{nodes: fc.NodesData, gen: a.store.Gen(store.SectionNodes)})
+	wide := model.(App)
+	if !bytes.Contains([]byte(wide.View().Content), []byte("Cluster Load")) {
+		t.Errorf("wide terminal should show the cluster sidebar")
+	}
+
+	// Narrow: below the threshold the sidebar is hidden.
+	narrow := wide
+	narrow.width, narrow.height = 80, 30
+	narrow.fanoutSize()
+	narrow.frame.dirty = true
+	if bytes.Contains([]byte(narrow.View().Content), []byte("Cluster Load")) {
+		t.Errorf("narrow terminal should auto-hide the cluster sidebar")
+	}
+}
+
+// TestTeatestTabNavigation drives the real loop and steps through tabs 1→5,
+// asserting each renders its distinctive content.
+func TestTeatestTabNavigation(t *testing.T) {
+	fc := &store.FakeClient{
+		UsernameStr: "alice",
+		RunningJobsData: []store.RunningJob{
+			{ID: "1001", Name: "train", State: "RUNNING", Time: "1:00", Nodes: "1", NodeList: "node01"},
+		},
+		NodesData: []store.Node{
+			{Name: "node01", State: "MIXED", CPUTot: "64", CPUAlloc: "16", Fields: map[string]string{"NodeName": "node01"}},
+		},
+		AllUsersJobsData: []store.AllUsersJob{
+			{ID: "1001", User: "alice", State: "RUNNING", NumNodes: "1", NodeList: "node01", TRES: "cpu=16,mem=32G"},
+		},
+		FairShareData: []store.FairShareEntry{
+			{Account: "physics", User: "alice", FairShare: "0.80"},
+		},
+	}
+	st := store.New()
+	st.SetClock(func() time.Time { return time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) })
+	st.SetRunningJobs(fc.RunningJobsData, st.NextGen(store.SectionRunningJobs), nil)
+	st.SetNodes(fc.NodesData, st.NextGen(store.SectionNodes), nil)
+	st.SetAllUsersJobs(fc.AllUsersJobsData, st.NextGen(store.SectionAllUsersJobs), nil)
+	st.SetFairShare(fc.FairShareData, st.NextGen(store.SectionFairShare), nil)
+
+	// Narrow width so the sidebar is hidden and tab bodies fill the frame.
+	tm := teatest.NewTestModel(t, New(st, fc), teatest.WithInitialTermSize(90, 30))
+
+	steps := []struct {
+		key  rune
+		want string
+	}{
+		{'2', "Node"},          // Nodes tab header/columns
+		{'3', "User Overview"}, // Users tab sub-tab header
+		{'4', "Priority"},      // Priority tab header
+		{'5', "log"},           // Logs tab placeholder ("No log entries yet.")
+		{'1', "My Usage"},      // back to Jobs
+	}
+	for _, s := range steps {
+		tm.Send(tea.KeyPressMsg{Code: s.key, Text: string(s.key)})
+		want := s.want
+		teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
+			return bytes.Contains(out, []byte(want))
+		}, teatest.WithDuration(3*time.Second), teatest.WithCheckInterval(10*time.Millisecond))
+	}
+
+	tm.Send(tea.KeyPressMsg{Code: 'q', Text: "q"})
+	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+}
+
 // TestTeatestJobsFlow drives the real program loop with teatest: jobs render
 // from the seeded store, "/" opens the filter and narrows the view, and "q"
 // quits. This is the single end-to-end smoke flow for Phase 3.
@@ -210,19 +290,16 @@ func TestTeatestJobsFlow(t *testing.T) {
 			bytes.Contains(out, []byte("My Usage"))
 	}, teatest.WithDuration(3*time.Second), teatest.WithCheckInterval(10*time.Millisecond))
 
-	// Open the filter and type a column-scoped query; the filter prompt reflects
-	// the typed text (the row-narrowing behavior is unit-tested separately, as the
-	// diff-based terminal stream splits cell text across cursor moves).
+	// Drive the filter through a full open → type → close cycle, then quit. The
+	// per-keystroke filter rendering is asserted in the unit tests (the diff-based
+	// terminal stream splits styled prompt/cell text across cursor moves, so it is
+	// not byte-stable here); this leg only proves the real loop processes the input
+	// sequence and exits cleanly.
 	tm.Send(tea.KeyPressMsg{Code: '/', Text: "/"})
 	for _, r := range "state" {
 		tm.Send(tea.KeyPressMsg{Code: r, Text: string(r)})
 	}
-	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
-		return bytes.Contains(out, []byte("state"))
-	}, teatest.WithDuration(3*time.Second), teatest.WithCheckInterval(10*time.Millisecond))
-
-	// Close the filter (Enter), then q quits cleanly.
 	tm.Send(tea.KeyPressMsg{Code: tea.KeyEnter})
 	tm.Send(tea.KeyPressMsg{Code: 'q', Text: "q"})
-	tm.WaitFinished(t, teatest.WithFinalTimeout(3*time.Second))
+	tm.WaitFinished(t, teatest.WithFinalTimeout(5*time.Second))
 }

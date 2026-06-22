@@ -350,7 +350,7 @@ func (s *Store) EnergyStats() []UserEnergyStats {
 }
 
 // RunningUserStats returns the per-user running-job summary derived from the
-// all-users jobs.
+// all-users jobs, excluding pending jobs to match app.py's running aggregation.
 func (s *Store) RunningUserStats() []UserStats {
-	return AggregateUserStats(s.AllUsersJobs)
+	return AggregateUserStats(RunningUserJobs(s.AllUsersJobs))
 }

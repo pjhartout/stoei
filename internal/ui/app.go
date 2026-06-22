@@ -19,6 +19,7 @@ import (
 	"charm.land/lipgloss/v2"
 
 	"github.com/pjhartout/stoei/internal/store"
+	"github.com/pjhartout/stoei/internal/ui/components"
 	"github.com/pjhartout/stoei/internal/ui/keys"
 	"github.com/pjhartout/stoei/internal/ui/tabs"
 	"github.com/pjhartout/stoei/internal/ui/theme"
@@ -58,10 +59,21 @@ type App struct {
 	notifier *healthNotifier
 	toasts   []string
 
+	// logs is the in-memory ring buffer of the app's own log lines; the Logs tab
+	// renders from it and the app appends to it.
+	logRing *components.LogRing
+
 	// Tabs held concretely; the active tab receives routed input.
-	jobs   *tabs.Jobs
-	others [numTabs]*tabs.Placeholder // indexed by tabIndex; tabJobs slot unused
-	active tabIndex
+	jobs     *tabs.Jobs
+	nodes    *tabs.Nodes
+	users    *tabs.Users
+	priority *tabs.Priority
+	logsTab  *tabs.Logs
+	active   tabIndex
+
+	// sidebar renders cluster load; it is composed beside the active tab on wide
+	// terminals and auto-hidden when narrow.
+	sidebar *components.Sidebar
 
 	// modals is the modal stack. It is empty in Phase 3 but the type and the
 	// push/pop helpers exist so later phases composite over the base.
@@ -99,8 +111,16 @@ type frameCache struct {
 }
 
 // New constructs the root model wired to s and client. Styles default to dark
-// until the terminal reports its background.
+// until the terminal reports its background. A fresh log ring is allocated; use
+// NewWithLogRing to share an existing ring (for example one already wired as a
+// logging sink).
 func New(s *store.Store, client store.SlurmClient) App {
+	return NewWithLogRing(s, client, components.NewLogRing(components.DefaultMaxLogLines))
+}
+
+// NewWithLogRing constructs the root model wired to s, client, and an existing
+// log ring the Logs tab renders from.
+func NewWithLogRing(s *store.Store, client store.SlurmClient, ring *components.LogRing) App {
 	t := theme.Charm()
 	styles := theme.BuildStyles(t, true)
 
@@ -114,18 +134,21 @@ func New(s *store.Store, client store.SlurmClient) App {
 		styles:    styles,
 		intervals: DefaultIntervals(),
 		notifier:  newHealthNotifier(),
+		logRing:   ring,
 		dark:      true,
 		frame:     &frameCache{dirty: true},
 		jobs:      tabs.NewJobs(s, username, styles),
-	}
-	for i := tabIndex(0); i < numTabs; i++ {
-		if i == tabJobs {
-			continue
-		}
-		a.others[i] = tabs.NewPlaceholder(tabTitles[i], styles)
+		nodes:     tabs.NewNodes(s, styles),
+		users:     tabs.NewUsers(s, styles, energyMonths),
+		priority:  tabs.NewPriority(s, styles, username),
+		logsTab:   tabs.NewLogs(ring, styles),
+		sidebar:   components.NewSidebar(styles),
 	}
 	return a
 }
+
+// LogRing returns the app's log ring so the caller can wire it as a logging sink.
+func (a App) LogRing() *components.LogRing { return a.logRing }
 
 // Init fires the minimal-critical first wave (availability + running jobs +
 // history), then a batched dispatch of the heavy sections, and starts both
@@ -250,31 +273,38 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case nodesMsg:
 		a.store.SetNodes(msg.nodes, msg.gen, msg.err)
 		a.observe(store.SectionNodes, msg.err)
+		a.nodes.Refresh()
+		a.refreshSidebar() // ClusterStats derives from nodes.
 		a.frame.dirty = true
 		return a, nil
 
 	case allUsersJobsMsg:
 		a.store.SetAllUsersJobs(msg.jobs, msg.gen, msg.err)
 		a.observe(store.SectionAllUsersJobs, msg.err)
-		a.jobs.Refresh() // My-Usage banner derives from all-users jobs.
+		a.jobs.Refresh()   // My-Usage banner derives from all-users jobs.
+		a.users.Refresh()  // Running/Pending panes derive from all-users jobs.
+		a.refreshSidebar() // Pending resources derive from all-users jobs.
 		a.frame.dirty = true
 		return a, nil
 
 	case fairShareMsg:
 		a.store.SetFairShare(msg.entries, msg.gen, msg.err)
 		a.observe(store.SectionFairShare, msg.err)
+		a.priority.Refresh()
 		a.frame.dirty = true
 		return a, nil
 
 	case pendingPrioMsg:
 		a.store.SetPendingPrio(msg.entries, msg.gen, msg.err)
 		a.observe(store.SectionPendingPrio, msg.err)
+		a.priority.Refresh()
 		a.frame.dirty = true
 		return a, nil
 
 	case energyMsg:
 		a.store.SetEnergy(msg.records, msg.gen, msg.err)
 		a.observe(store.SectionEnergy, msg.err)
+		a.users.Refresh() // Energy pane derives from energy records.
 		a.frame.dirty = true
 		return a, nil
 
@@ -282,6 +312,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.heavyInFlight = false
 		a.store.SetWaitTime(msg.records, msg.gen, msg.err)
 		a.observe(store.SectionWaitTime, msg.err)
+		a.refreshSidebar() // Wait-time stats derive from wait-time records.
 		a.frame.dirty = true
 		return a, nil
 	}
@@ -296,9 +327,16 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a.routeToActive(msg)
 	}
 
-	// When the active tab is capturing text (e.g. the Jobs filter bar), route raw
-	// keys to it so they are typed rather than triggering global shortcuts.
-	if a.active == tabJobs && a.jobs.CapturesInput() {
+	// When the active tab is capturing text (e.g. a filter bar), route raw keys to
+	// it so they are typed rather than triggering global shortcuts.
+	if a.activeCapturesInput() {
+		return a.routeToActive(msg)
+	}
+
+	// Sub-tab switch keys (Users r/p/e, Priority m/u/a/j) belong to the active tab
+	// and take precedence over the global shortcuts that share a letter (e.g. the
+	// 'r' refresh), matching the Python per-tab BINDINGS overriding globals.
+	if a.activeHandlesSubtabKey(msg.String()) {
 		return a.routeToActive(msg)
 	}
 
@@ -369,6 +407,10 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	if !a.runningInFlight {
 		cmds = append(cmds, a.dispatchRunning())
 	}
+	// The log ring is appended to outside the Update loop (a logging sink), so the
+	// Logs tab is re-rendered on the fast tick to surface new lines.
+	a.logsTab.Refresh()
+	a.frame.dirty = true
 	return a, tea.Batch(cmds...)
 }
 
@@ -392,16 +434,58 @@ func (a App) routeToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, cmd
 	}
 
-	if a.active == tabJobs {
-		var cmd tea.Cmd
-		a.jobs, cmd = a.jobs.Update(msg)
-		a.frame.dirty = true
-		return a, cmd
-	}
-
 	var cmd tea.Cmd
-	a.others[a.active], cmd = a.others[a.active].Update(msg)
+	switch a.active {
+	case tabJobs:
+		a.jobs, cmd = a.jobs.Update(msg)
+	case tabNodes:
+		a.nodes, cmd = a.nodes.Update(msg)
+	case tabUsers:
+		a.users, cmd = a.users.Update(msg)
+	case tabPriority:
+		a.priority, cmd = a.priority.Update(msg)
+	case tabLogs:
+		a.logsTab, cmd = a.logsTab.Update(msg)
+	}
+	a.frame.dirty = true
 	return a, cmd
+}
+
+// activeCapturesInput reports whether the active tab is consuming raw text input
+// (a filter bar is open), so global shortcuts are routed to it instead.
+func (a App) activeCapturesInput() bool {
+	switch a.active {
+	case tabJobs:
+		return a.jobs.CapturesInput()
+	case tabNodes:
+		return a.nodes.CapturesInput()
+	case tabUsers:
+		return a.users.CapturesInput()
+	case tabPriority:
+		return a.priority.CapturesInput()
+	default:
+		return false
+	}
+}
+
+// activeHandlesSubtabKey reports whether the active tab claims the given key as a
+// sub-tab switch (Users: r/p/e; Priority: m/u/a/j).
+func (a App) activeHandlesSubtabKey(k string) bool {
+	switch a.active {
+	case tabUsers:
+		return k == "r" || k == "p" || k == "e"
+	case tabPriority:
+		return k == "m" || k == "u" || k == "a" || k == "j"
+	default:
+		return false
+	}
+}
+
+// refreshSidebar pushes the current cluster stats into the sidebar, marking it
+// loaded once the nodes section has produced data.
+func (a *App) refreshSidebar() {
+	loaded := a.store.State(store.SectionNodes) == store.StateLoaded
+	a.sidebar.SetStats(a.store.ClusterStats, loaded)
 }
 
 // observe feeds a fetch outcome to the health notifier and appends/clears a toast
@@ -421,21 +505,31 @@ func (a *App) pushToast(msg string) {
 	a.frame.dirty = true
 }
 
-// fanoutSize fans the cached size out to every tab and modal (I7). Tabs reserve
-// space for the chrome (tab bar + footer).
+// fanoutSize fans the cached size out to every tab, the sidebar, and modals (I7).
+// Tabs reserve space for the chrome (tab bar + footer) and, when the sidebar is
+// shown, the sidebar's width.
 func (a *App) fanoutSize() {
 	w, h := a.size()
 	innerH := h - chromeReservedRows
 	if innerH < 1 {
 		innerH = 1
 	}
-	a.jobs.SetSize(w, innerH)
-	for i := tabIndex(0); i < numTabs; i++ {
-		if i == tabJobs || a.others[i] == nil {
-			continue
+
+	tabW := w
+	if components.ShouldShow(w) {
+		tabW = w - a.sidebar.Width()
+		if tabW < 1 {
+			tabW = 1
 		}
-		a.others[i].SetSize(w, innerH)
 	}
+
+	a.jobs.SetSize(tabW, innerH)
+	a.nodes.SetSize(tabW, innerH)
+	a.users.SetSize(tabW, innerH)
+	a.priority.SetSize(tabW, innerH)
+	a.logsTab.SetSize(tabW, innerH)
+	a.sidebar.SetSize(a.sidebar.Width(), innerH)
+
 	for _, m := range a.modals {
 		m.SetSize(w, h)
 	}
@@ -445,16 +539,15 @@ func (a *App) fanoutSize() {
 const chromeReservedRows = 4
 
 // rebuildStyles rebuilds the styles for the current background and re-themes
-// every tab and modal.
+// every tab, the sidebar, and modals.
 func (a *App) rebuildStyles() {
 	a.styles = theme.BuildStyles(a.theme, a.dark)
 	a.jobs.SetStyles(a.styles)
-	for i := tabIndex(0); i < numTabs; i++ {
-		if i == tabJobs || a.others[i] == nil {
-			continue
-		}
-		a.others[i].SetStyles(a.styles)
-	}
+	a.nodes.SetStyles(a.styles)
+	a.users.SetStyles(a.styles)
+	a.priority.SetStyles(a.styles)
+	a.logsTab.SetStyles(a.styles)
+	a.sidebar.SetStyles(a.styles)
 	for _, m := range a.modals {
 		m.SetStyles(a.styles)
 	}
@@ -509,10 +602,14 @@ func (a App) View() tea.View {
 	return v
 }
 
-// baseView renders the non-modal chrome plus the active tab.
+// baseView renders the non-modal chrome plus the active tab, composing the
+// cluster sidebar beside the tab body on wide terminals (I7 narrow auto-hide).
 func (a App) baseView() string {
 	tabBar := a.tabBar()
 	body := a.activeView()
+	if components.ShouldShow(a.widthOrDefault()) {
+		body = lipgloss.JoinHorizontal(lipgloss.Top, body, a.sidebar.View())
+	}
 	footer := a.footer()
 
 	sections := []string{tabBar, body, footer}
@@ -521,6 +618,12 @@ func (a App) baseView() string {
 	}
 
 	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+}
+
+// widthOrDefault returns the cached terminal width, falling back to the default.
+func (a App) widthOrDefault() int {
+	w, _ := a.size()
+	return w
 }
 
 // tabBar renders the styled tab bar with the active tab highlighted.
@@ -540,10 +643,18 @@ func (a App) tabBar() string {
 
 // activeView renders the active tab's body.
 func (a App) activeView() string {
-	if a.active == tabJobs {
+	switch a.active {
+	case tabNodes:
+		return a.nodes.View()
+	case tabUsers:
+		return a.users.View()
+	case tabPriority:
+		return a.priority.View()
+	case tabLogs:
+		return a.logsTab.View()
+	default:
 		return a.jobs.View()
 	}
-	return a.others[a.active].View()
 }
 
 // footer renders the help bar reflecting the active tab's bindings plus the
@@ -623,16 +734,32 @@ func (a App) FullHelp() [][]key.Binding {
 
 // activeShortHelp returns the active tab's short-help bindings.
 func (a App) activeShortHelp() []key.Binding {
-	if a.active == tabJobs {
+	switch a.active {
+	case tabNodes:
+		return a.nodes.ShortHelp()
+	case tabUsers:
+		return a.users.ShortHelp()
+	case tabPriority:
+		return a.priority.ShortHelp()
+	case tabLogs:
+		return a.logsTab.ShortHelp()
+	default:
 		return a.jobs.ShortHelp()
 	}
-	return a.others[a.active].ShortHelp()
 }
 
 // activeFullHelp returns the active tab's full-help groups.
 func (a App) activeFullHelp() [][]key.Binding {
-	if a.active == tabJobs {
+	switch a.active {
+	case tabNodes:
+		return a.nodes.FullHelp()
+	case tabUsers:
+		return a.users.FullHelp()
+	case tabPriority:
+		return a.priority.FullHelp()
+	case tabLogs:
+		return a.logsTab.FullHelp()
+	default:
 		return a.jobs.FullHelp()
 	}
-	return a.others[a.active].FullHelp()
 }

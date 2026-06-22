@@ -1,12 +1,28 @@
 package tabs
 
 import (
+	"strconv"
 	"strings"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
+
+// parsePercent parses a "NN.N%" cell into its float value. It returns ok=false
+// for cells that are not percentages (for example "N/A"), so callers can leave
+// them unstyled.
+func parsePercent(cell string) (float64, bool) {
+	s := strings.TrimSpace(cell)
+	if !strings.HasSuffix(s, "%") {
+		return 0, false
+	}
+	v, err := strconv.ParseFloat(strings.TrimSuffix(s, "%"), 64)
+	if err != nil {
+		return 0, false
+	}
+	return v, true
+}
 
 // stateRole classifies a job/node state into one of the semantic color roles.
 type stateRole int

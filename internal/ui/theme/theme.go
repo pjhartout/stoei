@@ -142,6 +142,44 @@ func BuildStyles(t Theme, dark bool) Styles {
 	}
 }
 
+// Default percent-color thresholds, mirroring colors.ThemeColors.pct_color.
+const (
+	// PctHighThreshold is the high/critical threshold (default 90%).
+	PctHighThreshold = 90.0
+	// PctMidThreshold is the medium/warning threshold (default 70%).
+	PctMidThreshold = 70.0
+	// SidebarGreenThreshold is the sidebar's "good" threshold for free resources.
+	SidebarGreenThreshold = 50.0
+	// SidebarYellowThreshold is the sidebar's "warning" threshold for free
+	// resources.
+	SidebarYellowThreshold = 25.0
+)
+
+// PctStyle returns the style for a percentage given high/mid thresholds. When
+// invert is false high values are bad (>=high error, >=mid warning, else
+// success); when invert is true high values are good (the reverse). Ports
+// colors.ThemeColors.pct_color.
+func (s Styles) PctStyle(pct, high, mid float64, invert bool) lipgloss.Style {
+	if invert {
+		switch {
+		case pct >= high:
+			return s.Success
+		case pct >= mid:
+			return s.Warning
+		default:
+			return s.Error
+		}
+	}
+	switch {
+	case pct >= high:
+		return s.Error
+	case pct >= mid:
+		return s.Warning
+	default:
+		return s.Success
+	}
+}
+
 // AccentGradient returns steps colors blended from Accent to AccentAlt for the
 // given mode, suitable for a per-rune gradient on the title or tab bar. It is a
 // thin wrapper over lipgloss.Blend1D, the v2 gradient primitive.
