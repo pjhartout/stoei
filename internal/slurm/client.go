@@ -112,6 +112,11 @@ var errSacctCooldown = errors.New("sacct unavailable: connection refused (will r
 // ErrSacctCooldown reports whether err indicates the sacct cooldown is active.
 func ErrSacctCooldown(err error) bool { return errors.Is(err, errSacctCooldown) }
 
+// IsConnectionRefused reports whether err carries a slurmdbd "connection refused"
+// signal, exposed so the store/ui layers can classify a history failure for an
+// informative toast.
+func IsConnectionRefused(err error) bool { return isConnectionRefused(err) }
+
 // sacctAvailable reports whether batch sacct calls may proceed: true when there
 // has been no hard failure or when the cooldown has elapsed. Ports
 // commands._sacct_is_available.
@@ -142,13 +147,19 @@ func (c *Client) sacctMarkSuccess() {
 }
 
 // isConnectionRefused reports whether err carries a "connection refused" signal,
-// the non-transient error that trips the cooldown. It checks both the error text
-// and any captured command stderr.
+// the non-transient error that trips the cooldown. It first inspects a
+// *CommandError's captured stderr (the slurmdbd-down case prints "connection
+// refused" only to stderr and still exits 0), then falls back to the error text
+// so plain errors are still classified.
 func isConnectionRefused(err error) bool {
 	if err == nil {
 		return false
 	}
-	return strings.Contains(strings.ToLower(err.Error()), "connection refused")
+	var ce *CommandError
+	if errors.As(err, &ce) && hasHardFailureSignal(ce.Stderr) {
+		return true
+	}
+	return strings.Contains(strings.ToLower(err.Error()), connectionRefusedSignal)
 }
 
 // RunningJobs returns the current user's running and pending jobs via the

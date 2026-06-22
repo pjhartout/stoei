@@ -247,11 +247,12 @@ func (j *Jobs) Refresh() {
 	reselect(&j.table, sorted, selectedID)
 }
 
-// plainRows builds the markup-free cell values for every running job in store
-// order. The first column (job id) is the stable key used for filtering, sorting
-// and cursor restoration.
+// plainRows builds the markup-free cell values for the merged running-plus-history
+// job list in store order (running/pending jobs first, then deduped completed/
+// failed history jobs). The first column (job id) is the stable key used for
+// filtering, sorting and cursor restoration.
 func (j *Jobs) plainRows() [][]string {
-	jobs := j.store.RunningJobs
+	jobs := j.store.MergedJobs()
 	rows := make([][]string, 0, len(jobs))
 	for _, job := range jobs {
 		rows = append(rows, []string{

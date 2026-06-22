@@ -267,6 +267,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case historyMsg:
 		a.store.SetHistory(msg.jobs, msg.stats, msg.gen, msg.err)
 		a.observe(store.SectionHistory, msg.err)
+		a.jobs.Refresh() // Completed/failed history jobs merge into the Jobs table.
 		a.frame.dirty = true
 		return a, nil
 
@@ -489,11 +490,31 @@ func (a *App) refreshSidebar() {
 }
 
 // observe feeds a fetch outcome to the health notifier and appends/clears a toast
-// on an edge transition (I9).
+// on an edge transition (I9). On a failing edge it prefers a section-specific,
+// cause-aware message over the notifier's generic text so a slurmdbd outage reads
+// clearly (for example "Job history unavailable: slurmdbd connection refused").
 func (a *App) observe(section store.Section, err error) {
-	if t, ok := a.notifier.Observe(section.String(), err == nil); ok {
-		a.pushToast(t.Message)
+	t, ok := a.notifier.Observe(section.String(), err == nil)
+	if !ok {
+		return
 	}
+	if t.Kind == toastFailed {
+		if msg := failureToastMessage(section, err); msg != "" {
+			t.Message = msg
+		}
+	}
+	a.pushToast(t.Message)
+}
+
+// failureToastMessage returns a section-specific failure message, or "" to fall
+// back to the notifier's generic text. The history section special-cases a
+// slurmdbd "connection refused" so the user understands why the job history is
+// empty.
+func failureToastMessage(section store.Section, err error) string {
+	if section == store.SectionHistory && store.IsSacctUnavailable(err) {
+		return "Job history unavailable: slurmdbd connection refused"
+	}
+	return ""
 }
 
 // pushToast appends a toast message, keeping at most maxToasts most-recent lines.

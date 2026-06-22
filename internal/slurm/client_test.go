@@ -388,6 +388,46 @@ func TestSacctCooldownSuppressesBatchCalls(t *testing.T) {
 	}
 }
 
+// TestSacctCommandErrorTripsCooldown verifies that a *CommandError whose stderr
+// carries "connection refused" on a zero exit (the real slurmdbd-down shape from
+// ExecRunner) trips the cooldown: the first JobHistory returns the error, and the
+// next batch sacct call is suppressed entirely. It uses FakeRunner with a seeded
+// CommandError, mirroring how ExecRunner classifies a stderr-only failure.
+func TestSacctCommandErrorTripsCooldown(t *testing.T) {
+	cmdErr := &CommandError{Name: "sacct", Stderr: "sacct: error: slurmdbd: Connection refused", Err: nil}
+	r := &FakeRunner{Errs: map[string]error{"sacct": cmdErr}}
+	c := NewClient(r, WithUsername("alice"))
+	ctx := context.Background()
+
+	_, _, err := c.JobHistory(ctx, 7)
+	if err == nil || !isConnectionRefused(err) {
+		t.Fatalf("first call err = %v, want connection refused", err)
+	}
+	callsAfterFail := countCalls(r.Calls, "sacct")
+	if callsAfterFail != 1 {
+		t.Fatalf("sacct called %d times, want 1", callsAfterFail)
+	}
+
+	// Cooldown now active: the next batch sacct call is suppressed (no new sacct).
+	if _, _, e := c.JobHistory(ctx, 7); !ErrSacctCooldown(e) {
+		t.Fatalf("during cooldown err = %v, want ErrSacctCooldown", e)
+	}
+	if got := countCalls(r.Calls, "sacct"); got != callsAfterFail {
+		t.Errorf("sacct invoked during cooldown: %d calls, want %d", got, callsAfterFail)
+	}
+}
+
+// countCalls counts how many recorded calls invoked name.
+func countCalls(calls []FakeCall, name string) int {
+	n := 0
+	for _, c := range calls {
+		if c.Name == name {
+			n++
+		}
+	}
+	return n
+}
+
 // TestSacctTransientErrorDoesNotTripCooldown verifies that a non-"connection
 // refused" failure does not suppress later batch calls.
 func TestSacctTransientErrorDoesNotTripCooldown(t *testing.T) {

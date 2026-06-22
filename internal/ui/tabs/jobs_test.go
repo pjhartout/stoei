@@ -106,3 +106,24 @@ func TestBannerUsesUsername(t *testing.T) {
 		t.Errorf("banner = %q; want a My Usage summary", got)
 	}
 }
+
+// TestHistoryJobsRenderInTable asserts Fix B end-to-end at the tab level: a
+// completed/failed history job that is not currently running is merged into the
+// Jobs table and shown alongside running jobs.
+func TestHistoryJobsRenderInTable(t *testing.T) {
+	j, st := seedJobs(t, []store.RunningJob{
+		{ID: "1001", Name: "running_job", State: "RUNNING", Time: "1:00", Nodes: "1", NodeList: "n01"},
+	})
+	st.SetHistory([]store.HistoryJob{
+		{ID: "2002", Name: "done_job", State: "COMPLETED", Elapsed: "0:42", NodeList: "n02"},
+		{ID: "2003", Name: "broke_job", State: "FAILED", Elapsed: "0:05", NodeList: "n03"},
+	}, store.HistoryStats{}, st.NextGen(store.SectionHistory), nil)
+	j.Refresh()
+
+	view := j.table.View()
+	for _, want := range []string{"1001", "running_job", "2002", "done_job", "2003", "broke_job"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("merged table view missing %q; view:\n%s", want, view)
+		}
+	}
+}

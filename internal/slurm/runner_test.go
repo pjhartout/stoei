@@ -3,6 +3,7 @@ package slurm
 import (
 	"context"
 	"errors"
+	"os/exec"
 	"testing"
 )
 
@@ -34,5 +35,64 @@ func TestFakeRunnerReturnsCannedError(t *testing.T) {
 
 	if _, err := fr.Run(context.Background(), "sacct"); !errors.Is(err, want) {
 		t.Fatalf("got %v, want %v", err, want)
+	}
+}
+
+// TestExecRunnerConnectionRefusedOnExitZero is the slurmdbd-down case: sacct
+// prints "connection refused" only to stderr yet exits 0 with empty stdout. The
+// runner must surface this as a *CommandError so the cooldown can trip, instead
+// of silently returning success. Run against a tiny shell command to avoid a real
+// scheduler.
+func TestExecRunnerConnectionRefusedOnExitZero(t *testing.T) {
+	out, err := ExecRunner{}.Run(context.Background(),
+		"sh", "-c", `echo "sacct: error: slurmdbd: Connection refused" 1>&2; exit 0`)
+	if err == nil {
+		t.Fatal("expected a CommandError, got nil")
+	}
+	if len(out) != 0 {
+		t.Errorf("stdout = %q, want empty", out)
+	}
+	var ce *CommandError
+	if !errors.As(err, &ce) {
+		t.Fatalf("err = %T (%v), want *CommandError", err, err)
+	}
+	if ce.Err != nil {
+		t.Errorf("CommandError.Err = %v, want nil (exit 0)", ce.Err)
+	}
+	if !isConnectionRefused(err) {
+		t.Errorf("isConnectionRefused(%v) = false, want true", err)
+	}
+}
+
+// TestExecRunnerNonZeroExitWrapsExitError verifies a non-zero exit yields a
+// *CommandError that wraps the *exec.ExitError and carries the captured stderr.
+func TestExecRunnerNonZeroExitWrapsExitError(t *testing.T) {
+	_, err := ExecRunner{}.Run(context.Background(),
+		"sh", "-c", `echo "boom" 1>&2; exit 3`)
+	if err == nil {
+		t.Fatal("expected a CommandError, got nil")
+	}
+	var ce *CommandError
+	if !errors.As(err, &ce) {
+		t.Fatalf("err = %T (%v), want *CommandError", err, err)
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Errorf("err does not unwrap to *exec.ExitError: %v", err)
+	}
+	if ce.Stderr != "boom" {
+		t.Errorf("CommandError.Stderr = %q, want %q", ce.Stderr, "boom")
+	}
+}
+
+// TestExecRunnerCleanSuccessHasNoError verifies a clean exit-0 command with no
+// hard-failure stderr returns its stdout and a nil error.
+func TestExecRunnerCleanSuccessHasNoError(t *testing.T) {
+	out, err := ExecRunner{}.Run(context.Background(), "sh", "-c", `echo ok`)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if string(out) != "ok\n" {
+		t.Errorf("stdout = %q, want %q", out, "ok\n")
 	}
 }

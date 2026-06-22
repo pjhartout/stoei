@@ -48,3 +48,23 @@ type SlurmClient interface {
 
 // Compile-time assertion that the concrete client satisfies the interface.
 var _ SlurmClient = (*slurm.Client)(nil)
+
+// IsSacctUnavailable reports whether err indicates the sacct history backend
+// (slurmdbd) is unreachable: either the active retry cooldown after a hard
+// failure, or a fresh "connection refused" failure. The ui layer uses it to
+// surface an informative toast without importing internal/slurm directly.
+func IsSacctUnavailable(err error) bool {
+	if err == nil {
+		return false
+	}
+	return slurm.ErrSacctCooldown(err) || slurm.IsConnectionRefused(err)
+}
+
+// ErrSacctConnectionRefused is a ready-made connection-refused error in the exact
+// shape ExecRunner produces (a *slurm.CommandError whose stderr carries the
+// signal). It lets ui tests exercise the informative-toast path without importing
+// internal/slurm directly. IsSacctUnavailable reports true for it.
+var ErrSacctConnectionRefused error = &slurm.CommandError{
+	Name:   "sacct",
+	Stderr: "sacct: error: slurmdbd: Connection refused",
+}
