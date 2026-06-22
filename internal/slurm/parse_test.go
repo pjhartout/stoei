@@ -1,6 +1,7 @@
 package slurm
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -120,6 +121,25 @@ func TestParseRunningJobs(t *testing.T) {
 	}
 	if jobs[2].State != "PENDING" || jobs[2].StartTime != "Unknown" {
 		t.Errorf("job[2] = %+v, want pending with Unknown start", jobs[2])
+	}
+}
+
+// TestParseRunningJobsTrimsFixedWidthPadding asserts the squeue -o fixed-width
+// padding (%.30i, %.50j, …) is stripped from each field, so values are the bare
+// content. Untrimmed, the padding hides short values (truncated to a default
+// column width they are all spaces) and inflates the rendered column widths. The
+// golden fixture is hand-written without padding, so this covers the real format.
+func TestParseRunningJobsTrimsFixedWidthPadding(t *testing.T) {
+	raw := "JOBID|JOBNAME|STATE|TIME|NODES|NODELIST|SUBMIT|START\n" +
+		fmt.Sprintf("%30s|%50s|%8s|%10s|%4s|%12s|%19s|%19s",
+			"5098105", "train", "RUNNING", "1:23:00", "2", "node[01-02]", "2024-01-15T10:00", "2024-01-15T10:05")
+	jobs := ParseRunningJobs(raw)
+	if len(jobs) != 1 {
+		t.Fatalf("got %d jobs, want 1", len(jobs))
+	}
+	j := jobs[0]
+	if j.ID != "5098105" || j.Name != "train" || j.State != "RUNNING" || j.Nodes != "2" || j.NodeList != "node[01-02]" {
+		t.Errorf("fixed-width padding not trimmed: %+v", j)
 	}
 }
 

@@ -206,6 +206,12 @@ func ParseRunningJobs(raw string) []RunningJob {
 		if len(parts) < minSqueueParts {
 			continue
 		}
+		// squeue -o uses fixed-width fields (%.30i, %.50j, …) that pad every value
+		// with spaces; trim them so the values are the bare content (otherwise the
+		// padding inflates the rendered column widths and hides short values).
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
+		}
 		jobs = append(jobs, RunningJob{
 			ID:         parts[0],
 			Name:       parts[1],
