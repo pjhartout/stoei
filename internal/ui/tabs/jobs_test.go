@@ -1,6 +1,7 @@
 package tabs
 
 import (
+	"regexp"
 	"strings"
 	"testing"
 
@@ -35,6 +36,34 @@ func TestColumnsFitLongValues(t *testing.T) {
 	}
 	if strings.Contains(out, "…") {
 		t.Errorf("unexpected ellipsis in jobs view:\n%s", out)
+	}
+}
+
+// TestSelectedRowHighlightSpansLine asserts the selected-row highlight bar spans
+// the whole line: it must fill the full table width, and the colored State cell
+// must use a foreground-only reset (ESC[39m) so the background is not cleared
+// mid-line (which previously left only the leading columns highlighted).
+func TestSelectedRowHighlightSpansLine(t *testing.T) {
+	j, _ := seedJobs(t, []store.RunningJob{
+		{ID: "5098105", Name: "train", State: "RUNNING", Time: "1:00", Nodes: "1", NodeList: "n01"},
+	})
+	j.SetSize(60, 12)
+
+	var row string
+	for _, ln := range strings.Split(j.View(), "\n") {
+		if strings.Contains(ln, "5098105") {
+			row = ln
+		}
+	}
+	if row == "" {
+		t.Fatal("selected row not found")
+	}
+	if !strings.Contains(row, "\x1b[39m") {
+		t.Errorf("State cell should end with a foreground-only reset (ESC[39m):\n%q", row)
+	}
+	plain := regexp.MustCompile(`\x1b\[[0-9;]*m`).ReplaceAllString(row, "")
+	if w := len([]rune(plain)); w != 60 {
+		t.Errorf("selected row width = %d; want 60 (bar spans the full line)", w)
 	}
 }
 

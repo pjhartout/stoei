@@ -102,7 +102,7 @@ func (ft *filterTable) SetKeyMode(mode string) { ft.keys = jobsKeysForMode(mode)
 // SetStyles re-themes the table and rebuilds the display rows.
 func (ft *filterTable) SetStyles(styles theme.Styles) {
 	ft.styles = styles
-	ft.table.SetStyles(tableStyles(styles))
+	ft.table.SetStyles(tableStylesWidth(styles, ft.width))
 	ft.rebuild()
 }
 
@@ -122,6 +122,7 @@ func (ft *filterTable) SetSize(width, height int) {
 	}
 	ft.table.SetWidth(width)
 	ft.table.SetHeight(h)
+	ft.table.SetStyles(tableStylesWidth(ft.styles, width))
 }
 
 // SetRows replaces the plain row set and rebuilds the table, preserving the

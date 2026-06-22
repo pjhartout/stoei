@@ -185,13 +185,24 @@ func tableStyles(styles theme.Styles) table.Styles {
 	return s
 }
 
+// tableStylesWidth is tableStyles with the selected-row highlight padded to width
+// so the bar spans the whole line rather than stopping at the cell content. A
+// non-positive width leaves the selection unpadded.
+func tableStylesWidth(styles theme.Styles, width int) table.Styles {
+	s := tableStyles(styles)
+	if width > 0 {
+		s.Selected = s.Selected.Width(width).MaxWidth(width)
+	}
+	return s
+}
+
 // SetKeyMode switches the Jobs tab's filter/sort bindings to the given preset.
 func (j *Jobs) SetKeyMode(mode string) { j.keys = jobsKeysForMode(mode) }
 
 // SetStyles re-themes the tab after a background/theme change.
 func (j *Jobs) SetStyles(styles theme.Styles) {
 	j.styles = styles
-	j.table.SetStyles(tableStyles(styles))
+	j.table.SetStyles(tableStylesWidth(styles, j.width))
 	j.Refresh()
 }
 
@@ -211,6 +222,7 @@ func (j *Jobs) SetSize(width, height int) {
 	}
 	j.table.SetWidth(width)
 	j.table.SetHeight(tableHeight)
+	j.table.SetStyles(tableStylesWidth(j.styles, width))
 }
 
 const (
