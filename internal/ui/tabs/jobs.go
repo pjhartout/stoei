@@ -176,10 +176,13 @@ func (j *Jobs) fitColumns(rows [][]string) {
 	}
 }
 
-// tableStyles maps the app theme onto the bubbles table styles.
+// tableStyles maps the app theme onto the bubbles table styles. Cells and the
+// header use a single left pad (no right pad) so columns sit one space apart
+// instead of the default two, keeping the table compact.
 func tableStyles(styles theme.Styles) table.Styles {
 	s := table.DefaultStyles()
-	s.Header = s.Header.Foreground(styles.Title.GetForeground()).Bold(true)
+	s.Cell = s.Cell.Padding(0, 0, 0, 1)
+	s.Header = s.Header.Foreground(styles.Title.GetForeground()).Bold(true).Padding(0, 0, 0, 1)
 	s.Selected = styles.Selection
 	return s
 }
