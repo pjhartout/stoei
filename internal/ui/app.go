@@ -1033,9 +1033,15 @@ func (a App) overlayTopModal(base string) string {
 	x := max((w-mw)/2, 0)
 	y := max((h-mh)/2, 0)
 
+	// A Compositor (not chained Canvas.Compose) is required to honor each layer's
+	// X/Y: Canvas.Compose draws a layer at the full canvas bounds, ignoring its
+	// offset, so the modal would pin to the top-left. The Compositor flattens
+	// layers to absolute positions and draws each at its own bounds.
 	return lipgloss.NewCanvas(w, h).
-		Compose(lipgloss.NewLayer(base)).
-		Compose(lipgloss.NewLayer(modal).X(x).Y(y).Z(1)).
+		Compose(lipgloss.NewCompositor(
+			lipgloss.NewLayer(base),
+			lipgloss.NewLayer(modal).X(x).Y(y).Z(1),
+		)).
 		Render()
 }
 
