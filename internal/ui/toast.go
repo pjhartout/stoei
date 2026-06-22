@@ -47,9 +47,15 @@ func toastBorderColor(level toastLevel, styles theme.Styles) lipgloss.Style {
 	}
 }
 
+// toastChrome is the horizontal space a toast's rounded border (2) and
+// horizontal padding (2) consume around its text.
+const toastChrome = 4
+
 // renderToasts renders the toast stack as charm-style boxed, accent/error/
-// success-bordered transient notices. An empty stack renders to "".
-func renderToasts(toasts []toastItem, styles theme.Styles) string {
+// success-bordered transient notices. An empty stack renders to "". Each box is
+// capped to maxWidth so a long message (e.g. a slurmdbd connection-refused
+// notice) wraps inside the border instead of overflowing the terminal.
+func renderToasts(toasts []toastItem, maxWidth int, styles theme.Styles) string {
 	if len(toasts) == 0 {
 		return ""
 	}
@@ -60,6 +66,9 @@ func renderToasts(toasts []toastItem, styles theme.Styles) string {
 			Border(lipgloss.RoundedBorder()).
 			BorderForeground(accent.GetForeground()).
 			Padding(0, 1)
+		if inner := maxWidth - toastChrome; inner > 0 && lipgloss.Width(t.text) > inner {
+			box = box.Width(inner)
+		}
 		boxes[i] = box.Render(accent.Render(t.text))
 	}
 	return strings.Join(boxes, "\n")

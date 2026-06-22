@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"charm.land/lipgloss/v2"
+
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
@@ -56,7 +58,7 @@ func TestRenderToastsLevels(t *testing.T) {
 	out := renderToasts([]toastItem{
 		{text: "failed thing", level: toastErrorLevel, ticks: 1},
 		{text: "recovered thing", level: toastSuccess, ticks: 1},
-	}, styles)
+	}, 80, styles)
 	if !strings.Contains(out, "failed thing") || !strings.Contains(out, "recovered thing") {
 		t.Errorf("toast render missing text:\n%s", out)
 	}
@@ -64,7 +66,20 @@ func TestRenderToastsLevels(t *testing.T) {
 	if !strings.Contains(out, "╭") {
 		t.Errorf("toast render not boxed:\n%s", out)
 	}
-	if renderToasts(nil, styles) != "" {
+	if renderToasts(nil, 80, styles) != "" {
 		t.Error("empty toast stack should render empty")
+	}
+}
+
+// TestRenderToastsCapsWidth asserts a long toast wraps inside the terminal width
+// instead of overflowing it (regression for the slurmdbd notice box overflowing).
+func TestRenderToastsCapsWidth(t *testing.T) {
+	styles := theme.BuildStyles(theme.Charm(), true)
+	long := "Job history unavailable: slurmdbd connection refused"
+	for _, w := range []int{40, 30, 20} {
+		out := renderToasts([]toastItem{{text: long, level: toastErrorLevel, ticks: 1}}, w, styles)
+		if got := lipgloss.Width(out); got > w {
+			t.Errorf("toast box width %d exceeds terminal width %d:\n%s", got, w, out)
+		}
 	}
 }

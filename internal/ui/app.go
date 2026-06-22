@@ -1005,7 +1005,7 @@ func (a App) footer() string {
 // transient notices (charm-style), with recovered toasts shown in success green
 // and failures in error red.
 func (a App) toastView() string {
-	return renderToasts(a.toasts, a.styles)
+	return renderToasts(a.toasts, a.widthOrDefault(), a.styles)
 }
 
 // unavailableView renders the full-screen Slurm-unavailable screen.
