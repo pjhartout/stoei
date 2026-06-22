@@ -79,7 +79,100 @@ type Styles struct {
 	Muted lipgloss.Style
 }
 
-// Charm returns the default charm.land-flavored palette.
+// DefaultThemeName is the default palette name, matching config.DefaultTheme
+// and the Python DEFAULT_THEME_NAME (oc-1).
+const DefaultThemeName = "oc-1"
+
+// solid wraps a single hex color as an AdaptiveColor whose light and dark
+// variants are identical. The ported OpenCode palettes are dark-first single
+// colors (themes.py uses dark=True with one value per role), so light and dark
+// resolve to the same color; the charm palette keeps distinct light/dark pairs.
+func solid(hex string) AdaptiveColor {
+	c := lipgloss.Color(hex)
+	return AdaptiveColor{Light: c, Dark: c}
+}
+
+// palettes is the registry of named themes, keyed by theme id. It is built from
+// the OpenCode palettes ported from themes.py plus the original charm palette.
+// Roles map from the OpenCode palette: Accent←primary, AccentAlt←accent,
+// Text←text_base, Subtle←text_muted, Border←border, Error/Success/Warning from
+// the semantic colors, Muted←secondary.
+var palettes = func() map[string]Theme {
+	ts := []Theme{
+		Charm(),
+		opencode("oc-1", "#fab283", "#034cff", "#f5f5f5", "#b8b0b0", "#3a3333", "#fc533a", "#12c905", "#fcd53a", "#716c6b"),
+		opencode("tokyonight", "#7aa2f7", "#7aa2f7", "#c0caf5", "#7a88cf", "#3a3e57", "#f7768e", "#9ece6a", "#e0af68", "#1a1b26"),
+		opencode("dracula", "#bd93f9", "#bd93f9", "#f8f8f2", "#b6b9e4", "#3f415a", "#ff5555", "#50fa7b", "#ffb86c", "#1d1e28"),
+		opencode("monokai", "#ae81ff", "#ae81ff", "#f8f8f2", "#c5c5c0", "#494a3a", "#f92672", "#a6e22e", "#fd971f", "#272822"),
+		opencode("solarized", "#6c71c4", "#6c71c4", "#93a1a1", "#6c7f80", "#31505b", "#dc322f", "#859900", "#b58900", "#002b36"),
+		opencode("nord", "#88c0d0", "#88c0d0", "#e5e9f0", "#d8dee9", "#4c566a", "#bf616a", "#a3be8c", "#ebcb8b", "#2e3440"),
+		opencode("catppuccin", "#b4befe", "#b4befe", "#cdd6f4", "#a6adc8", "#4a4763", "#f38ba8", "#a6d189", "#f4b8e4", "#1e1e2e"),
+		opencode("ayu", "#39bae6", "#39bae6", "#ced0d6", "#8f9aa5", "#3d4555", "#ff8f77", "#7fd962", "#ebb062", "#0f1419"),
+		opencode("onedarkpro", "#61afef", "#61afef", "#abb2bf", "#818899", "#4a5164", "#e06c75", "#98c379", "#e5c07b", "#1e222a"),
+		opencode("shadesofpurple", "#c792ff", "#c792ff", "#f5f0ff", "#c9b6ff", "#4d3a73", "#ff7ac6", "#7be0b0", "#ffd580", "#1a102b"),
+		opencode("nightowl", "#82aaff", "#82aaff", "#d6deeb", "#5f7e97", "#3a5a75", "#ef5350", "#c5e478", "#ecc48d", "#011627"),
+		opencode("vesper", "#ffc799", "#ffc799", "#ffffff", "#a0a0a0", "#282828", "#ff8080", "#99ffe4", "#ffc799", "#101010"),
+		opencode("gruvbox", "#fabd2f", "#83a598", "#ebdbb2", "#a89984", "#504945", "#fb4934", "#b8bb26", "#fe8019", "#928374"),
+	}
+	m := make(map[string]Theme, len(ts))
+	for _, t := range ts {
+		m[t.Name] = t
+	}
+	return m
+}()
+
+// opencode builds a Theme from an OpenCode-style palette of single hex colors
+// (dark-first; light and dark variants are identical). Ports
+// themes.OpencodeThemePalette → role mapping.
+func opencode(name, primary, accent, text, muted, border, errc, success, warning, secondary string) Theme {
+	return Theme{
+		Name:      name,
+		Accent:    solid(primary),
+		AccentAlt: solid(accent),
+		Text:      solid(text),
+		Subtle:    solid(muted),
+		Border:    solid(border),
+		Error:     solid(errc),
+		Success:   solid(success),
+		Warning:   solid(warning),
+		Muted:     solid(secondary),
+	}
+}
+
+// ByName returns the named palette, falling back to the default (oc-1) for an
+// unknown name. Ports the THEME_LABELS lookup with the DEFAULT_THEME_NAME
+// fallback in settings.from_mapping.
+func ByName(name string) Theme {
+	if t, ok := palettes[name]; ok {
+		return t
+	}
+	return palettes[DefaultThemeName]
+}
+
+// Names returns the registered theme names in a stable, registry-insertion-free
+// order matching the config ValidThemes/cycling order the settings form uses.
+func Names() []string {
+	return []string{
+		"oc-1",
+		"tokyonight",
+		"dracula",
+		"monokai",
+		"solarized",
+		"nord",
+		"catppuccin",
+		"ayu",
+		"onedarkpro",
+		"shadesofpurple",
+		"nightowl",
+		"vesper",
+		"gruvbox",
+		"charm",
+	}
+}
+
+// Charm returns the default charm.land-flavored palette. It retains distinct
+// light/dark variants (the only adaptive palette); the ported OpenCode palettes
+// are dark-first.
 func Charm() Theme {
 	return Theme{
 		Name:      "charm",

@@ -90,6 +90,7 @@ func helpSections(km keys.KeyMap) []helpSection {
 		}},
 		{"General", []helpBinding{
 			{bindingKey(km.Refresh, "r"), "Refresh data now"},
+			{bindingKey(km.Settings, "s"), "Open settings"},
 			{bindingKey(km.Help, "?"), "Show this help screen"},
 			{bindingKey(km.Quit, "q"), "Quit application"},
 		}},

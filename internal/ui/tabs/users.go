@@ -97,6 +97,13 @@ func (u *Users) active() *filterTable {
 	}
 }
 
+// SetEnergyMonths updates the energy-window label (months) used by the energy
+// pane header, applied live when the user changes it in settings.
+func (u *Users) SetEnergyMonths(months int) {
+	u.energyMonths = months
+	u.Refresh()
+}
+
 // SetStyles re-themes all three panes.
 func (u *Users) SetStyles(styles theme.Styles) {
 	u.styles = styles

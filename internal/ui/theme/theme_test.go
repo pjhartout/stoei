@@ -42,3 +42,38 @@ func TestAccentGradientReturnsRequestedSteps(t *testing.T) {
 		t.Fatalf("gradient steps = %d, want 5", len(g))
 	}
 }
+
+// TestByNameReturnsDistinctPalettes asserts named palettes resolve to distinct
+// themes and that an unknown name falls back to the default.
+func TestByNameReturnsDistinctPalettes(t *testing.T) {
+	oc := ByName("oc-1")
+	if oc.Name != "oc-1" {
+		t.Errorf("ByName(oc-1).Name = %q, want oc-1", oc.Name)
+	}
+
+	dracula := ByName("dracula")
+	if dracula.Name != "dracula" {
+		t.Errorf("ByName(dracula).Name = %q, want dracula", dracula.Name)
+	}
+
+	// Distinct palettes must differ on at least the accent color.
+	if oc.Accent.Dark == dracula.Accent.Dark {
+		t.Error("oc-1 and dracula share an accent; palettes are not distinct")
+	}
+
+	// Unknown name falls back to the default palette.
+	fallback := ByName("does-not-exist")
+	if fallback.Name != DefaultThemeName {
+		t.Errorf("ByName(unknown).Name = %q, want fallback %q", fallback.Name, DefaultThemeName)
+	}
+}
+
+// TestNamesCoverRegistry asserts every name returned by Names resolves to a real
+// palette (no dangling names in the cycling list).
+func TestNamesCoverRegistry(t *testing.T) {
+	for _, n := range Names() {
+		if ByName(n).Name != n {
+			t.Errorf("Names() lists %q but ByName(%q) did not return it", n, n)
+		}
+	}
+}

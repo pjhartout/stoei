@@ -48,6 +48,11 @@ type FakeClient struct {
 	LastNodeDetailName string
 	// LastCancelJobID is the job ID passed to the most recent CancelJob call.
 	LastCancelJobID string
+	// LastHistoryDays is the day window passed to the most recent JobHistory call.
+	LastHistoryDays int
+	// LastEnergyMonths is the month window passed to the most recent EnergyHistory
+	// call.
+	LastEnergyMonths int
 }
 
 // Available implements SlurmClient.
@@ -73,7 +78,8 @@ func (f *FakeClient) UserJobs(_ context.Context, username string) ([]slurm.UserJ
 }
 
 // JobHistory implements SlurmClient.
-func (f *FakeClient) JobHistory(_ context.Context, _ int) ([]slurm.HistoryJob, slurm.HistoryStats, error) {
+func (f *FakeClient) JobHistory(_ context.Context, days int) ([]slurm.HistoryJob, slurm.HistoryStats, error) {
+	f.LastHistoryDays = days
 	return f.HistoryJobsData, f.HistoryStatsData, f.JobHistoryErr
 }
 
@@ -93,7 +99,8 @@ func (f *FakeClient) PendingPriority(_ context.Context) ([]slurm.PriorityEntry, 
 }
 
 // EnergyHistory implements SlurmClient.
-func (f *FakeClient) EnergyHistory(_ context.Context, _ int) ([]slurm.EnergyRecord, error) {
+func (f *FakeClient) EnergyHistory(_ context.Context, months int) ([]slurm.EnergyRecord, error) {
+	f.LastEnergyMonths = months
 	return f.EnergyData, f.EnergyHistoryErr
 }
 

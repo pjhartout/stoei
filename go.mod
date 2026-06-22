@@ -7,6 +7,7 @@ require (
 	charm.land/bubbletea/v2 v2.0.7
 	charm.land/lipgloss/v2 v2.0.4
 	github.com/charmbracelet/x/exp/teatest/v2 v2.0.0-20260621010513-945fab64fd3e
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

@@ -12,12 +12,14 @@ package ui
 import (
 	"fmt"
 	"strings"
+	"time"
 
 	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
+	"github.com/pjhartout/stoei/internal/config"
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/components"
 	"github.com/pjhartout/stoei/internal/ui/keys"
@@ -51,11 +53,19 @@ type App struct {
 	store  *store.Store
 	client store.SlurmClient
 
+	// cfg is the live user configuration. The settings modal mutates it and
+	// re-applies the derived theme/keymap/intervals/windows in place.
+	cfg config.Config
+
 	keys      keys.KeyMap
 	help      help.Model
 	theme     theme.Theme
 	styles    theme.Styles
 	intervals Intervals
+
+	// configPath is where Save writes the persisted config; empty disables
+	// persistence (tests). It is resolved from the XDG path by the constructor.
+	configPath string
 
 	notifier *healthNotifier
 	toasts   []string
@@ -115,42 +125,63 @@ type frameCache struct {
 	base  string
 }
 
-// New constructs the root model wired to s and client. Styles default to dark
-// until the terminal reports its background. A fresh log ring is allocated; use
-// NewWithLogRing to share an existing ring (for example one already wired as a
-// logging sink).
+// New constructs the root model wired to s and client using the default
+// configuration. Styles default to dark until the terminal reports its
+// background. A fresh log ring is allocated; use NewWithLogRing to share an
+// existing ring (for example one already wired as a logging sink).
 func New(s *store.Store, client store.SlurmClient) App {
 	return NewWithLogRing(s, client, components.NewLogRing(components.DefaultMaxLogLines))
 }
 
 // NewWithLogRing constructs the root model wired to s, client, and an existing
-// log ring the Logs tab renders from.
+// log ring, using the default configuration.
 func NewWithLogRing(s *store.Store, client store.SlurmClient, ring *components.LogRing) App {
-	t := theme.Charm()
+	return NewWithConfig(s, client, ring, config.Default(), "")
+}
+
+// NewWithConfig constructs the root model from cfg: the theme, keymap, refresh
+// intervals, history/energy windows, and log-viewer line count are all derived
+// from the configuration rather than hardcoded. configPath is where the settings
+// modal persists changes ("" disables persistence, for tests).
+func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.LogRing, cfg config.Config, configPath string) App {
+	t := theme.ByName(cfg.Theme)
 	styles := theme.BuildStyles(t, true)
 
 	username := client.Username()
 	a := App{
 		store:       s,
 		client:      client,
-		keys:        keys.Default(),
+		cfg:         cfg,
+		configPath:  configPath,
+		keys:        keys.BuildKeyMap(cfg.KeybindMode),
 		help:        help.New(),
 		theme:       t,
 		styles:      styles,
-		intervals:   DefaultIntervals(),
+		intervals:   intervalsFromConfig(cfg),
 		notifier:    newHealthNotifier(),
 		logRing:     ring,
 		dark:        true,
 		frame:       &frameCache{dirty: true},
 		jobs:        tabs.NewJobs(s, username, styles),
 		nodes:       tabs.NewNodes(s, styles),
-		users:       tabs.NewUsers(s, styles, energyMonths),
+		users:       tabs.NewUsers(s, styles, cfg.EnergyHistoryMonths),
 		priority:    tabs.NewPriority(s, styles, username),
 		logsTab:     tabs.NewLogs(ring, styles),
 		sidebar:     components.NewSidebar(styles),
 		detailCache: modals.NewJobDetailCache(),
 	}
 	return a
+}
+
+// intervalsFromConfig derives the two-tier refresh intervals from cfg's
+// refresh_interval (seconds): the fast tier is the configured interval, the slow
+// tier is slowIntervalFactor times it.
+func intervalsFromConfig(cfg config.Config) Intervals {
+	fast := time.Duration(cfg.RefreshInterval * float64(time.Second))
+	if fast <= 0 {
+		fast = defaultFastInterval
+	}
+	return Intervals{Fast: fast, Slow: fast * slowIntervalFactor}
 }
 
 // LogRing returns the app's log ring so the caller can wire it as a logging sink.
@@ -190,7 +221,7 @@ func (a *App) dispatchRunning() tea.Cmd {
 func (a *App) dispatchHistory() tea.Cmd {
 	gen := a.store.NextGen(store.SectionHistory)
 	a.store.SetLoading(store.SectionHistory, gen)
-	return fetchHistory(a.client, gen, historyDays)
+	return fetchHistory(a.client, gen, a.cfg.JobHistoryDays)
 }
 
 // dispatchHeavy bumps every heavy section's generation, marks each loading, sets
@@ -216,17 +247,14 @@ func (a *App) dispatchHeavy() tea.Cmd {
 		fetchAllUsersJobs(a.client, gAll),
 		fetchFairShare(a.client, gFair),
 		fetchPendingPrio(a.client, gPend),
-		fetchEnergy(a.client, gEnergy, energyMonths),
+		fetchEnergy(a.client, gEnergy, a.cfg.EnergyHistoryMonths),
 		fetchWaitTime(a.client, gWait, waitTimeHours),
 	)
 }
 
-// Default fetch windows. Phase 6 sources these from config.
-const (
-	historyDays   = 7
-	energyMonths  = 1
-	waitTimeHours = 1
-)
+// waitTimeHours is the per-partition wait-time lookback window. It is not user
+// configurable (no Python Settings field exists for it).
+const waitTimeHours = 1
 
 // Update is the heart of the model: it wires window-size fanout, background
 // detection, global keys, the two tick handlers, and the async result handlers.
@@ -333,7 +361,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.pushToast("No " + msg.Label + " path available")
 			return a, nil
 		}
-		return a, a.pushModal(modals.NewLogViewer(a.styles, msg.Path, msg.Label, logViewerLines))
+		return a, a.pushModal(modals.NewLogViewer(a.styles, msg.Path, msg.Label, a.cfg.LogViewerLines))
 
 	case modals.CancelRequestedMsg:
 		if msg.Err != nil {
@@ -346,6 +374,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case modals.LogToastMsg:
 		a.pushToast(msg.Text)
 		return a, nil
+
+	case modals.SettingsToastMsg:
+		a.pushToast(msg.Text)
+		return a, nil
+
+	case modals.SettingsAppliedMsg:
+		return a, a.applyConfig(msg.Config)
 	}
 
 	return a.routeToActive(msg)
@@ -377,6 +412,8 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a, tea.Quit
 	case key.Matches(msg, a.keys.Help):
 		return a, a.pushModal(modals.NewHelp(a.keys, a.styles))
+	case key.Matches(msg, a.keys.Settings):
+		return a, a.pushModal(modals.NewSettings(a.styles, a.cfg))
 	case key.Matches(msg, a.keys.Refresh):
 		return a, a.manualRefresh()
 	}
@@ -404,10 +441,6 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 
 	return a.routeToActive(msg)
 }
-
-// logViewerLines is the tail window for the log viewer. Phase 6 sources it from
-// config.
-const logViewerLines = 1000
 
 // handleModalOpenKey opens the right modal for the active tab's selected row:
 // Enter opens a detail (job/node/user/account), "i" opens the job-id prompt, and
@@ -703,6 +736,36 @@ func (a *App) rebuildStyles() {
 	for _, m := range a.modals {
 		m.SetStyles(a.styles)
 	}
+}
+
+// applyConfig persists the new config and applies it live: it swaps the theme
+// (rebuilds styles and re-themes every sub-model), swaps the keymap (so the
+// footer/help reflect the new preset), updates the refresh intervals, and pushes
+// the new energy-months label to the Users tab. The history/energy/log-line
+// windows are read from a.cfg on the next dispatch, so updating a.cfg suffices.
+// A manual refresh is triggered so the new history/energy windows take effect at
+// once. Ports the live-apply path of the Python settings flow.
+func (a *App) applyConfig(cfg config.Config) tea.Cmd {
+	themeChanged := cfg.Theme != a.cfg.Theme
+	a.cfg = cfg
+
+	a.theme = theme.ByName(cfg.Theme)
+	if themeChanged {
+		a.rebuildStyles()
+	}
+	a.keys = keys.BuildKeyMap(cfg.KeybindMode)
+	a.intervals = intervalsFromConfig(cfg)
+	a.users.SetEnergyMonths(cfg.EnergyHistoryMonths)
+
+	if a.configPath != "" {
+		if err := config.Save(a.configPath, cfg); err != nil {
+			a.pushToast("Failed to save settings: " + err.Error())
+		}
+	}
+
+	a.frame.dirty = true
+	// Re-fetch so the new history/energy windows are reflected immediately.
+	return a.manualRefresh()
 }
 
 // pushModal pushes a modal onto the stack, sizes it, and returns its Init Cmd so
