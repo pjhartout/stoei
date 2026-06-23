@@ -219,6 +219,10 @@ func BuildStyles(t Theme, dark bool) Styles {
 	success := t.Success.Resolve(dark)
 	warning := t.Warning.Resolve(dark)
 	muted := t.Muted.Resolve(dark)
+	// The palette's Muted value is often the theme's background color, which would
+	// render cancelled/inactive text invisibly (background on background). Blend it
+	// halfway toward Text so it is a readable dim tone on every theme.
+	mutedFg := lipgloss.Blend1D(3, text, muted)[1]
 
 	return Styles{
 		Title: lipgloss.NewStyle().
@@ -249,7 +253,7 @@ func BuildStyles(t Theme, dark bool) Styles {
 		Warning: lipgloss.NewStyle().
 			Foreground(warning),
 		Muted: lipgloss.NewStyle().
-			Foreground(muted),
+			Foreground(mutedFg),
 		Selection: lipgloss.NewStyle().
 			Foreground(text).
 			Background(border).
