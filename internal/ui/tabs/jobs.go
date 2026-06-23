@@ -191,7 +191,10 @@ func tableStyles(styles theme.Styles) table.Styles {
 func tableStylesWidth(styles theme.Styles, width int) table.Styles {
 	s := tableStyles(styles)
 	if width > 0 {
-		s.Selected = s.Selected.Width(width).MaxWidth(width)
+		// Inline keeps the selected row on a single line: Width pads a short row to
+		// fill the bar, but without Inline it would *wrap* a row wider than width to
+		// a second line; Inline truncates instead (the trick the table uses per cell).
+		s.Selected = s.Selected.Width(width).MaxWidth(width).Inline(true)
 	}
 	return s
 }
