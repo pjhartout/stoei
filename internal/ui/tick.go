@@ -37,6 +37,22 @@ type fastTickMsg struct{ at time.Time }
 // slowTickMsg fires on the slow refresh tier.
 type slowTickMsg struct{ at time.Time }
 
+// spinnerTickInterval is the frame cadence of the loading-spinner animation
+// (~10 fps). It is a conditional tier: it runs only while a section is loading
+// and stops re-arming once nothing is in flight, so the UI is idle when there is
+// nothing to animate.
+const spinnerTickInterval = 100 * time.Millisecond
+
+// spinnerTickMsg advances the loading-spinner animation frames.
+type spinnerTickMsg struct{ at time.Time }
+
+// spinnerTick returns a Cmd that fires a single spinnerTickMsg after d. It is
+// started when a load begins and re-armed only while at least one section is
+// still loading (handleSpinnerTick), so it never runs when the UI is idle.
+func spinnerTick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return spinnerTickMsg{at: t} })
+}
+
 // fastTick returns a Cmd that fires a single fastTickMsg after d. Each tier
 // re-arms only from its own handler (I2): the root model, on receiving a
 // fastTickMsg, dispatches the fast fetches and calls fastTick again. It is never

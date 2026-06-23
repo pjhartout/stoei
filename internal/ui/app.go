@@ -102,6 +102,9 @@ type App struct {
 	heavyInFlight bool
 	// heavyPending counts the outstanding heavy-wave fetches.
 	heavyPending int
+	// spinnerActive is true while the loading-spinner animation tick is in flight,
+	// so it is started at most once and stopped when nothing is loading.
+	spinnerActive bool
 
 	// unavailable holds the Slurm-availability error; non-nil renders the
 	// full-screen unavailable screen.
@@ -152,26 +155,28 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 
 	username := client.Username()
 	a := App{
-		store:       s,
-		client:      client,
-		cfg:         cfg,
-		configPath:  configPath,
-		keys:        keys.BuildKeyMap(cfg.KeybindMode),
-		help:        help.New(),
-		theme:       t,
-		styles:      styles,
-		intervals:   intervalsFromConfig(cfg),
-		notifier:    newHealthNotifier(),
-		logRing:     ring,
-		dark:        true,
-		frame:       &frameCache{dirty: true},
-		jobs:        tabs.NewJobs(s, username, styles),
-		nodes:       tabs.NewNodes(s, styles),
-		users:       tabs.NewUsers(s, styles, cfg.EnergyHistoryMonths),
-		priority:    tabs.NewPriority(s, styles, username),
-		logsTab:     tabs.NewLogs(ring, styles),
-		sidebar:     components.NewSidebar(styles),
-		detailCache: modals.NewJobDetailCache(),
+		store:      s,
+		client:     client,
+		cfg:        cfg,
+		configPath: configPath,
+		keys:       keys.BuildKeyMap(cfg.KeybindMode),
+		help:       help.New(),
+		theme:      t,
+		styles:     styles,
+		intervals:  intervalsFromConfig(cfg),
+		notifier:   newHealthNotifier(),
+		logRing:    ring,
+		dark:       true,
+		frame:      &frameCache{dirty: true},
+		// spinnerActive starts true because Init batches the first spinner tick.
+		spinnerActive: true,
+		jobs:          tabs.NewJobs(s, username, styles),
+		nodes:         tabs.NewNodes(s, styles),
+		users:         tabs.NewUsers(s, styles, cfg.EnergyHistoryMonths),
+		priority:      tabs.NewPriority(s, styles, username),
+		logsTab:       tabs.NewLogs(ring, styles),
+		sidebar:       components.NewSidebar(styles),
+		detailCache:   modals.NewJobDetailCache(),
 	}
 	// Apply the tab-local filter/sort bindings for the active preset so an
 	// emacs-mode config rebinds them (C-s filter, C-o sort) from the start.
@@ -221,6 +226,7 @@ func (a App) Init() tea.Cmd {
 		heavy,
 		fastTick(a.intervals.Fast),
 		slowTick(a.intervals.Slow),
+		spinnerTick(spinnerTickInterval),
 	)
 }
 
@@ -324,6 +330,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case slowTickMsg:
 		return a.handleSlowTick()
 
+	case spinnerTickMsg:
+		return a.handleSpinnerTick()
 	}
 
 	if m, cmd, ok := a.handleDataMsg(msg); ok {
@@ -620,6 +628,7 @@ func (a *App) manualRefresh() tea.Cmd {
 		a.dispatchRunning(),
 		a.dispatchHistory(),
 		a.dispatchHeavy(),
+		a.ensureSpinner(),
 	)
 }
 
@@ -636,6 +645,7 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	// Logs tab is re-rendered on the fast tick to surface new lines.
 	a.logsTab.Refresh()
 	a.frame.dirty = true
+	cmds = append(cmds, a.ensureSpinner())
 	return a, tea.Batch(cmds...)
 }
 
@@ -646,7 +656,31 @@ func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
 	if !a.heavyInFlight {
 		cmds = append(cmds, a.dispatchHeavy())
 	}
+	cmds = append(cmds, a.ensureSpinner())
 	return a, tea.Batch(cmds...)
+}
+
+// ensureSpinner starts the loading-spinner animation tick if it is not already
+// running and a section is loading, returning the tick Cmd (or nil). Guarding on
+// spinnerActive keeps at most one spinner tier in flight.
+func (a *App) ensureSpinner() tea.Cmd {
+	if a.spinnerActive || !a.store.AnyLoading() {
+		return nil
+	}
+	a.spinnerActive = true
+	return spinnerTick(spinnerTickInterval)
+}
+
+// handleSpinnerTick advances the loading-spinner animation: it marks the frame
+// dirty so the spinner re-renders its next wall-clock frame, and re-arms only
+// while something is still loading, so the tick stops when the UI goes idle.
+func (a App) handleSpinnerTick() (tea.Model, tea.Cmd) {
+	if !a.store.AnyLoading() {
+		a.spinnerActive = false
+		return a, nil
+	}
+	a.frame.dirty = true
+	return a, spinnerTick(spinnerTickInterval)
 }
 
 // routeToActive forwards a message to the top modal (if any) or the active tab,

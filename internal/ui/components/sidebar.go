@@ -4,12 +4,25 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+	"time"
 
 	"charm.land/lipgloss/v2"
 
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
+
+// spinnerFrames are the braille loading frames, matching the per-section status
+// spinner so loading indicators look consistent across the UI.
+var spinnerFrames = []string{"⣾", "⣽", "⣻", "⢿", "⡿", "⣟", "⣯", "⣷"}
+
+// spinnerFrame picks a loading-animation frame from wall-clock time. The UI's
+// spinner tick re-renders at ~10 fps while a section is loading, so the frame
+// advances and the indicator animates.
+func spinnerFrame() string {
+	idx := (time.Now().UnixNano() / int64(100*time.Millisecond)) % int64(len(spinnerFrames))
+	return spinnerFrames[idx]
+}
 
 // SidebarMinTermWidth is the terminal-width threshold below which the cluster
 // sidebar auto-hides so the active tab keeps the full frame on narrow terminals.
@@ -95,7 +108,7 @@ func (s *Sidebar) body() string {
 		return lipgloss.JoinVertical(lipgloss.Left,
 			s.titleRule(len("Cluster Load")),
 			"",
-			s.styles.Subtle.Render("Loading cluster…"),
+			s.styles.Subtle.Render(spinnerFrame()+" Loading cluster…"),
 		)
 	}
 

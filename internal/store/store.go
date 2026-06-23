@@ -195,6 +195,18 @@ func (s *Store) State(section Section) State {
 	}
 }
 
+// AnyLoading reports whether any section currently has a fetch in flight. The UI
+// uses it to run the loading-spinner animation only while there is something to
+// animate.
+func (s *Store) AnyLoading() bool {
+	for sec := Section(0); sec < numSections; sec++ {
+		if s.State(sec) == StateLoading {
+			return true
+		}
+	}
+	return false
+}
+
 // SectionErr returns the most recent fetch error for a section, or nil. It lets
 // a tab render an inline error badge for a failed section.
 func (s *Store) SectionErr(section Section) error {
