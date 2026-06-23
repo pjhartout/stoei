@@ -4,6 +4,7 @@ package main
 import (
 	"fmt"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -27,11 +28,6 @@ func main() {
 		}
 	}
 
-	// Wire the one-way dependency chain: an ExecRunner shells out to Slurm, the
-	// Client builds/parses commands, the Store holds the data, and the root model
-	// renders it. The alt-screen is a View field in Bubble Tea v2, so NewProgram
-	// takes just the model.
-	client := slurm.NewClient(slurm.ExecRunner{})
 	st := store.New()
 
 	// Resolve and load the user config; a missing file yields defaults. The path
@@ -46,6 +42,18 @@ func main() {
 		fmt.Fprintln(os.Stderr, "stoei: failed to load config, using defaults:", err)
 		cfg = config.Default()
 	}
+
+	// Wire the one-way dependency chain: a Runner shells out to Slurm, the Client
+	// builds/parses commands, the Store holds the data, and the root model renders
+	// it. sacct output is cached on disk so the head node is queried at most once
+	// per the configured TTL — and not at all on a warm restart — while squeue,
+	// scontrol, and the rest run live. The alt-screen is a View field in Bubble
+	// Tea v2, so NewProgram takes just the model.
+	var runner slurm.Runner = slurm.ExecRunner{}
+	if dir, ttl := slurm.CacheDir(), time.Duration(cfg.SacctCacheMinutes)*time.Minute; dir != "" && ttl > 0 {
+		runner = slurm.NewCachingRunner(slurm.ExecRunner{}, dir, ttl)
+	}
+	client := slurm.NewClient(runner)
 
 	ring := components.NewLogRing(components.DefaultMaxLogLines)
 	p := tea.NewProgram(ui.NewWithConfig(st, client, ring, cfg, cfgPath))

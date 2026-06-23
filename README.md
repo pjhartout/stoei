@@ -104,7 +104,7 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `?` | Help |
 | `q` | Quit |
 
-Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refresh interval, history window, keybindings) and can be edited in-app via `s`.
+Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refresh interval, history window, keybindings, sacct cache TTL) and can be edited in-app via `s`.
 
 ## Requirements
 

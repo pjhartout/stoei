@@ -624,6 +624,9 @@ func tabForKey(msg tea.KeyPressMsg) (tabIndex, bool) {
 // not visible while data is already on screen.
 func (a *App) manualRefresh() tea.Cmd {
 	a.frame.dirty = true
+	// Re-dispatch every wave. sacct-backed fetches (history/energy/wait-time) are
+	// served from the persistent cache until its TTL expires, so a manual refresh
+	// updates the cheap live data without forcing a fresh head-node sacct query.
 	return tea.Batch(
 		a.dispatchRunning(),
 		a.dispatchHistory(),

@@ -6,3 +6,8 @@ log_viewer_lines: 10000
 keybind_mode: vim
 energy_enabled: false
 energy_history_months: 6
+# How long sacct output (history, energy, wait-time) is cached on disk (minutes)
+# before the head node is queried again. Higher = less head-node load, staler
+# data. The default is one day. A manual refresh (r) refreshes live data but
+# still serves sacct from the cache. 1..10080 (a week).
+sacct_cache_minutes: 1440
