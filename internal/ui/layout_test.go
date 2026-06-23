@@ -34,3 +34,26 @@ func TestActiveTabClippedToWidth(t *testing.T) {
 		}
 	}
 }
+
+// TestToastDoesNotOverflowHeight asserts a toast (which may wrap to several lines
+// on a narrow terminal) is trimmed into the frame so its box never spills off the
+// bottom of the screen, while staying visible.
+func TestToastDoesNotOverflowHeight(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{UsernameStr: "alice"})
+	a.availChecked = true
+	a.toasts = []toastItem{
+		{text: "Job history unavailable: slurmdbd connection refused", level: toastErrorLevel, ticks: 1},
+	}
+	for _, sz := range [][2]int{{80, 24}, {40, 18}, {120, 30}, {60, 16}} {
+		a.width, a.height = sz[0], sz[1]
+		a.fanoutSize()
+		a.frame.dirty = true
+		out := a.View().Content
+		if lines := strings.Count(out, "\n") + 1; lines > sz[1] {
+			t.Errorf("term %dx%d: %d rendered lines exceed terminal height", sz[0], sz[1], lines)
+		}
+		if !strings.Contains(out, "slurmdbd connection refused") {
+			t.Errorf("term %dx%d: toast text not visible", sz[0], sz[1])
+		}
+	}
+}

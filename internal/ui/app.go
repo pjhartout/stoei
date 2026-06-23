@@ -974,7 +974,7 @@ func (a App) View() tea.View {
 // cluster sidebar beside the tab body on wide terminals (I7 narrow auto-hide).
 func (a App) baseView() string {
 	tabBar := a.tabBar()
-	w := a.widthOrDefault()
+	w, h := a.size()
 	body := a.activeView()
 
 	// Constrain the active tab to its allotted width so a wide table is clipped at
@@ -994,6 +994,12 @@ func (a App) baseView() string {
 
 	sections := []string{tabBar, a.tabBarRule(), body, footer}
 	if toasts := a.toastView(); toasts != "" {
+		// Trim the body to the space left after the toast so the toast box fits
+		// within the terminal height instead of spilling off the bottom. 3 = the
+		// tab bar, the rule, and the footer rows; the (possibly wrapped, possibly
+		// stacked) toast takes the rest.
+		bodyRows := max(h-3-lipgloss.Height(toasts), 1)
+		sections[2] = lipgloss.NewStyle().MaxHeight(bodyRows).Render(body)
 		sections = append(sections, toasts)
 	}
 
