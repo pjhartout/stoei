@@ -51,8 +51,8 @@ type editorDoneMsg struct{ err error }
 // in Update — a big/slow-FS file must not freeze the UI; a spinner shows while
 // loading, and large files are tailed to the last N lines), shows line numbers
 // via the viewport gutter, supports in-pane search (/ then n/N), reload (r), copy
-// path (c), and open in $EDITOR (e) via tea.ExecProcess. Long lines pre-wrap to
-// the viewport width (SoftWrap).
+// path (c), and open in $EDITOR (e) via tea.ExecProcess. Long lines are not
+// wrapped; they can be scrolled horizontally (←/→), as a log pager should.
 type LogViewer struct {
 	styles theme.Styles
 
@@ -94,7 +94,9 @@ func NewLogViewer(styles theme.Styles, path, label string, maxLines int) *LogVie
 	sp.Spinner = spinner.Dot
 
 	vp := viewport.New()
-	vp.SoftWrap = true
+	// Do not wrap long log lines; allow horizontal scrolling (←/→) instead so each
+	// line stays intact. The line-number gutter is preserved while scrolling.
+	vp.SoftWrap = false
 
 	si := textinput.New()
 	si.Placeholder = "Search…"
@@ -438,7 +440,7 @@ func (v *LogViewer) View() string {
 	}
 
 	footer := v.styles.Subtle.Render(
-		"c copy path   g/G top/bot   / search   n/N next/prev   l line#   r reload   e editor   Esc close")
+		"←/→ scroll   c copy path   g/G top/bot   / search   n/N next/prev   l line#   r reload   e editor   Esc close")
 	if v.matchCount > 0 {
 		footer = v.styles.Text.Render(fmt.Sprintf("%d matches", v.matchCount)) + "   " + footer
 	}

@@ -51,11 +51,12 @@ type scrollBox struct {
 	height int
 }
 
-// newScrollBox returns a scrollBox with the given styles. SoftWrap is enabled so
-// long lines pre-wrap to the viewport width rather than scrolling horizontally.
+// newScrollBox returns a scrollBox with the given styles. SoftWrap is disabled so
+// a line longer than the viewport is not wrapped but can be scrolled horizontally
+// (←/→) instead, which keeps tabular detail content aligned.
 func newScrollBox(styles theme.Styles) scrollBox {
 	vp := viewport.New()
-	vp.SoftWrap = true
+	vp.SoftWrap = false
 	return scrollBox{styles: styles, vp: vp}
 }
 
