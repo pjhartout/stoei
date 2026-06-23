@@ -38,16 +38,6 @@ const (
 	MinEnergyHistoryMonths = 1
 	// DefaultEnergyHistoryMonths is the default energy window in months.
 	DefaultEnergyHistoryMonths = 6
-
-	// MinSacctCacheMinutes and MaxSacctCacheMinutes bound the persistent sacct
-	// cache TTL in minutes. The cache keeps the head node from being queried more
-	// than once per TTL per distinct sacct query (history, energy, wait-time, and
-	// completed-job detail) and survives restarts.
-	MinSacctCacheMinutes = 1
-	MaxSacctCacheMinutes = 10080 // one week
-	// DefaultSacctCacheMinutes is the default sacct cache TTL in minutes: one day,
-	// so the head node is queried for history/energy/wait-time at most once a day.
-	DefaultSacctCacheMinutes = 1440
 )
 
 // DefaultTheme is the default palette name; nord is a calm Nord-style
@@ -112,10 +102,6 @@ type Config struct {
 	EnergyEnabled bool `yaml:"energy_enabled"`
 	// EnergyHistoryMonths is the energy window in months.
 	EnergyHistoryMonths int `yaml:"energy_history_months"`
-	// SacctCacheMinutes is how long sacct output is cached on disk before the head
-	// node is queried again. A larger value reduces head-node load at the cost of
-	// staler accounting data; a manual refresh always fetches fresh.
-	SacctCacheMinutes int `yaml:"sacct_cache_minutes"`
 }
 
 // Default returns the configuration used when no file exists or a field is
@@ -129,7 +115,6 @@ func Default() Config {
 		KeybindMode:         DefaultKeybindMode,
 		EnergyEnabled:       false,
 		EnergyHistoryMonths: DefaultEnergyHistoryMonths,
-		SacctCacheMinutes:   DefaultSacctCacheMinutes,
 	}
 }
 
@@ -178,11 +163,6 @@ func clamp(c Config) Config {
 	}
 	if c.EnergyHistoryMonths < MinEnergyHistoryMonths {
 		c.EnergyHistoryMonths = d.EnergyHistoryMonths
-	}
-	// 0 (an older config missing the field) and any out-of-range value fall back
-	// to the default rather than disabling the cache.
-	if c.SacctCacheMinutes < MinSacctCacheMinutes || c.SacctCacheMinutes > MaxSacctCacheMinutes {
-		c.SacctCacheMinutes = d.SacctCacheMinutes
 	}
 	return c
 }

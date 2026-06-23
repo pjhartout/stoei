@@ -811,31 +811,8 @@ func (a *App) observe(section store.Section, err error) {
 	level := toastSuccess
 	if t.Kind == toastFailed {
 		level = toastErrorLevel
-		if msg := failureToastMessage(section, err); msg != "" {
-			t.Message = msg
-		}
 	}
 	a.pushToastLevel(t.Message, level)
-}
-
-// failureToastMessage returns a section-specific failure message, or "" to fall
-// back to the notifier's generic text. The three sacct-backed sections special-
-// case a slurmdbd "connection refused" so the user understands why that data is
-// empty, rather than getting one informative and two generic toasts for the same
-// outage.
-func failureToastMessage(section store.Section, err error) string {
-	if !store.IsSacctUnavailable(err) {
-		return ""
-	}
-	switch section {
-	case store.SectionHistory:
-		return "Job history unavailable: slurmdbd connection refused"
-	case store.SectionEnergy:
-		return "Energy data unavailable: slurmdbd connection refused"
-	case store.SectionWaitTime:
-		return "Wait-time data unavailable: slurmdbd connection refused"
-	}
-	return ""
 }
 
 // pushToast appends a neutral (info) toast, keeping at most maxToasts most-recent
@@ -1114,7 +1091,7 @@ func (a App) unavailableView() string {
 		"",
 		a.styles.Text.Render(a.unavailable.Error()),
 		"",
-		a.styles.Subtle.Render("Ensure squeue, scontrol, and sacct are on PATH. Press q to quit."),
+		a.styles.Subtle.Render("Ensure squeue and scontrol are on PATH. Press q to quit."),
 	))
 	return lipgloss.Place(w, h, lipgloss.Center, lipgloss.Center, box)
 }

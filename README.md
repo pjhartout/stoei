@@ -57,7 +57,7 @@ go build -o stoei ./cmd/stoei
 stoei
 ```
 
-stoei runs the Slurm CLIs (`squeue`, `sacct`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. Check the version with `stoei --version`.
+stoei runs the Slurm CLIs (`squeue`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. It never queries `sacct`/slurmdbd. Check the version with `stoei --version`.
 
 ### Keyboard shortcuts
 
@@ -84,14 +84,14 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `?` | Help |
 | `q` | Quit |
 
-Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refresh interval, history window, keybindings, sacct cache TTL) and can be edited in-app via `s`.
+Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refresh interval, history window, keybindings) and can be edited in-app via `s`.
 
 ## Requirements
 
-- Slurm CLIs on `PATH`: `squeue`, `sacct`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
+- Slurm CLIs on `PATH`: `squeue`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
 - A login node where those commands talk to your cluster
 
-The `sacct`-backed views — job history, energy, and wait times — additionally require a reachable `slurmdbd`.
+Job history, energy, and wait-time come from the controller (`scontrol show jobs`) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl` — `sacct`/`slurmdbd` is never queried, so those views reflect jobs stoei has observed (running, pending, and recently finished), building up over time.
 
 ## Development
 

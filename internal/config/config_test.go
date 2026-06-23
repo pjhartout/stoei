@@ -38,7 +38,6 @@ func TestLoadRoundTrips(t *testing.T) {
 		KeybindMode:         KeybindEmacs,
 		EnergyEnabled:       true,
 		EnergyHistoryMonths: 3,
-		SacctCacheMinutes:   60,
 	}
 	data, err := Marshal(in)
 	if err != nil {
@@ -109,7 +108,6 @@ func TestClampPreservesBoundaryValues(t *testing.T) {
 		LogViewerLines:      MaxLogViewerLines,
 		KeybindMode:         KeybindVim,
 		EnergyHistoryMonths: MinEnergyHistoryMonths,
-		SacctCacheMinutes:   MaxSacctCacheMinutes,
 	}
 	data, err := rawYAML(in)
 	if err != nil {

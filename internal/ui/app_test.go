@@ -3,7 +3,6 @@ package ui
 import (
 	"bytes"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -257,28 +256,6 @@ func TestSidebarShownWhenWideHiddenWhenNarrow(t *testing.T) {
 	}
 }
 
-// TestHistoryErrorShowsInformativeToast asserts Fix A's tail: a job-history fetch
-// that fails because slurmdbd refused the connection produces a visible,
-// cause-specific toast (not the generic "history: data refresh failed").
-func TestHistoryErrorShowsInformativeToast(t *testing.T) {
-	a := newTestApp(t, &store.FakeClient{UsernameStr: "alice"})
-	a.width, a.height = 100, 30
-	a.fanoutSize()
-
-	gen := a.store.Gen(store.SectionHistory)
-	histErr := store.ErrSacctConnectionRefused
-	model, _ := a.Update(historyMsg{gen: gen, err: histErr})
-	got := model.(App)
-
-	view := got.toastView()
-	if !strings.Contains(view, "slurmdbd connection refused") {
-		t.Errorf("toast = %q; want an informative slurmdbd-connection-refused message", view)
-	}
-	if strings.Contains(view, "history: data refresh failed") {
-		t.Errorf("toast = %q; want the cause-specific message, not the generic one", view)
-	}
-}
-
 // TestHistoryErrorTransitionEmitsOneToast asserts the edge-triggered behavior
 // (I9): a repeat history failure does not stack a second toast, and a generic
 // history error still surfaces some toast.
@@ -287,7 +264,7 @@ func TestHistoryErrorTransitionEmitsOneToast(t *testing.T) {
 	a.width, a.height = 100, 30
 	a.fanoutSize()
 
-	histErr := store.ErrSacctConnectionRefused
+	histErr := errors.New("history fetch failed")
 	m1, _ := a.Update(historyMsg{gen: a.store.Gen(store.SectionHistory), err: histErr})
 	a1 := m1.(App)
 	if len(a1.toasts) != 1 {

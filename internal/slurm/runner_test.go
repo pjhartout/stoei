@@ -59,8 +59,8 @@ func TestExecRunnerConnectionRefusedOnExitZero(t *testing.T) {
 	if ce.Err != nil {
 		t.Errorf("CommandError.Err = %v, want nil (exit 0)", ce.Err)
 	}
-	if !isConnectionRefused(err) {
-		t.Errorf("isConnectionRefused(%v) = false, want true", err)
+	if !hasHardFailureSignal(ce.Stderr) {
+		t.Errorf("hasHardFailureSignal(%q) = false, want true", ce.Stderr)
 	}
 }
 

@@ -11,9 +11,11 @@ import (
 	"time"
 )
 
-// sacctRetryCooldown is how long batch sacct calls are suppressed after a
-// non-transient ("connection refused") failure.
-const sacctRetryCooldown = 5 * time.Minute
+// controllerFetchThrottle bounds how often "scontrol show jobs" is run to refresh
+// the job journal. History, energy, and wait-time all derive from the journal and
+// may ask for a refresh near-simultaneously; within this window the existing
+// journal is reused so the controller is queried at most once per refresh wave.
+const controllerFetchThrottle = 3 * time.Second
 
 // safeUsername and safeJobID validate CLI inputs before they reach a command, so
 // only an alphanumeric-plus-separators username and a numeric job ID (with an
@@ -23,38 +25,43 @@ var (
 	safeJobID    = regexp.MustCompile(`^[0-9]+(_[0-9]+)?$`)
 )
 
-// sacctJobFields are the columns requested for on-demand single-job sacct
-// lookups.
-var sacctJobFields = []string{
-	"JobID", "JobName", "User", "Account", "Partition", "State", "ExitCode",
-	"Start", "End", "Elapsed", "TimelimitRaw", "NNodes", "NCPUS", "NTasks",
-	"ReqMem", "MaxRSS", "MaxVMSize", "NodeList", "WorkDir", "StdOut", "StdErr",
-	"Submit", "Priority", "QOS",
-}
-
 // Client builds Slurm commands and parses their output. It wraps a Runner (the
-// only seam to the OS) and tracks slurmdbd availability so that batch sacct calls
-// are skipped during a cooldown after a hard failure. A zero Client is not
-// usable; construct one with NewClient.
+// only seam to the OS). Job history, energy, and wait-time come from the
+// controller ("scontrol show jobs") accumulated into a persistent journal, never
+// from slurmdbd/sacct. A zero Client is not usable; construct one with NewClient.
 type Client struct {
 	runner Runner
 	// username is the resolved current user, used by the per-user getters.
 	username string
-	// now returns the current time; it is injectable so the sacct cooldown can be
+	// now returns the current time; it is injectable so the fetch throttle can be
 	// unit-tested without sleeping. It defaults to time.Now.
 	now func() time.Time
 
-	mu         sync.Mutex
-	sacctFailo *time.Time // last hard sacct failure, or nil when healthy
+	// journal is the persistent record of observed controller jobs; nil disables
+	// it (history/energy/wait-time then reflect only the latest controller fetch).
+	journal *jobJournal
+
+	mu        sync.Mutex
+	lastFetch time.Time // last "scontrol show jobs" time, for the throttle
 }
 
 // Option configures a Client.
 type Option func(*Client)
 
 // WithClock overrides the Client's time source. It is used by tests to drive the
-// sacct cooldown deterministically.
+// controller-fetch throttle deterministically.
 func WithClock(now func() time.Time) Option {
 	return func(c *Client) { c.now = now }
+}
+
+// WithJournal enables the persistent job journal at path. An empty path leaves
+// the journal disabled.
+func WithJournal(path string) Option {
+	return func(c *Client) {
+		if path != "" {
+			c.journal = newJobJournal(path)
+		}
+	}
 }
 
 // WithUsername overrides the resolved current username. It is used by tests to
@@ -85,7 +92,7 @@ func (c *Client) Username() string { return c.username }
 
 // requiredCommands are the Slurm binaries Available probes; their absence means
 // stoei cannot function.
-var requiredCommands = []string{"squeue", "scontrol", "sacct"}
+var requiredCommands = []string{"squeue", "scontrol"}
 
 // Available reports whether the Slurm controller commands are usable by probing
 // each required binary with "<cmd> --version" through the Runner. A nil return
@@ -101,59 +108,42 @@ func (c *Client) Available(ctx context.Context) error {
 	return nil
 }
 
-// errSacctCooldown is returned by the batch sacct getters when slurmdbd is in the
-// post-failure cooldown window. Callers can detect it with errors.Is.
-var errSacctCooldown = errors.New("sacct unavailable: connection refused")
-
-// ErrSacctCooldown reports whether err indicates the sacct cooldown is active.
-func ErrSacctCooldown(err error) bool { return errors.Is(err, errSacctCooldown) }
-
-// IsConnectionRefused reports whether err carries a slurmdbd "connection refused"
-// signal, exposed so the store/ui layers can classify a history failure for an
-// informative toast.
-func IsConnectionRefused(err error) bool { return isConnectionRefused(err) }
-
-// sacctAvailable reports whether batch sacct calls may proceed: true when there
-// has been no hard failure or when the cooldown has elapsed.
-func (c *Client) sacctAvailable() bool {
+// refreshControllerJobs runs "scontrol show jobs" and merges the result into the
+// persistent journal, throttled so a wave of near-simultaneous history/energy/
+// wait-time fetches queries the controller at most once. It is a no-op when the
+// journal is disabled. Holding mu across the run serializes the wave: the first
+// caller fetches, the rest fall inside the throttle window and reuse the journal.
+func (c *Client) refreshControllerJobs(ctx context.Context) error {
+	if c.journal == nil {
+		return nil
+	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if c.sacctFailo == nil {
-		return true
+	if !c.lastFetch.IsZero() && c.now().Sub(c.lastFetch) < controllerFetchThrottle {
+		return nil
 	}
-	return c.now().Sub(*c.sacctFailo) >= sacctRetryCooldown
+	out, err := c.runner.Run(ctx, "scontrol", "show", "jobs")
+	if err != nil {
+		return err
+	}
+	c.lastFetch = c.now()
+	return c.journal.upsert(ParseControllerJobs(string(out)))
 }
 
-// sacctMarkFailure records a non-transient sacct failure and (re)starts the
-// cooldown.
-func (c *Client) sacctMarkFailure() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	t := c.now()
-	c.sacctFailo = &t
-}
-
-// sacctMarkSuccess clears the sacct failure state after a successful batch call.
-func (c *Client) sacctMarkSuccess() {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	c.sacctFailo = nil
-}
-
-// isConnectionRefused reports whether err carries a "connection refused" signal,
-// the non-transient error that trips the cooldown. It first inspects a
-// *CommandError's captured stderr (the slurmdbd-down case prints "connection
-// refused" only to stderr and still exits 0), then falls back to the error text
-// so plain errors are still classified.
-func isConnectionRefused(err error) bool {
-	if err == nil {
-		return false
+// journalJobs returns the accumulated controller jobs: the journal when enabled,
+// otherwise just the latest controller fetch.
+func (c *Client) journalJobs(ctx context.Context) ([]ControllerJob, error) {
+	if err := c.refreshControllerJobs(ctx); err != nil {
+		return nil, err
 	}
-	var ce *CommandError
-	if errors.As(err, &ce) && hasHardFailureSignal(ce.Stderr) {
-		return true
+	if c.journal != nil {
+		return c.journal.all(), nil
 	}
-	return strings.Contains(strings.ToLower(err.Error()), connectionRefusedSignal)
+	out, err := c.runner.Run(ctx, "scontrol", "show", "jobs")
+	if err != nil {
+		return nil, err
+	}
+	return ParseControllerJobs(string(out)), nil
 }
 
 // RunningJobs returns the current user's running and pending jobs via the
@@ -211,88 +201,43 @@ func (c *Client) UserJobs(ctx context.Context, username string) ([]UserJob, erro
 	return ParseUserJobs(string(out)), nil
 }
 
-// JobHistory returns the current user's job history for the last days days via
-// sacct, plus aggregate requeue statistics. It honors the sacct cooldown: when
-// slurmdbd recently refused a connection the call is skipped and ErrSacctCooldown
-// is returned. The sacct format is
-// "JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList,Submit,Start,End".
-func (c *Client) JobHistory(ctx context.Context, days int) ([]HistoryJob, HistoryStats, error) {
-	if !c.sacctAvailable() {
-		return nil, HistoryStats{}, errSacctCooldown
-	}
+// JobHistory returns the current user's job history plus aggregate requeue
+// statistics, derived from the controller-jobs journal rather than sacct. The
+// days argument is accepted for API compatibility but no longer bounds the
+// window: history is whatever the journal has accumulated, since the controller
+// has no historical query.
+func (c *Client) JobHistory(ctx context.Context, _ int) ([]HistoryJob, HistoryStats, error) {
 	if err := validateUsername(c.username); err != nil {
 		return nil, HistoryStats{}, err
 	}
-	out, err := c.runner.Run(ctx, "sacct",
-		"-u", c.username,
-		"--format=JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList,Submit,Start,End",
-		"-S", fmt.Sprintf("now-%ddays", days),
-		"-X",
-		"-P",
-	)
+	jobs, err := c.journalJobs(ctx)
 	if err != nil {
-		if isConnectionRefused(err) {
-			c.sacctMarkFailure()
-		}
 		return nil, HistoryStats{}, err
 	}
-	c.sacctMarkSuccess()
-	jobs, stats := ParseHistory(string(out))
-	return jobs, stats, nil
+	history, stats := HistoryJobsFor(jobs, c.username)
+	return history, stats, nil
 }
 
-// EnergyHistory returns completed jobs for all users over the last months months
-// for energy estimation, via sacct. It honors the sacct cooldown. The sacct
-// format is "JobID,User,Elapsed,NCPUS,AllocTRES,State". The start date is
-// computed explicitly as now - months*30 days, formatted YYYY-MM-DD, rather than
-// using sacct's unreliable "now-Xmonths" syntax.
-func (c *Client) EnergyHistory(ctx context.Context, months int) ([]EnergyRecord, error) {
-	if !c.sacctAvailable() {
-		return nil, errSacctCooldown
-	}
-	start := c.now().AddDate(0, 0, -months*30).Format("2006-01-02")
-	out, err := c.runner.Run(ctx, "sacct",
-		"--allusers",
-		"--format=JobID,User,Elapsed,NCPUS,AllocTRES,State",
-		"-S", start,
-		"-X",
-		"-P",
-		"--noheader",
-	)
+// EnergyHistory returns finished jobs (all users) for energy estimation, derived
+// from the controller-jobs journal rather than sacct. The months argument is
+// accepted for API compatibility but no longer bounds the window.
+func (c *Client) EnergyHistory(ctx context.Context, _ int) ([]EnergyRecord, error) {
+	jobs, err := c.journalJobs(ctx)
 	if err != nil {
-		if isConnectionRefused(err) {
-			c.sacctMarkFailure()
-		}
 		return nil, err
 	}
-	c.sacctMarkSuccess()
-	return ParseEnergyRecords(string(out)), nil
+	return EnergyRecordsFrom(jobs), nil
 }
 
-// WaitTimeHistory returns all-users jobs that started within the last hours hours
-// via sacct, for wait-time analysis. It honors the sacct cooldown. The sacct
-// format is "JobID,Partition,State,Submit,Start" over a "now-Nhours" start
-// window.
-func (c *Client) WaitTimeHistory(ctx context.Context, hours int) ([]WaitTimeRecord, error) {
-	if !c.sacctAvailable() {
-		return nil, errSacctCooldown
-	}
-	out, err := c.runner.Run(ctx, "sacct",
-		"--allusers",
-		"--format=JobID,Partition,State,Submit,Start",
-		"-S", fmt.Sprintf("now-%dhours", hours),
-		"-X",
-		"-P",
-		"--noheader",
-	)
+// WaitTimeHistory returns jobs that have started (all users) for wait-time
+// analysis, derived from the controller-jobs journal rather than sacct. The hours
+// argument is accepted for API compatibility but no longer bounds the window.
+func (c *Client) WaitTimeHistory(ctx context.Context, _ int) ([]WaitTimeRecord, error) {
+	jobs, err := c.journalJobs(ctx)
 	if err != nil {
-		if isConnectionRefused(err) {
-			c.sacctMarkFailure()
-		}
 		return nil, err
 	}
-	c.sacctMarkSuccess()
-	return ParseWaitTimeRecords(string(out)), nil
+	return WaitTimeRecordsFrom(jobs), nil
 }
 
 // ClusterNodes returns every cluster node via "scontrol show nodes".
@@ -334,11 +279,11 @@ func (c *Client) PendingPriority(ctx context.Context) ([]PriorityEntry, error) {
 	return ParsePriority(string(out)), nil
 }
 
-// JobDetail returns the parsed Key=Value detail for a single job. It first tries
-// "scontrol show jobid" (best for active jobs) and falls back to a single-job
-// sacct lookup for completed jobs. The sacct fallback is on-demand and therefore
-// bypasses the batch cooldown. The job ID is validated and array-range notation
-// is normalized away before it reaches a command.
+// JobDetail returns the parsed Key=Value detail for a single job via "scontrol
+// show jobid". The controller retains a finished job only briefly, so a job that
+// has aged out is reported as not found (there is no sacct fallback). The job ID
+// is validated and array-range notation is normalized away before it reaches a
+// command.
 func (c *Client) JobDetail(ctx context.Context, jobID string) (JobDetail, error) {
 	normalized := NormalizeArrayJobID(jobID)
 	if err := validateJobID(normalized); err != nil {
@@ -346,28 +291,14 @@ func (c *Client) JobDetail(ctx context.Context, jobID string) (JobDetail, error)
 	}
 
 	out, err := c.runner.Run(ctx, "scontrol", "show", "jobid", normalized)
-	if err == nil {
-		fields := ParseScontrolFields(strings.TrimSpace(string(out)))
-		if len(fields) > 0 {
-			return JobDetail{Fields: fields, Source: "scontrol"}, nil
-		}
+	if err != nil {
+		return JobDetail{}, fmt.Errorf("job %s not found: %w", jobID, err)
 	}
-
-	// Fall back to sacct (on-demand: bypasses the cooldown).
-	sacctOut, sacctErr := c.runner.Run(ctx, "sacct",
-		"-j", normalized,
-		"--format="+strings.Join(sacctJobFields, ","),
-		"-P",
-		"--noheader",
-	)
-	if sacctErr != nil {
-		return JobDetail{}, fmt.Errorf("job %s not found: scontrol err=%v sacct err=%w", jobID, err, sacctErr)
-	}
-	fields := ParseJobDetail(string(sacctOut), sacctJobFields)
+	fields := ParseScontrolFields(strings.TrimSpace(string(out)))
 	if len(fields) == 0 {
-		return JobDetail{}, fmt.Errorf("job %s: could not parse sacct output", jobID)
+		return JobDetail{}, fmt.Errorf("job %s: could not parse scontrol output", jobID)
 	}
-	return JobDetail{Fields: fields, Source: "sacct"}, nil
+	return JobDetail{Fields: fields, Source: "scontrol"}, nil
 }
 
 // terminalJobStates are the SLURM base job states that mean a job has finished.
