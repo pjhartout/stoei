@@ -17,14 +17,28 @@ go build ./...
 pre-commit install   # optional: runs gofmt/vet/golangci-lint on commit
 ```
 
-Run the app with `go run ./cmd/stoei`. To make the `stoei` command itself a live
-debug build of your checkout, symlink the dev wrapper onto your `PATH`:
+Run the app with `go run ./cmd/stoei`.
+
+### Local debug build
+
+To make the `stoei` command run your working copy — a live build that recompiles
+on each launch — symlink the dev wrapper onto your `PATH`:
 
 ```bash
 ln -sf "$(pwd)/scripts/stoei-dev" ~/.local/bin/stoei   # ~/.local/bin must be on $PATH
 ```
 
-See the README "Local debug build" section for details.
+Now `stoei` runs `go run ./cmd/stoei` from this checkout, always reflecting your
+edits. If a release binary or the old Python tool is still installed, make sure
+`~/.local/bin` comes first on your `PATH` so the wrapper wins. Prefer a fast
+prebuilt binary over recompiling each launch? Build once and rebuild after
+changes:
+
+```bash
+go build -o ~/.local/bin/stoei ./cmd/stoei
+```
+
+The demo GIFs in `demo/` are generated with [vhs](https://github.com/charmbracelet/vhs).
 
 ## Layout
 

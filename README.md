@@ -81,17 +81,24 @@ stoei runs the Slurm CLIs (`squeue`, `sacct`, `scontrol`, `sshare`, `sprio`, `sc
 
 ### Keyboard shortcuts
 
+The table shows the default **vim** preset; in **emacs** mode the global, filter,
+and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
+`C-o`, …). Press `?` in-app for the full, always-current list.
+
 | Key | Action |
 |-----|--------|
-| `1`–`5` | Jobs / Nodes / Users / Priority / Logs |
+| `1`–`5` | Switch tab: Jobs / Nodes / Users / Priority / Logs |
 | `Tab` / `Shift+Tab` | Next / previous tab |
-| `↑` / `↓` | Navigate rows |
-| `Enter` | View selected row's details |
-| `i` | Enter a job ID to view |
-| `c` | Cancel selected job |
+| `↑` / `↓` (`k` / `j`) | Navigate rows |
+| `Enter` | View the selected row's details |
+| `i` | Enter a job ID to view (Jobs tab) |
+| `c` | Cancel the selected job (Jobs tab) |
 | `/` | Filter (`col:value` or substring) |
+| `Esc` | Close / clear the filter |
 | `o` | Cycle sort order |
-| `r` | Refresh now |
+| `r` / `p` / `e` | Users tab: Running / Pending / Energy pane |
+| `m` / `u` / `a` / `j` | Priority tab: My / All Users / Accounts / Jobs pane |
+| `r` | Refresh now (on the Users tab, `r` switches pane instead) |
 | `L` | Cluster load (scrollable popup) |
 | `s` | Settings |
 | `?` | Help |
@@ -108,50 +115,9 @@ The `sacct`-backed views — job history, energy, and wait times — additionall
 
 ## Development
 
-See [CONTRIBUTING.md](CONTRIBUTING.md). In short:
-
-```bash
-go build ./...
-go test ./... -race
-gofmt -l .
-golangci-lint run
-```
-
-### Local debug build
-
-To make the `stoei` command run your working copy — a live, unstripped debug
-build that recompiles on each launch — symlink the dev wrapper onto your `PATH`:
-
-```bash
-ln -sf "$(pwd)/scripts/stoei-dev" ~/.local/bin/stoei   # ~/.local/bin must be on $PATH
-```
-
-Now typing `stoei` runs `go run ./cmd/stoei` from this checkout, so it always
-reflects your latest edits. If a release binary or the old Python tool is still
-installed, remove it or make sure `~/.local/bin` comes first on your `PATH` so
-this wrapper wins.
-
-Prefer a fast prebuilt binary over recompiling each launch? Build once (and
-rebuild after changes):
-
-```bash
-go build -o ~/.local/bin/stoei ./cmd/stoei
-```
-
-The demo GIFs in `demo/` are generated with [vhs](https://github.com/charmbracelet/vhs).
-
-## Releases
-
-Pushing a `v*` tag runs [GoReleaser](https://goreleaser.com/) and publishes cross-platform binaries to the [releases page](https://github.com/pjhartout/stoei/releases).
+See [CONTRIBUTING.md](CONTRIBUTING.md) for building from source, the local debug
+build, the checks to run, and the release process.
 
 ## License
 
 MIT License — see [LICENSE](LICENSE) for details.
-
-## Related projects
-
-GitHub is full of related projects. Fundamentally I just wanted a way to easily look at my logs, cancel, and monitor requeued jobs, which I don't think is well supported by existing solutions.
-
-## What's in a name?
-
-`stoei` is a Dutch verb meaning "wrestle", because that's what it feels like sometimes to manage these jobs... it's also an alternative spelling for SLURM Terminal User Interface (STUI).
