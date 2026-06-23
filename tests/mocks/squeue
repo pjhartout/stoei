@@ -1,0 +1,9 @@
+#!/bin/sh
+# Demo mock: serves the Go parser's golden squeue fixtures by request shape.
+# ponytail: dispatch on the -O format string; the real flags are ignored.
+D="${STOEI_DEMO_DATA:?set STOEI_DEMO_DATA to internal/slurm/testdata}"
+case "$*" in
+*UserName*) cat "$D/squeue_all_users.txt" ;;  # AllUsersJobs (-O includes UserName)
+*-O*) cat "$D/squeue_user.txt" ;;             # UserJobs (-O without UserName)
+*) cat "$D/squeue_running.txt" ;;             # RunningJobs (-o pipe format)
+esac

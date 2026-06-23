@@ -14,26 +14,25 @@ Set WindowBar Colorful
 Set WindowBarSize 30
 Set Padding 8
 
-# Hidden setup + launch + wait for load + navigate to Priority tab
+# Hidden setup + launch + wait for load + open Priority tab on the All Users
+# view (the default "My Priority" is empty for the anonymized demo user).
 Source "demo/setup.tape"
 Hide
 Type "stoei"
 Enter
 Sleep 8s
 Type "4"
+Sleep 0.5s
+Type "u"
 Sleep 1s
 Show
 
-# Show the Priority tab
-Sleep 1s
-
-# Toggle views
-Type "u"
-Sleep 1s
+# Show the All Users view, then toggle the others
+Sleep 1.5s
 Type "a"
-Sleep 1s
+Sleep 1.5s
 Type "j"
-Sleep 1s
+Sleep 1.5s
 
 # Quit
 Type "q"

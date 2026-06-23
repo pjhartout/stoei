@@ -10,7 +10,8 @@
 #
 # Prerequisites:
 #   brew install vhs gifsicle
-#   uv sync (Pillow dev dependency)
+#   uv sync (Pillow dev dependency, for captions)
+#   Go >= 1.25 (to build the stoei binary the tapes launch)
 
 set -euo pipefail
 
@@ -29,6 +30,10 @@ if ! command -v gifsicle &>/dev/null; then
     echo "Error: gifsicle is not installed. Install with: brew install gifsicle"
     exit 1
 fi
+
+# Build the binary the tapes launch as `stoei` (setup.tape puts demo/bin on PATH).
+echo "Building stoei binary..."
+go build -o "$DEMO_DIR/bin/stoei" ./cmd/stoei
 
 # Record a single tape and optionally add captions
 record_tape() {
@@ -109,7 +114,7 @@ CAPTIONS
 }
 
 # All demo tapes in order
-ALL_TAPES=(install jobs nodes users priority filtering)
+ALL_TAPES=(jobs nodes users priority filtering)
 
 # Parse flags
 ADD_CAPTIONS="true"
