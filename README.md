@@ -6,26 +6,6 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 [![Go Version](https://img.shields.io/github/go-mod/go-version/pjhartout/stoei)](https://go.dev/)
 [![License](https://img.shields.io/github/license/pjhartout/stoei)](https://github.com/pjhartout/stoei/blob/main/LICENSE)
 
-### Jobs
-
-![Jobs](demo/jobs.gif)
-
-### Nodes
-
-![Nodes](demo/nodes.gif)
-
-### Users
-
-![Users](demo/users.gif)
-
-### Priority
-
-![Priority](demo/priority.gif)
-
-### Filtering
-
-![Filtering](demo/filtering.gif)
-
 ## Features
 
 - Auto-refreshing job list with running/pending/requeue stats

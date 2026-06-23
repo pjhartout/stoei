@@ -1,8 +1,0 @@
-#!/bin/sh
-# Demo mock: serves the Go parser's golden sacct fixtures by --format shape.
-D="${STOEI_DEMO_DATA:?set STOEI_DEMO_DATA to internal/slurm/testdata}"
-case "$*" in
-*JobName*) cat "$D/sacct_history.txt" ;;    # JobHistory
-*AllocTRES*) cat "$D/sacct_energy.txt" ;;   # EnergyHistory
-*) cat "$D/sacct_wait_time.txt" ;;          # WaitTimeHistory
-esac

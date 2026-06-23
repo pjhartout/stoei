@@ -38,8 +38,6 @@ changes:
 go build -o ~/.local/bin/stoei ./cmd/stoei
 ```
 
-The demo GIFs in `demo/` are generated with [vhs](https://github.com/charmbracelet/vhs).
-
 ## Layout
 
 ```

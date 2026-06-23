@@ -1,3 +1,0 @@
-#!/bin/sh
-# Demo mock: pretend the cancel succeeded.
-exit 0

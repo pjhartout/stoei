@@ -1,4 +1,0 @@
-#!/bin/sh
-# Demo mock: pending-priority fixture for the Priority tab.
-D="${STOEI_DEMO_DATA:?set STOEI_DEMO_DATA to internal/slurm/testdata}"
-cat "$D/sprio.txt"

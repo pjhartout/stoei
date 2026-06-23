@@ -1,4 +1,0 @@
-#!/bin/sh
-# Demo mock: fair-share fixture for the Priority tab.
-D="${STOEI_DEMO_DATA:?set STOEI_DEMO_DATA to internal/slurm/testdata}"
-cat "$D/sshare.txt"

@@ -1,8 +1,0 @@
-#!/bin/sh
-# Demo mock: serves the Go parser's golden scontrol fixtures.
-D="${STOEI_DEMO_DATA:?set STOEI_DEMO_DATA to internal/slurm/testdata}"
-case "$*" in
-*"show nodes"*|*"show node "*) cat "$D/scontrol_nodes.txt" ;;
-*"show jobid"*|*"show job "*) cat "$D/scontrol_job_12345.txt" ;;
-*) exit 0 ;;
-esac
