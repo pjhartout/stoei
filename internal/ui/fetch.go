@@ -43,6 +43,14 @@ type historyMsg struct {
 	err   error
 }
 
+// completedJobMsg carries the scontrol-sourced final record for a job that just
+// left the running queue (found is false when the controller no longer has it or
+// it is not yet terminal). It is merged into history without a sacct query.
+type completedJobMsg struct {
+	job   store.HistoryJob
+	found bool
+}
+
 // nodesMsg carries a cluster-nodes fetch result.
 type nodesMsg struct {
 	gen   uint64
@@ -131,6 +139,25 @@ func fetchRunningJobs(client store.SlurmClient, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		jobs, err := runFetch(client.RunningJobs)
 		return runningJobsMsg{gen: gen, jobs: jobs, err: err}
+	}
+}
+
+// fetchCompletedJob returns a Cmd that asks the controller (scontrol, not sacct)
+// for the final record of a job that just left the running queue, reporting it as
+// a completedJobMsg. A lookup error or a non-terminal/expired job yields found
+// false and is silently dropped — the cached sacct refresh covers it.
+func fetchCompletedJob(client store.SlurmClient, id string) tea.Cmd {
+	return func() tea.Msg {
+		var found bool
+		job, err := runFetch(func(ctx context.Context) (store.HistoryJob, error) {
+			j, ok, e := client.CompletedJobRecord(ctx, id)
+			found = ok
+			return j, e
+		})
+		if err != nil {
+			return completedJobMsg{found: false}
+		}
+		return completedJobMsg{job: job, found: found}
 	}
 }
 

@@ -24,6 +24,8 @@ type FakeClient struct {
 	WaitTimeData        []slurm.WaitTimeRecord
 	JobDetailData       slurm.JobDetail
 	NodeDetailData      slurm.JobDetail
+	CompletedJobData    slurm.HistoryJob
+	CompletedJobFound   bool
 	UsernameStr         string
 
 	AvailableErr       error
@@ -39,6 +41,7 @@ type FakeClient struct {
 	JobDetailErr       error
 	NodeDetailErr      error
 	CancelJobErr       error
+	CompletedJobErr    error
 
 	// LastUserJobsUser is the username passed to the most recent UserJobs call.
 	LastUserJobsUser string
@@ -48,6 +51,8 @@ type FakeClient struct {
 	LastNodeDetailName string
 	// LastCancelJobID is the job ID passed to the most recent CancelJob call.
 	LastCancelJobID string
+	// LastCompletedJobID is the job ID passed to the most recent CompletedJobRecord call.
+	LastCompletedJobID string
 	// LastHistoryDays is the day window passed to the most recent JobHistory call.
 	LastHistoryDays int
 	// LastEnergyMonths is the month window passed to the most recent EnergyHistory
@@ -125,6 +130,12 @@ func (f *FakeClient) NodeDetail(_ context.Context, nodeName string) (slurm.JobDe
 func (f *FakeClient) CancelJob(_ context.Context, jobID string) error {
 	f.LastCancelJobID = jobID
 	return f.CancelJobErr
+}
+
+// CompletedJobRecord implements SlurmClient.
+func (f *FakeClient) CompletedJobRecord(_ context.Context, jobID string) (slurm.HistoryJob, bool, error) {
+	f.LastCompletedJobID = jobID
+	return f.CompletedJobData, f.CompletedJobFound, f.CompletedJobErr
 }
 
 // Compile-time assertion that FakeClient satisfies the interface.

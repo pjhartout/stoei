@@ -46,6 +46,11 @@ type SlurmClient interface {
 	NodeDetail(ctx context.Context, nodeName string) (slurm.JobDetail, error)
 	// CancelJob cancels a job via scancel.
 	CancelJob(ctx context.Context, jobID string) error
+	// CompletedJobRecord returns a history record for a just-finished job sourced
+	// from the controller (scontrol), not slurmdbd, so a job that finishes during a
+	// session can be merged into history without a sacct query. found is false when
+	// the controller no longer has the job or it is not yet in a terminal state.
+	CompletedJobRecord(ctx context.Context, jobID string) (slurm.HistoryJob, bool, error)
 }
 
 // Compile-time assertion that the concrete client satisfies the interface.

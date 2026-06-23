@@ -109,9 +109,17 @@ type Store struct {
 	RunningJobs     []slurm.RunningJob
 	RunningJobsMeta Meta
 
+	// HistoryJobs is the public history view: the session-completion overlay
+	// followed by the sacct base, rebuilt whenever either changes. Readers use it
+	// directly; historyBase and completed are the inputs rebuildHistory merges.
 	HistoryJobs  []slurm.HistoryJob
 	HistoryStats slurm.HistoryStats
 	HistoryMeta  Meta
+	// historyBase is the most recent sacct history result; completed holds jobs
+	// observed finishing this session (from scontrol), kept apart so the overlay
+	// survives a sacct refresh until that refresh includes the job.
+	historyBase []slurm.HistoryJob
+	completed   []slurm.HistoryJob
 
 	Nodes     []slurm.Node
 	NodesMeta Meta
@@ -280,26 +288,83 @@ func (s *Store) applyMeta(m *Meta, err error) {
 }
 
 // SetRunningJobs applies a running-jobs fetch result, dropping stale generations.
-func (s *Store) SetRunningJobs(data []slurm.RunningJob, gen uint64, err error) {
+// On a fresh, successful result it returns the IDs that were present in the prior
+// result but are gone now — the current user's jobs that just left the queue, so
+// the caller can fetch their final record and merge it into history without sacct.
+// It returns nil for a stale or failed result, and (harmlessly) every prior ID the
+// first time the user's queue empties.
+func (s *Store) SetRunningJobs(data []slurm.RunningJob, gen uint64, err error) []string {
 	if s.stale(SectionRunningJobs, gen) {
-		return
+		return nil
 	}
+	var vanished []string
 	if err == nil {
+		current := make(map[string]struct{}, len(data))
+		for _, j := range data {
+			current[j.ID] = struct{}{}
+		}
+		for _, j := range s.RunningJobs {
+			if _, ok := current[j.ID]; !ok {
+				vanished = append(vanished, j.ID)
+			}
+		}
 		s.RunningJobs = data
 	}
 	s.applyMeta(&s.RunningJobsMeta, err)
+	return vanished
 }
 
-// SetHistory applies a job-history fetch result, dropping stale generations.
+// SetHistory applies a job-history fetch result, dropping stale generations. The
+// sacct result is the history base; the session-observed completions overlay is
+// re-applied on top (rebuildHistory) so a job that finished mid-session stays
+// visible until a sacct refresh absorbs it.
 func (s *Store) SetHistory(jobs []slurm.HistoryJob, stats slurm.HistoryStats, gen uint64, err error) {
 	if s.stale(SectionHistory, gen) {
 		return
 	}
 	if err == nil {
-		s.HistoryJobs = jobs
+		s.historyBase = jobs
 		s.HistoryStats = stats
+		s.rebuildHistory()
 	}
 	s.applyMeta(&s.HistoryMeta, err)
+}
+
+// AddCompletedJob records a job observed finishing this session (sourced from
+// scontrol, not sacct) so it appears in the history view immediately. The newest
+// record wins for a duplicate ID; entries the sacct base already covers are
+// dropped on the next rebuild.
+func (s *Store) AddCompletedJob(job slurm.HistoryJob) {
+	overlay := make([]slurm.HistoryJob, 0, len(s.completed)+1)
+	overlay = append(overlay, job) // newest first
+	for _, j := range s.completed {
+		if j.ID != job.ID {
+			overlay = append(overlay, j)
+		}
+	}
+	s.completed = overlay
+	s.rebuildHistory()
+}
+
+// rebuildHistory recomputes the public HistoryJobs as the session-completion
+// overlay followed by the sacct base, dropping overlay entries the base already
+// carries (the sacct record is authoritative once it lands).
+func (s *Store) rebuildHistory() {
+	baseIDs := make(map[string]struct{}, len(s.historyBase))
+	for _, j := range s.historyBase {
+		baseIDs[j.ID] = struct{}{}
+	}
+	kept := make([]slurm.HistoryJob, 0, len(s.completed))
+	for _, j := range s.completed {
+		if _, ok := baseIDs[j.ID]; !ok {
+			kept = append(kept, j)
+		}
+	}
+	s.completed = kept
+	merged := make([]slurm.HistoryJob, 0, len(kept)+len(s.historyBase))
+	merged = append(merged, kept...)
+	merged = append(merged, s.historyBase...)
+	s.HistoryJobs = merged
 }
 
 // SetNodes applies a cluster-nodes fetch result and recomputes cluster stats.

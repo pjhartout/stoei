@@ -239,6 +239,30 @@ func (a *App) dispatchRunning() tea.Cmd {
 	return fetchRunningJobs(a.client, gen)
 }
 
+// maxCompletionLookups caps how many just-finished jobs are looked up via
+// scontrol after a single running-jobs refresh, bounding the burst on the
+// controller when a large array drains at once. Any beyond the cap are picked up
+// by the next cached sacct refresh.
+const maxCompletionLookups = 64
+
+// fetchCompletions returns a batched Cmd that asks the controller for the final
+// record of each just-vanished job ID, so completions observed mid-session reach
+// the history view without a sacct query. It returns nil when nothing vanished.
+// ponytail: caps the burst at maxCompletionLookups; the daily sacct covers the rest.
+func (a *App) fetchCompletions(ids []string) tea.Cmd {
+	if len(ids) == 0 {
+		return nil
+	}
+	if len(ids) > maxCompletionLookups {
+		ids = ids[:maxCompletionLookups]
+	}
+	cmds := make([]tea.Cmd, len(ids))
+	for i, id := range ids {
+		cmds[i] = fetchCompletedJob(a.client, id)
+	}
+	return tea.Batch(cmds...)
+}
+
 // dispatchHistory bumps the history generation, marks it loading, and returns the
 // fetch Cmd.
 func (a *App) dispatchHistory() tea.Cmd {
@@ -351,12 +375,12 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case runningJobsMsg:
 		a.runningInFlight = false
-		a.store.SetRunningJobs(msg.jobs, msg.gen, msg.err)
+		vanished := a.store.SetRunningJobs(msg.jobs, msg.gen, msg.err)
 		a.observe(store.SectionRunningJobs, msg.err)
 		a.jobs.Refresh()
 		a.detailCache.SyncStates(a.store.MergedJobs()) // evict cached details on state change
 		a.frame.dirty = true
-		return a, nil, true
+		return a, a.fetchCompletions(vanished), true
 
 	case historyMsg:
 		a.store.SetHistory(msg.jobs, msg.stats, msg.gen, msg.err)
@@ -364,6 +388,15 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.jobs.Refresh() // Completed/failed history jobs merge into the Jobs table.
 		a.detailCache.SyncStates(a.store.MergedJobs())
 		a.frame.dirty = true
+		return a, nil, true
+
+	case completedJobMsg:
+		if msg.found {
+			a.store.AddCompletedJob(msg.job)
+			a.jobs.Refresh() // The finished job joins the history rows in the Jobs table.
+			a.detailCache.SyncStates(a.store.MergedJobs())
+			a.frame.dirty = true
+		}
 		return a, nil, true
 
 	case nodesMsg:

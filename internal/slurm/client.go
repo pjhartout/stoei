@@ -370,6 +370,57 @@ func (c *Client) JobDetail(ctx context.Context, jobID string) (JobDetail, error)
 	return JobDetail{Fields: fields, Source: "sacct"}, nil
 }
 
+// terminalJobStates are the SLURM base job states that mean a job has finished.
+// A job in any other state (PENDING, RUNNING, SUSPENDED, COMPLETING, …) is still
+// active. The base state is the first whitespace-delimited token of JobState, so
+// "CANCELLED by 1001" matches "CANCELLED".
+var terminalJobStates = map[string]bool{
+	"COMPLETED": true, "FAILED": true, "CANCELLED": true, "TIMEOUT": true,
+	"OUT_OF_MEMORY": true, "NODE_FAIL": true, "BOOT_FAIL": true, "DEADLINE": true,
+	"PREEMPTED": true, "REVOKED": true, "SPECIAL_EXIT": true,
+}
+
+// isTerminalState reports whether a JobState string denotes a finished job.
+func isTerminalState(state string) bool {
+	base, _, _ := strings.Cut(strings.TrimSpace(state), " ")
+	return terminalJobStates[base]
+}
+
+// CompletedJobRecord returns a history record for a just-finished job, sourced
+// from "scontrol show jobid" (the controller) rather than sacct (slurmdbd), so a
+// job that completes mid-session can be merged into the history view without a
+// head-node sacct query. The controller retains a finished job only briefly
+// (MinJobAge), so the caller must look it up promptly on completion. found is
+// false — with a nil error — when the controller no longer has the job or it is
+// not yet in a terminal state; the next cached sacct refresh then covers it. It
+// never falls back to sacct.
+func (c *Client) CompletedJobRecord(ctx context.Context, jobID string) (HistoryJob, bool, error) {
+	normalized := NormalizeArrayJobID(jobID)
+	if err := validateJobID(normalized); err != nil {
+		return HistoryJob{}, false, err
+	}
+	out, err := c.runner.Run(ctx, "scontrol", "show", "jobid", normalized)
+	if err != nil {
+		return HistoryJob{}, false, err
+	}
+	f := ParseScontrolFields(strings.TrimSpace(string(out)))
+	if f["JobId"] == "" || !isTerminalState(f["JobState"]) {
+		return HistoryJob{}, false, nil
+	}
+	return HistoryJob{
+		ID:       jobID,
+		Name:     f["JobName"],
+		State:    f["JobState"],
+		Restart:  f["Restarts"],
+		Elapsed:  f["RunTime"],
+		ExitCode: f["ExitCode"],
+		NodeList: f["NodeList"],
+		Submit:   f["SubmitTime"],
+		Start:    f["StartTime"],
+		End:      f["EndTime"],
+	}, true, nil
+}
+
 // safeNodeName validates a node name before it reaches a command. Node names are
 // the same safe character class as usernames (alphanumerics, plus separators).
 var safeNodeName = regexp.MustCompile(`^[A-Za-z0-9_.-]+$`)
