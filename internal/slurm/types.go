@@ -100,8 +100,8 @@ type Node struct {
 }
 
 // JobDetail is the parsed Key=Value view of a single job from "scontrol show
-// jobid" (or the sacct fallback). Fields holds the complete key/value map; Source
-// records which command produced it ("scontrol" or "sacct").
+// jobid". Fields holds the complete key/value map; Source records which command
+// produced it ("scontrol").
 type JobDetail struct {
 	Fields map[string]string
 	Source string
@@ -136,16 +136,4 @@ type PriorityEntry struct {
 	JobSize   string
 	Partition string
 	QOS       string
-}
-
-// EnergyRecord is one completed job from the energy-history sacct query, holding
-// its six columns. Only jobs whose base state is in energyValidStates are
-// returned.
-type EnergyRecord struct {
-	JobID     string
-	User      string
-	Elapsed   string
-	NCPUS     string
-	AllocTRES string
-	State     string
 }

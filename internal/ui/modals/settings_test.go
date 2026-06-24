@@ -41,8 +41,8 @@ func TestSettingsSaveEmitsApply(t *testing.T) {
 	}
 }
 
-// TestSettingsCyclesEnumAndSaves asserts cycling the theme field and toggling
-// energy is reflected in the emitted config.
+// TestSettingsCyclesEnumAndSaves asserts cycling the theme and keybind fields is
+// reflected in the emitted config.
 func TestSettingsCyclesEnumAndSaves(t *testing.T) {
 	s := newTestSettings()
 
@@ -63,12 +63,6 @@ func TestSettingsCyclesEnumAndSaves(t *testing.T) {
 	}
 	s.Update(tea.KeyPressMsg{Code: tea.KeyRight})
 
-	// Move to the energy-enabled field and toggle it on.
-	for s.focus != fEnergyEnabledIdx {
-		s.Update(tea.KeyPressMsg{Code: tea.KeyDown})
-	}
-	s.Update(tea.KeyPressMsg{Code: tea.KeyRight})
-
 	_, cmd, done := s.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if !done {
 		t.Fatal("ctrl+s should close")
@@ -80,9 +74,6 @@ func TestSettingsCyclesEnumAndSaves(t *testing.T) {
 	}
 	if applied.Config.KeybindMode != config.KeybindEmacs {
 		t.Errorf("keybind = %q, want emacs", applied.Config.KeybindMode)
-	}
-	if !applied.Config.EnergyEnabled {
-		t.Error("energy should be enabled after toggle")
 	}
 }
 

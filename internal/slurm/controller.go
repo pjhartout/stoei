@@ -9,7 +9,7 @@ import (
 // ControllerJob is one job as reported by "scontrol show jobs": the controller's
 // live view, covering running, pending, and recently finished jobs (the
 // controller retains a finished job only briefly). It is the sacct-free source
-// for job history and energy; persisted into the on-disk journal it
+// for job history; persisted into the on-disk journal it
 // accumulates across runs into a durable record.
 type ControllerJob struct {
 	ID        string
@@ -98,20 +98,4 @@ func HistoryJobsFor(jobs []ControllerJob, username string) ([]HistoryJob, Histor
 	stats.TotalJobs = len(out)
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Submit > out[b].Submit })
 	return out, stats
-}
-
-// EnergyRecordsFrom derives energy records from the finished jobs in the journal
-// (all users), carrying the CPU/TRES figures energy estimation needs.
-func EnergyRecordsFrom(jobs []ControllerJob) []EnergyRecord {
-	var out []EnergyRecord
-	for _, j := range jobs {
-		if !isTerminalState(j.State) {
-			continue
-		}
-		out = append(out, EnergyRecord{
-			JobID: j.ID, User: j.User, Elapsed: j.Elapsed,
-			NCPUS: j.NCPUS, AllocTRES: j.AllocTRES, State: j.State,
-		})
-	}
-	return out
 }

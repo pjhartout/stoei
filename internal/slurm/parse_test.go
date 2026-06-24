@@ -158,52 +158,6 @@ func TestParseRunningJobsEdgeCases(t *testing.T) {
 	}
 }
 
-func TestParseHistory(t *testing.T) {
-	jobs, stats := ParseHistory(readFixture(t, "sacct_history.txt"))
-	if stats.TotalJobs != 10 || len(jobs) != 10 {
-		t.Fatalf("TotalJobs = %d / len = %d, want 10", stats.TotalJobs, len(jobs))
-	}
-	// Requeues: 0+2+0+3+0+0+1+0+0+5 = 11, max 5.
-	if stats.TotalRequeues != 11 {
-		t.Errorf("TotalRequeues = %d, want 11", stats.TotalRequeues)
-	}
-	if stats.MaxRequeues != 5 {
-		t.Errorf("MaxRequeues = %d, want 5", stats.MaxRequeues)
-	}
-	// Sorted by numeric base job ID descending.
-	prev := historySortKey(jobs[0].ID)
-	for _, j := range jobs[1:] {
-		k := historySortKey(j.ID)
-		if k > prev {
-			t.Errorf("history not sorted descending: %d after %d", k, prev)
-		}
-		prev = k
-	}
-}
-
-func TestParseHistoryEdgeCases(t *testing.T) {
-	if jobs, stats := ParseHistory(""); jobs != nil || stats != (HistoryStats{}) {
-		t.Errorf("empty = %v / %+v, want nil / zero", jobs, stats)
-	}
-	header := "JobID|JobName|State|Restart|Elapsed|ExitCode|NodeList|Submit|Start|End"
-	if jobs, _ := ParseHistory(header); jobs != nil {
-		t.Errorf("header-only = %v, want nil", jobs)
-	}
-	// A non-numeric restart count is ignored without crashing.
-	in := header + "\n12345|t|RUNNING|invalid|01:00:00|0:0|n01|2024-01-15T10:00:00|2024-01-15T10:01:00|Unknown"
-	jobs, stats := ParseHistory(in)
-	if len(jobs) != 1 || stats.TotalRequeues != 0 || stats.MaxRequeues != 0 {
-		t.Errorf("invalid restart not handled: jobs=%d stats=%+v", len(jobs), stats)
-	}
-	// A non-numeric job ID sorts as zero rather than crashing.
-	in2 := header +
-		"\nabc123|t1|RUNNING|0|01:00:00|0:0|n01|2024-01-15T10:00:00|2024-01-15T10:01:00|Unknown" +
-		"\n12345|t2|RUNNING|0|01:00:00|0:0|n02|2024-01-15T10:00:00|2024-01-15T10:01:00|Unknown"
-	if jobs, _ := ParseHistory(in2); len(jobs) != 2 {
-		t.Errorf("non-numeric job ID: got %d jobs, want 2", len(jobs))
-	}
-}
-
 func TestParseAllUsersJobs(t *testing.T) {
 	jobs := ParseAllUsersJobs(readFixture(t, "squeue_all_users.txt"))
 	if len(jobs) != 10 {
@@ -264,77 +218,6 @@ func TestParseUserJobs(t *testing.T) {
 	}
 }
 
-func TestParseJobDetail(t *testing.T) {
-	tests := []struct {
-		name   string
-		raw    string
-		fields []string
-		want   map[string]string
-	}{
-		{
-			name:   "basic",
-			raw:    "12345|test_job|COMPLETED|0:0",
-			fields: []string{"JobID", "JobName", "State", "ExitCode"},
-			want:   map[string]string{"JobID": "12345", "JobName": "test_job", "State": "COMPLETED", "ExitCode": "0:0"},
-		},
-		{
-			name:   "empty",
-			raw:    "",
-			fields: []string{"JobID"},
-			want:   map[string]string{},
-		},
-		{
-			name:   "skips dot substeps",
-			raw:    "12345.batch|main|COMPLETED\n12345|main|COMPLETED",
-			fields: []string{"JobID", "JobName", "State"},
-			want:   map[string]string{"JobID": "12345", "JobName": "main", "State": "COMPLETED"},
-		},
-		{
-			name:   "skips numeric substeps",
-			raw:    "12345.0|step|COMPLETED\n12345|main|COMPLETED",
-			fields: []string{"JobID", "JobName", "State"},
-			want:   map[string]string{"JobID": "12345", "JobName": "main", "State": "COMPLETED"},
-		},
-		{
-			name:   "fallback first line",
-			raw:    "12345.batch|batch|COMPLETED",
-			fields: []string{"JobID", "JobName", "State"},
-			want:   map[string]string{"JobID": "12345.batch", "JobName": "batch", "State": "COMPLETED"},
-		},
-		{
-			name:   "empty values dropped",
-			raw:    "12345|test||0:0",
-			fields: []string{"JobID", "JobName", "State", "ExitCode"},
-			want:   map[string]string{"JobID": "12345", "JobName": "test", "ExitCode": "0:0"},
-		},
-		{
-			name:   "fewer values than fields",
-			raw:    "12345|test|COMPLETED",
-			fields: []string{"JobID", "JobName", "State", "ExitCode", "NodeList"},
-			want:   map[string]string{"JobID": "12345", "JobName": "test", "State": "COMPLETED"},
-		},
-		{
-			name:   "picks main among many substeps",
-			raw:    "12345.extern|t|COMPLETED|00:01:00\n12345.0|t|COMPLETED|00:30:00\n12345|t|COMPLETED|00:31:00\n12345.batch|t|COMPLETED|00:30:00",
-			fields: []string{"JobID", "JobName", "State", "Elapsed"},
-			want:   map[string]string{"JobID": "12345", "JobName": "t", "State": "COMPLETED", "Elapsed": "00:31:00"},
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := ParseJobDetail(tt.raw, tt.fields)
-			if len(got) != len(tt.want) {
-				t.Fatalf("got %v, want %v", got, tt.want)
-			}
-			for k, v := range tt.want {
-				if got[k] != v {
-					t.Errorf("field %s = %q, want %q", k, got[k], v)
-				}
-			}
-		})
-	}
-}
-
 func TestParseFairShare(t *testing.T) {
 	entries := ParseFairShare(readFixture(t, "sshare.txt"))
 	if len(entries) != 13 {
@@ -374,34 +257,5 @@ func TestParsePriority(t *testing.T) {
 			t.Errorf("priority not descending: %v after %v", v, prev)
 		}
 		prev = v
-	}
-}
-
-func TestParseEnergyRecords(t *testing.T) {
-	records := ParseEnergyRecords(readFixture(t, "sacct_energy.txt"))
-	// The energy fixture has 17 COMPLETED rows; all are valid states.
-	if len(records) != 17 {
-		t.Fatalf("got %d records, want 17", len(records))
-	}
-	if records[0].JobID != "50001" || records[0].User != "user1" {
-		t.Errorf("record[0] = %+v", records[0])
-	}
-	if got := ParseTRESResources(records[0].AllocTRES); got.CPUs != 64 || CalculateTotalGPUs(got.GPUs, true) != 32 {
-		t.Errorf("record[0] TRES parse = %+v", got)
-	}
-}
-
-func TestParseEnergyRecordsStateFilter(t *testing.T) {
-	// RUNNING/PENDING are excluded; "CANCELLED by 123" matches CANCELLED by base.
-	in := "1|u|1:00:00|8|cpu=8|RUNNING\n" +
-		"2|u|1:00:00|8|cpu=8|COMPLETED\n" +
-		"3|u|1:00:00|8|cpu=8|CANCELLED by 12345\n" +
-		"4|u|1:00:00|8|cpu=8|PENDING"
-	records := ParseEnergyRecords(in)
-	if len(records) != 2 {
-		t.Fatalf("got %d records, want 2 (COMPLETED + CANCELLED)", len(records))
-	}
-	if records[0].JobID != "2" || records[1].JobID != "3" {
-		t.Errorf("kept wrong records: %+v", records)
 	}
 }

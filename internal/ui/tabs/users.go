@@ -19,7 +19,6 @@ type userSubtab int
 const (
 	subtabRunning userSubtab = iota
 	subtabPending
-	subtabEnergy
 )
 
 // runningUserColumns are the Running sub-tab columns: per-user running totals
@@ -46,29 +45,16 @@ var pendingUserColumns = []column{
 	{key: "gpu_types", title: "GPU Types"},
 }
 
-// energyUserColumns are the Energy sub-tab columns: per-user energy and
-// CPU/GPU-hour totals (user, jobs, energy, GPU-hours, CPU-hours).
-var energyUserColumns = []column{
-	{key: "user", title: "User"},
-	{key: "jobs", title: "Jobs", numeric: true},
-	{key: "energy", title: "Energy"},
-	{key: "gpu_hours", title: "GPU-hours", numeric: true},
-	{key: "cpu_hours", title: "CPU-hours", numeric: true},
-}
-
-// Users is the user-overview tab. It is a two-level mini-root: it owns three
-// filterable sub-pane tables (Running / Pending / Energy) and an activeSubtab,
-// switching between them on the r/p/e keys. Each pane renders from a different
-// store aggregation (running/pending per-user stats, energy stats).
-// Enter→user-detail modal is deferred to Phase 5.
+// Users is the user-overview tab. It is a two-level mini-root: it owns two
+// filterable sub-pane tables (Running / Pending) and an activeSubtab, switching
+// between them on the r/p keys. Each pane renders from the all-users-jobs
+// aggregation (running/pending per-user stats).
 type Users struct {
-	store        *store.Store
-	styles       theme.Styles
-	energyMonths int
+	store  *store.Store
+	styles theme.Styles
 
 	running filterTable
 	pending filterTable
-	energy  filterTable
 
 	status       sectionStatus
 	activeSubtab userSubtab
@@ -76,12 +62,11 @@ type Users struct {
 	height       int
 }
 
-// NewUsers returns a Users tab bound to s. energyMonths labels the energy pane.
-func NewUsers(s *store.Store, styles theme.Styles, energyMonths int) *Users {
-	u := &Users{store: s, styles: styles, energyMonths: energyMonths, status: newSectionStatus()}
+// NewUsers returns a Users tab bound to s.
+func NewUsers(s *store.Store, styles theme.Styles) *Users {
+	u := &Users{store: s, styles: styles, status: newSectionStatus()}
 	u.running = newFilterTable(runningUserColumns, styles, nil)
 	u.pending = newFilterTable(pendingUserColumns, styles, nil)
-	u.energy = newFilterTable(energyUserColumns, styles, nil)
 	u.Refresh()
 	return u
 }
@@ -91,33 +76,22 @@ func (u *Users) active() *filterTable {
 	switch u.activeSubtab {
 	case subtabPending:
 		return &u.pending
-	case subtabEnergy:
-		return &u.energy
 	default:
 		return &u.running
 	}
-}
-
-// SetEnergyMonths updates the energy-window label (months) used by the energy
-// pane header, applied live when the user changes it in settings.
-func (u *Users) SetEnergyMonths(months int) {
-	u.energyMonths = months
-	u.Refresh()
 }
 
 // SetKeyMode switches every sub-pane's filter/sort bindings to the given preset.
 func (u *Users) SetKeyMode(mode string) {
 	u.running.SetKeyMode(mode)
 	u.pending.SetKeyMode(mode)
-	u.energy.SetKeyMode(mode)
 }
 
-// SetStyles re-themes all three panes.
+// SetStyles re-themes both panes.
 func (u *Users) SetStyles(styles theme.Styles) {
 	u.styles = styles
 	u.running.SetStyles(styles)
 	u.pending.SetStyles(styles)
-	u.energy.SetStyles(styles)
 }
 
 // SetSize records the area and sizes every pane, reserving a row for the sub-tab
@@ -131,14 +105,13 @@ func (u *Users) SetSize(width, height int) {
 	}
 	u.running.SetSize(width, inner)
 	u.pending.SetSize(width, inner)
-	u.energy.SetSize(width, inner)
 }
 
 // subtabHeaderRows is the vertical space reserved for the sub-tab header.
 const subtabHeaderRows = 2
 
-// Update routes sub-tab-switch keys (r/p/e) to a switch, otherwise forwards to
-// the active pane. The owning root reassigns the returned model and batches the
+// Update routes sub-tab-switch keys (r/p) to a switch, otherwise forwards to the
+// active pane. The owning root reassigns the returned model and batches the
 // cmd (I3).
 func (u *Users) Update(msg tea.Msg) (*Users, tea.Cmd) {
 	if km, ok := msg.(tea.KeyPressMsg); ok && !u.active().CapturesInput() {
@@ -151,33 +124,25 @@ func (u *Users) Update(msg tea.Msg) (*Users, tea.Cmd) {
 			u.activeSubtab = subtabPending
 			u.reobserve()
 			return u, nil
-		case "e":
-			u.activeSubtab = subtabEnergy
-			u.reobserve()
-			return u, nil
 		}
 	}
 	cmd := u.active().Update(msg)
 	return u, cmd
 }
 
-// Refresh rebuilds all three panes from the store aggregations and updates the
+// Refresh rebuilds both panes from the store aggregations and updates the
 // load-status tracker for the active sub-pane's backing section.
 func (u *Users) Refresh() {
 	u.running.SetRows(runningUserRows(u.store.RunningUserStats()))
 	u.pending.SetRows(pendingUserRows(u.store.PendingUserStats()))
-	u.energy.SetRows(energyUserRows(u.store.EnergyStats()))
 	sec, hasData := u.activeSection()
 	u.status.observe(u.store.State(sec), hasData)
 }
 
 // activeSection returns the store section backing the active sub-pane and whether
-// that pane currently has rows. The Running and Pending panes both derive from
-// the all-users-jobs section; the Energy pane derives from the energy section.
+// that pane currently has rows. Both panes derive from the all-users-jobs section.
 func (u *Users) activeSection() (store.Section, bool) {
 	switch u.activeSubtab {
-	case subtabEnergy:
-		return store.SectionEnergy, len(u.energy.rows) > 0
 	case subtabPending:
 		return store.SectionAllUsersJobs, len(u.pending.rows) > 0
 	default:
@@ -220,22 +185,6 @@ func pendingUserRows(users []store.UserPendingStats) [][]string {
 			fmt.Sprintf("%.1f", us.PendingMemoryGB),
 			strconv.Itoa(us.PendingGPUs),
 			naIfEmpty(us.PendingGPUTypes),
-		})
-	}
-	return rows
-}
-
-// energyUserRows builds the Energy pane rows. The store already sorts energy
-// stats by total energy descending.
-func energyUserRows(users []store.UserEnergyStats) [][]string {
-	rows := make([][]string, 0, len(users))
-	for _, us := range users {
-		rows = append(rows, []string{
-			us.Username,
-			strconv.Itoa(us.JobCount),
-			store.FormatEnergy(us.TotalEnergyWh),
-			fmt.Sprintf("%.0f", us.GPUHours),
-			fmt.Sprintf("%.0f", us.CPUHours),
 		})
 	}
 	return rows
@@ -287,7 +236,6 @@ func (u *Users) subtabHeader() string {
 	tabs := []string{
 		u.subtabLabel("r", "Running", subtabRunning),
 		u.subtabLabel("p", "Pending", subtabPending),
-		u.subtabLabel("e", "Energy", subtabEnergy),
 	}
 	return lipgloss.JoinHorizontal(lipgloss.Top, append([]string{title, "  "}, tabs...)...)
 }
@@ -311,11 +259,10 @@ func (u *Users) FullHelp() [][]key.Binding {
 	return append(u.active().FullHelp(), userSubtabBindings())
 }
 
-// userSubtabBindings are the r/p/e sub-tab switch bindings shown in help.
+// userSubtabBindings are the r/p sub-tab switch bindings shown in help.
 func userSubtabBindings() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "running")),
 		key.NewBinding(key.WithKeys("p"), key.WithHelp("p", "pending")),
-		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "energy")),
 	}
 }

@@ -34,9 +34,6 @@ type SlurmClient interface {
 	FairShare(ctx context.Context) ([]slurm.FairShareEntry, error)
 	// PendingPriority returns the priority breakdown for all pending jobs.
 	PendingPriority(ctx context.Context) ([]slurm.PriorityEntry, error)
-	// EnergyHistory returns completed jobs across all users over the last months
-	// months for energy estimation.
-	EnergyHistory(ctx context.Context, months int) ([]slurm.EnergyRecord, error)
 	// JobDetail returns the parsed Key=Value detail for a single job.
 	JobDetail(ctx context.Context, jobID string) (slurm.JobDetail, error)
 	// NodeDetail returns the parsed Key=Value detail for a single node.

@@ -144,13 +144,12 @@ func TestHeavyGuardClearsOnlyAfterAllFetchesReturn(t *testing.T) {
 	a.heavyPending = heavyFetchCount
 
 	g := func(s store.Section) uint64 { return a.store.Gen(s) }
-	// Four of five results arrive. The guard must stay set, so handleSlowTick
+	// Three of four results arrive. The guard must stay set, so handleSlowTick
 	// (which checks !heavyInFlight) cannot re-dispatch.
 	partial := []tea.Msg{
 		nodesMsg{gen: g(store.SectionNodes)},
 		allUsersJobsMsg{gen: g(store.SectionAllUsersJobs)},
 		fairShareMsg{gen: g(store.SectionFairShare)},
-		pendingPrioMsg{gen: g(store.SectionPendingPrio)},
 	}
 	cur := a
 	for _, msg := range partial {
@@ -158,16 +157,16 @@ func TestHeavyGuardClearsOnlyAfterAllFetchesReturn(t *testing.T) {
 		cur = next.(App)
 	}
 	if !cur.heavyInFlight {
-		t.Fatal("heavyInFlight cleared after only 4/5 heavy results returned")
+		t.Fatal("heavyInFlight cleared after only 3/4 heavy results returned")
 	}
 	if cur.heavyPending != 1 {
-		t.Fatalf("heavyPending = %d after 4 results; want 1", cur.heavyPending)
+		t.Fatalf("heavyPending = %d after 3 results; want 1", cur.heavyPending)
 	}
 
-	// The fifth result clears the guard.
-	next, _ := cur.Update(energyMsg{gen: g(store.SectionEnergy)})
+	// The fourth result clears the guard.
+	next, _ := cur.Update(pendingPrioMsg{gen: g(store.SectionPendingPrio)})
 	if next.(App).heavyInFlight {
-		t.Error("heavyInFlight still set after all 5 heavy results returned")
+		t.Error("heavyInFlight still set after all 4 heavy results returned")
 	}
 }
 

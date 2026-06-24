@@ -33,13 +33,12 @@ func summaryLine(label, value string, styles theme.Styles) string {
 
 // formatUserInfo renders a user-detail block from the store's already-fetched
 // data, in this section order: a user summary, jobs-by-state, pending resources,
-// fair-share priority, energy, pending job priorities, and a job list. The job
-// rows come from the all-users list filtered to this user.
+// fair-share priority, pending job priorities, and a job list. The job rows come
+// from the all-users list filtered to this user.
 func formatUserInfo(username string, st *store.Store, styles theme.Styles) string {
 	jobs := userJobs(st, username)
 	userStats := findUserStats(store.AggregateUserStats(jobs), username)
 	pending := findPendingStats(st.PendingUserStats(), username)
-	energy := findEnergyStats(st.EnergyStats(), username)
 	fair := findFairShare(st.FairShare, username)
 	prios := userPriorities(st.PendingPrio, username)
 
@@ -80,14 +79,6 @@ func formatUserInfo(username string, st *store.Store, styles theme.Styles) strin
 		lines = append(lines, summaryLine("Raw Usage", fair.RawUsage, styles))
 		lines = append(lines, summaryLine("Effective Usage", fair.EffectvUsage, styles))
 		lines = append(lines, summaryLine("Fair-Share Factor", fairShareColored(fair.FairShare, styles), styles))
-	}
-
-	if energy != nil {
-		lines = append(lines, "", styles.Title.Render(" Energy "))
-		lines = append(lines, summaryLine("Total Energy", styles.Success.Render(store.FormatEnergy(energy.TotalEnergyWh)), styles))
-		lines = append(lines, summaryLine("Completed Jobs", fmtInt(energy.JobCount), styles))
-		lines = append(lines, summaryLine("GPU-Hours", fmt.Sprintf("%.1f", energy.GPUHours), styles))
-		lines = append(lines, summaryLine("CPU-Hours", fmt.Sprintf("%.1f", energy.CPUHours), styles))
 	}
 
 	if len(prios) > 0 {
@@ -290,17 +281,6 @@ func findUserStats(stats []store.UserStats, username string) store.UserStats {
 // findPendingStats returns the pending-resource stats for username, or nil when
 // the user has none.
 func findPendingStats(stats []store.UserPendingStats, username string) *store.UserPendingStats {
-	for i := range stats {
-		if stats[i].Username == username {
-			return &stats[i]
-		}
-	}
-	return nil
-}
-
-// findEnergyStats returns the energy stats for username, or nil when the user has
-// none.
-func findEnergyStats(stats []store.UserEnergyStats, username string) *store.UserEnergyStats {
 	for i := range stats {
 		if stats[i].Username == username {
 			return &stats[i]

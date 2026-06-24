@@ -66,8 +66,6 @@ const (
 	fHistoryIdx
 	fLinesIdx
 	fKeybindIdx
-	fEnergyEnabledIdx
-	fEnergyMonthsIdx
 	numFields
 )
 
@@ -116,15 +114,6 @@ func NewSettings(styles theme.Styles, cfg config.Config) *Settings {
 		labels:   []string{"Vim", "Emacs"},
 		selected: indexOf(keybindOpts, cfg.KeybindMode),
 	}
-	fields[fEnergyEnabledIdx] = settingField{
-		label:   "Energy accounting",
-		kind:    fieldBool,
-		boolVal: cfg.EnergyEnabled,
-	}
-	fields[fEnergyMonthsIdx] = numericField(
-		fmt.Sprintf("Energy history months (>= %d)", config.MinEnergyHistoryMonths),
-		strconv.Itoa(cfg.EnergyHistoryMonths),
-	)
 
 	s := &Settings{styles: styles, fields: fields}
 	s.focusField(fThemeIdx)
@@ -241,7 +230,6 @@ func (s *Settings) save() tea.Cmd {
 	cfg := config.Default()
 	cfg.Theme = s.fields[fThemeIdx].options[s.fields[fThemeIdx].selected]
 	cfg.KeybindMode = s.fields[fKeybindIdx].options[s.fields[fKeybindIdx].selected]
-	cfg.EnergyEnabled = s.fields[fEnergyEnabledIdx].boolVal
 
 	refresh, err := parseFloat(s.fields[fRefreshIdx].input.Value())
 	if err != nil {
@@ -261,12 +249,6 @@ func (s *Settings) save() tea.Cmd {
 	}
 	cfg.LogViewerLines = lines
 
-	months, err := parseInt(s.fields[fEnergyMonthsIdx].input.Value())
-	if err != nil {
-		return toastCmd("Energy history months must be a number")
-	}
-	cfg.EnergyHistoryMonths = months
-
 	// Clamp through the pure config path so out-of-range fields fall back to the
 	// defaults rather than persisting invalid values.
 	clamped, _ := config.Load(mustMarshalRaw(cfg))
@@ -278,9 +260,9 @@ func (s *Settings) save() tea.Cmd {
 // behavior; here we want Load to be the single clamp seam.
 func mustMarshalRaw(cfg config.Config) []byte {
 	return []byte(fmt.Sprintf(
-		"theme: %q\nrefresh_interval: %v\njob_history_days: %d\nlog_viewer_lines: %d\nkeybind_mode: %q\nenergy_enabled: %t\nenergy_history_months: %d\n",
+		"theme: %q\nrefresh_interval: %v\njob_history_days: %d\nlog_viewer_lines: %d\nkeybind_mode: %q\n",
 		cfg.Theme, cfg.RefreshInterval, cfg.JobHistoryDays, cfg.LogViewerLines,
-		cfg.KeybindMode, cfg.EnergyEnabled, cfg.EnergyHistoryMonths,
+		cfg.KeybindMode,
 	))
 }
 

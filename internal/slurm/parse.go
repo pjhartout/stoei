@@ -7,14 +7,9 @@ import (
 	"strings"
 )
 
-const (
-	// minSqueueParts is the minimum pipe-separated field count a pipe-delimited
-	// squeue row must have to be parsed.
-	minSqueueParts = 8
-	// minSacctParts is the minimum field count a sacct history row must have to be
-	// parsed.
-	minSacctParts = 10
-)
+// minSqueueParts is the minimum pipe-separated field count a pipe-delimited
+// squeue row must have to be parsed.
+const minSqueueParts = 8
 
 // scontrolKVPattern matches one Key=Value record from "scontrol show" output: a
 // key of one or more "\w+" segments joined by "/", an "=", then a value that is a
@@ -223,97 +218,6 @@ func ParseRunningJobs(raw string) []RunningJob {
 	return jobs
 }
 
-// ParseHistory parses pipe-delimited "sacct" history output into HistoryJob
-// records plus aggregate requeue statistics. The first line is treated as a
-// header and skipped; rows with fewer than ten fields are dropped. Jobs are
-// sorted by numeric base job ID descending (most recent first), with
-// non-numeric IDs sorting as zero.
-func ParseHistory(raw string) ([]HistoryJob, HistoryStats) {
-	lines := splitNonTrailing(raw)
-	if len(lines) <= 1 {
-		return nil, HistoryStats{}
-	}
-
-	var jobs []HistoryJob
-	stats := HistoryStats{}
-	for _, line := range lines[1:] {
-		parts := strings.Split(line, "|")
-		if len(parts) < minSacctParts {
-			continue
-		}
-		jobs = append(jobs, HistoryJob{
-			ID:       parts[0],
-			Name:     parts[1],
-			State:    parts[2],
-			Restart:  parts[3],
-			Elapsed:  parts[4],
-			ExitCode: parts[5],
-			NodeList: parts[6],
-			Submit:   parts[7],
-			Start:    parts[8],
-			End:      parts[9],
-			Raw:      parts,
-		})
-		if n, err := strconv.Atoi(parts[3]); err == nil {
-			stats.TotalRequeues += n
-			if n > stats.MaxRequeues {
-				stats.MaxRequeues = n
-			}
-		}
-	}
-	stats.TotalJobs = len(jobs)
-
-	sort.SliceStable(jobs, func(i, j int) bool {
-		return historySortKey(jobs[i].ID) > historySortKey(jobs[j].ID)
-	})
-	return jobs, stats
-}
-
-// historySortKey returns the integer base job ID used to order history rows: the
-// portion before any "_", parsed as an int, or 0 when it is not numeric.
-func historySortKey(jobID string) int {
-	base := strings.TrimSpace(strings.SplitN(jobID, "_", 2)[0])
-	n, err := strconv.Atoi(base)
-	if err != nil {
-		return 0
-	}
-	return n
-}
-
-// ParseJobDetail parses pipe-delimited single-job sacct output into a Key=Value
-// map using the supplied field names. It picks the main job entry, skipping
-// sub-steps whose JobID contains a "." (such as ".batch" or ".0"), and drops
-// empty values.
-func ParseJobDetail(raw string, fields []string) map[string]string {
-	lines := splitNonTrailing(raw)
-	if len(lines) == 0 {
-		return map[string]string{}
-	}
-
-	mainLine := ""
-	for _, line := range lines {
-		jobID := strings.SplitN(line, "|", 2)[0]
-		if !strings.Contains(jobID, ".") || strings.HasSuffix(jobID, ".") {
-			mainLine = line
-			break
-		}
-	}
-	if mainLine == "" {
-		mainLine = lines[0]
-	}
-
-	parts := strings.Split(mainLine, "|")
-	result := make(map[string]string)
-	for i, field := range fields {
-		if i < len(parts) {
-			if v := strings.TrimSpace(parts[i]); v != "" {
-				result[field] = v
-			}
-		}
-	}
-	return result
-}
-
 // allUsersColEnds are the cumulative column end offsets for the all-users
 // "squeue -O" layout (JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,
 // TimeUsed:12,NumNodes:6,NodeList:80) with TRES taking the remainder.
@@ -457,46 +361,6 @@ func priorityValue(s string) float64 {
 		return 0
 	}
 	return v
-}
-
-// energyFieldCount is the column count of the energy sacct query.
-const energyFieldCount = 6
-
-// energyValidStates is the set of job states that count toward energy use.
-var energyValidStates = map[string]struct{}{
-	"COMPLETED":     {},
-	"FAILED":        {},
-	"CANCELLED":     {},
-	"TIMEOUT":       {},
-	"NODE_FAIL":     {},
-	"PREEMPTED":     {},
-	"OUT_OF_MEMORY": {},
-}
-
-// ParseEnergyRecords parses pipe-delimited energy sacct output into EnergyRecord
-// values, keeping only rows whose base state (the first whitespace-separated
-// token, so "CANCELLED by 123" matches "CANCELLED") is in energyValidStates.
-// Rows with fewer than six fields are skipped. Fields are not trimmed here.
-func ParseEnergyRecords(raw string) []EnergyRecord {
-	var records []EnergyRecord
-	for _, parts := range iterPipeRows(raw, energyFieldCount, false) {
-		state := ""
-		if parts[5] != "" {
-			state = strings.Fields(parts[5])[0]
-		}
-		if _, ok := energyValidStates[state]; !ok {
-			continue
-		}
-		records = append(records, EnergyRecord{
-			JobID:     parts[0],
-			User:      parts[1],
-			Elapsed:   parts[2],
-			NCPUS:     parts[3],
-			AllocTRES: parts[4],
-			State:     parts[5],
-		})
-	}
-	return records
 }
 
 // iterPipeRows yields the pipe-separated fields of each non-blank line in out

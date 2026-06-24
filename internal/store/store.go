@@ -54,8 +54,6 @@ const (
 	SectionFairShare
 	// SectionPendingPrio is the sprio pending-priority data.
 	SectionPendingPrio
-	// SectionEnergy is the energy-history data.
-	SectionEnergy
 	// numSections is the count of sections; keep last.
 	numSections
 )
@@ -76,8 +74,6 @@ func (s Section) String() string {
 		return "fair_share"
 	case SectionPendingPrio:
 		return "pending_priority"
-	case SectionEnergy:
-		return "energy"
 	default:
 		return "unknown"
 	}
@@ -128,9 +124,6 @@ type Store struct {
 
 	PendingPrio     []slurm.PriorityEntry
 	PendingPrioMeta Meta
-
-	Energy     []slurm.EnergyRecord
-	EnergyMeta Meta
 
 	// ClusterStats is recomputed from Nodes and AllUsersJobs whenever either
 	// section is applied.
@@ -187,8 +180,6 @@ func (s *Store) State(section Section) State {
 		return s.FairShareMeta.State
 	case SectionPendingPrio:
 		return s.PendingPrioMeta.State
-	case SectionEnergy:
-		return s.EnergyMeta.State
 	default:
 		return StateIdle
 	}
@@ -222,8 +213,6 @@ func (s *Store) SectionErr(section Section) error {
 		return s.FairShareMeta.Err
 	case SectionPendingPrio:
 		return s.PendingPrioMeta.Err
-	case SectionEnergy:
-		return s.EnergyMeta.Err
 	default:
 		return nil
 	}
@@ -249,8 +238,6 @@ func (s *Store) SetLoading(section Section, gen uint64) {
 		s.FairShareMeta.State = StateLoading
 	case SectionPendingPrio:
 		s.PendingPrioMeta.State = StateLoading
-	case SectionEnergy:
-		s.EnergyMeta.State = StateLoading
 	}
 }
 
@@ -402,28 +389,11 @@ func (s *Store) SetPendingPrio(data []slurm.PriorityEntry, gen uint64, err error
 	s.applyMeta(&s.PendingPrioMeta, err)
 }
 
-// SetEnergy applies an energy-history fetch result, dropping stale generations.
-func (s *Store) SetEnergy(data []slurm.EnergyRecord, gen uint64, err error) {
-	if s.stale(SectionEnergy, gen) {
-		return
-	}
-	if err == nil {
-		s.Energy = data
-	}
-	s.applyMeta(&s.EnergyMeta, err)
-}
-
 // recomputeClusterStats refreshes the derived ClusterStats from the current
 // nodes and all-users jobs. It is called by every setter whose dataset feeds the
 // derivation.
 func (s *Store) recomputeClusterStats() {
 	s.ClusterStats = DeriveClusterStats(s.Nodes, s.AllUsersJobs)
-}
-
-// EnergyStats returns the per-user energy summary derived from the current energy
-// records.
-func (s *Store) EnergyStats() []UserEnergyStats {
-	return AggregateEnergyStats(s.Energy)
 }
 
 // RunningUserStats returns the per-user running-job summary derived from the

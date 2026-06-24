@@ -31,13 +31,11 @@ func TestEmbeddedDefaultParsesToDefaults(t *testing.T) {
 // TestLoadRoundTrips asserts an in-range config survives Load unchanged.
 func TestLoadRoundTrips(t *testing.T) {
 	in := Config{
-		Theme:               "dracula",
-		RefreshInterval:     12.5,
-		JobHistoryDays:      30,
-		LogViewerLines:      20000,
-		KeybindMode:         KeybindEmacs,
-		EnergyEnabled:       true,
-		EnergyHistoryMonths: 3,
+		Theme:           "dracula",
+		RefreshInterval: 12.5,
+		JobHistoryDays:  30,
+		LogViewerLines:  20000,
+		KeybindMode:     KeybindEmacs,
 	}
 	data, err := Marshal(in)
 	if err != nil {
@@ -56,13 +54,11 @@ func TestLoadRoundTrips(t *testing.T) {
 // Python default per from_mapping.
 func TestLoadClampsOutOfRange(t *testing.T) {
 	in := Config{
-		Theme:               "no-such-theme",
-		RefreshInterval:     0.0,  // below MinRefreshInterval
-		JobHistoryDays:      9999, // above MaxJobHistoryDays
-		LogViewerLines:      1,    // below MinLogViewerLines
-		KeybindMode:         "qwerty",
-		EnergyEnabled:       true,
-		EnergyHistoryMonths: 0, // below MinEnergyHistoryMonths
+		Theme:           "no-such-theme",
+		RefreshInterval: 0.0,  // below MinRefreshInterval
+		JobHistoryDays:  9999, // above MaxJobHistoryDays
+		LogViewerLines:  1,    // below MinLogViewerLines
+		KeybindMode:     "qwerty",
 	}
 	// Bypass Marshal (which clamps) by serializing directly via Load on raw bytes.
 	data, err := rawYAML(in)
@@ -90,24 +86,16 @@ func TestLoadClampsOutOfRange(t *testing.T) {
 	if got.KeybindMode != d.KeybindMode {
 		t.Errorf("KeybindMode = %q, want %q", got.KeybindMode, d.KeybindMode)
 	}
-	if got.EnergyHistoryMonths != d.EnergyHistoryMonths {
-		t.Errorf("EnergyHistoryMonths = %v, want %v", got.EnergyHistoryMonths, d.EnergyHistoryMonths)
-	}
-	// EnergyEnabled has no range; it is preserved as set.
-	if !got.EnergyEnabled {
-		t.Error("EnergyEnabled should be preserved (no bound)")
-	}
 }
 
 // TestClampPreservesBoundaryValues asserts inclusive bounds are not clamped.
 func TestClampPreservesBoundaryValues(t *testing.T) {
 	in := Config{
-		Theme:               "vesper",
-		RefreshInterval:     MaxRefreshInterval,
-		JobHistoryDays:      MinJobHistoryDays,
-		LogViewerLines:      MaxLogViewerLines,
-		KeybindMode:         KeybindVim,
-		EnergyHistoryMonths: MinEnergyHistoryMonths,
+		Theme:           "vesper",
+		RefreshInterval: MaxRefreshInterval,
+		JobHistoryDays:  MinJobHistoryDays,
+		LogViewerLines:  MaxLogViewerLines,
+		KeybindMode:     KeybindVim,
 	}
 	data, err := rawYAML(in)
 	if err != nil {

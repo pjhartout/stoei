@@ -19,8 +19,7 @@ const (
 	// DefaultRefreshInterval is the default fast-tier refresh in seconds.
 	DefaultRefreshInterval = 5.0
 
-	// MinJobHistoryDays and MaxJobHistoryDays bound the sacct history window in
-	// days.
+	// MinJobHistoryDays and MaxJobHistoryDays bound the history window in days.
 	MinJobHistoryDays = 1
 	MaxJobHistoryDays = 90
 	// DefaultJobHistoryDays is the default history window in days.
@@ -32,12 +31,6 @@ const (
 	MaxLogViewerLines = 100000
 	// DefaultLogViewerLines is the default tail window in lines.
 	DefaultLogViewerLines = 10000
-
-	// MinEnergyHistoryMonths is the inclusive lower bound for the energy window in
-	// months. There is no upper bound.
-	MinEnergyHistoryMonths = 1
-	// DefaultEnergyHistoryMonths is the default energy window in months.
-	DefaultEnergyHistoryMonths = 6
 )
 
 // DefaultTheme is the default palette name; nord is a calm Nord-style
@@ -84,37 +77,30 @@ var ValidThemes = []string{
 }
 
 // Config is the persisted user configuration: theme, refresh interval, history
-// days, log-viewer lines, keybind mode, and energy on/off plus months. This
-// struct carries no UI or Charm types so the package stays a pure, testable
-// seam.
+// days, log-viewer lines, and keybind mode. This struct carries no UI or Charm
+// types so the package stays a pure, testable seam.
 type Config struct {
 	// Theme is the palette name.
 	Theme string `yaml:"theme"`
 	// RefreshInterval is the fast-tier refresh in seconds.
 	RefreshInterval float64 `yaml:"refresh_interval"`
-	// JobHistoryDays is the sacct history window in days.
+	// JobHistoryDays is the history window in days.
 	JobHistoryDays int `yaml:"job_history_days"`
 	// LogViewerLines is the log-viewer tail window in lines.
 	LogViewerLines int `yaml:"log_viewer_lines"`
 	// KeybindMode is the keybinding preset ("vim" or "emacs").
 	KeybindMode string `yaml:"keybind_mode"`
-	// EnergyEnabled toggles energy accounting.
-	EnergyEnabled bool `yaml:"energy_enabled"`
-	// EnergyHistoryMonths is the energy window in months.
-	EnergyHistoryMonths int `yaml:"energy_history_months"`
 }
 
 // Default returns the configuration used when no file exists or a field is
 // invalid.
 func Default() Config {
 	return Config{
-		Theme:               DefaultTheme,
-		RefreshInterval:     DefaultRefreshInterval,
-		JobHistoryDays:      DefaultJobHistoryDays,
-		LogViewerLines:      DefaultLogViewerLines,
-		KeybindMode:         DefaultKeybindMode,
-		EnergyEnabled:       false,
-		EnergyHistoryMonths: DefaultEnergyHistoryMonths,
+		Theme:           DefaultTheme,
+		RefreshInterval: DefaultRefreshInterval,
+		JobHistoryDays:  DefaultJobHistoryDays,
+		LogViewerLines:  DefaultLogViewerLines,
+		KeybindMode:     DefaultKeybindMode,
 	}
 }
 
@@ -160,9 +146,6 @@ func clamp(c Config) Config {
 	}
 	if c.KeybindMode != KeybindVim && c.KeybindMode != KeybindEmacs {
 		c.KeybindMode = d.KeybindMode
-	}
-	if c.EnergyHistoryMonths < MinEnergyHistoryMonths {
-		c.EnergyHistoryMonths = d.EnergyHistoryMonths
 	}
 	return c
 }

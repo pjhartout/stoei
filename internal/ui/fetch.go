@@ -79,13 +79,6 @@ type pendingPrioMsg struct {
 	err     error
 }
 
-// energyMsg carries an energy-history fetch result.
-type energyMsg struct {
-	gen     uint64
-	records []store.EnergyRecord
-	err     error
-}
-
 // runFetch executes fn under a fresh timeout context and recovers from any panic,
 // converting it into an error so a fetch Cmd never crashes the program (I8). All
 // Slurm IO happens here, inside the Cmd closure goroutine (I1).
@@ -198,16 +191,5 @@ func fetchPendingPrio(client store.SlurmClient, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		entries, err := runFetch(client.PendingPriority)
 		return pendingPrioMsg{gen: gen, entries: entries, err: err}
-	}
-}
-
-// fetchEnergy returns a Cmd that loads energy history over the last months months
-// as an energyMsg.
-func fetchEnergy(client store.SlurmClient, gen uint64, months int) tea.Cmd {
-	return func() tea.Msg {
-		records, err := runFetch(func(ctx context.Context) ([]store.EnergyRecord, error) {
-			return client.EnergyHistory(ctx, months)
-		})
-		return energyMsg{gen: gen, records: records, err: err}
 	}
 }

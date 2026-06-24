@@ -27,7 +27,7 @@ type Runner interface {
 // exit (Err wraps the *exec.ExitError), or a zero exit that nonetheless printed a
 // hard-failure signal to stderr (Err is nil).
 type CommandError struct {
-	// Name is the command that failed (for example "sacct").
+	// Name is the command that failed (for example "squeue").
 	Name string
 	// Stderr is the captured standard error, trimmed of trailing whitespace.
 	Stderr string

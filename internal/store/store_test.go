@@ -153,12 +153,4 @@ func TestDerivedAccessors(t *testing.T) {
 	if us := s.RunningUserStats(); len(us) != 1 || us[0].Username != "alice" {
 		t.Errorf("RunningUserStats = %+v", us)
 	}
-
-	genE := s.NextGen(SectionEnergy)
-	s.SetEnergy([]slurm.EnergyRecord{
-		{User: "alice", Elapsed: "01:00:00", NCPUS: "10"},
-	}, genE, nil)
-	if es := s.EnergyStats(); len(es) != 1 || es[0].Username != "alice" {
-		t.Errorf("EnergyStats = %+v", es)
-	}
 }

@@ -20,7 +20,6 @@ type FakeClient struct {
 	NodesData           []slurm.Node
 	FairShareData       []slurm.FairShareEntry
 	PendingPriorityData []slurm.PriorityEntry
-	EnergyData          []slurm.EnergyRecord
 	JobDetailData       slurm.JobDetail
 	NodeDetailData      slurm.JobDetail
 	CompletedJobData    slurm.HistoryJob
@@ -35,7 +34,6 @@ type FakeClient struct {
 	ClusterNodesErr    error
 	FairShareErr       error
 	PendingPriorityErr error
-	EnergyHistoryErr   error
 	JobDetailErr       error
 	NodeDetailErr      error
 	CancelJobErr       error
@@ -53,9 +51,6 @@ type FakeClient struct {
 	LastCompletedJobID string
 	// LastHistoryDays is the day window passed to the most recent JobHistory call.
 	LastHistoryDays int
-	// LastEnergyMonths is the month window passed to the most recent EnergyHistory
-	// call.
-	LastEnergyMonths int
 }
 
 // Available implements SlurmClient.
@@ -99,12 +94,6 @@ func (f *FakeClient) FairShare(_ context.Context) ([]slurm.FairShareEntry, error
 // PendingPriority implements SlurmClient.
 func (f *FakeClient) PendingPriority(_ context.Context) ([]slurm.PriorityEntry, error) {
 	return f.PendingPriorityData, f.PendingPriorityErr
-}
-
-// EnergyHistory implements SlurmClient.
-func (f *FakeClient) EnergyHistory(_ context.Context, months int) ([]slurm.EnergyRecord, error) {
-	f.LastEnergyMonths = months
-	return f.EnergyData, f.EnergyHistoryErr
 }
 
 // JobDetail implements SlurmClient.

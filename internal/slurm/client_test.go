@@ -136,20 +136,6 @@ func TestClientJobHistoryFromJournal(t *testing.T) {
 	}
 }
 
-func TestClientEnergyHistoryFromJournal(t *testing.T) {
-	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_jobs.txt")}}
-	c := NewClient(r, WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")))
-
-	records, err := c.EnergyHistory(context.Background(), 6)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Energy covers finished jobs across users: 1001 and 1003 (COMPLETED).
-	if len(records) != 2 {
-		t.Errorf("got %d records, want 2 (terminal jobs)", len(records))
-	}
-}
-
 func TestClientClusterNodesCommand(t *testing.T) {
 	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_nodes.txt")}}
 	c := NewClient(r, WithUsername("alice"))

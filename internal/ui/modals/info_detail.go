@@ -16,8 +16,8 @@ type InfoDetail struct {
 }
 
 // NewUserDetail builds a user-detail modal from the store. The content is
-// aggregated against the store's already-fetched all-users, fair-share, energy,
-// and priority data, so no further IO is needed.
+// aggregated against the store's already-fetched all-users, fair-share, and
+// priority data, so no further IO is needed.
 func NewUserDetail(st *store.Store, styles theme.Styles, username string) *InfoDetail {
 	d := &InfoDetail{box: newScrollBox(styles)}
 	d.box.SetTitle("User Details — " + username)

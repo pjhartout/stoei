@@ -35,13 +35,11 @@ func TestApplyConfigSwapsThemeKeymapIntervals(t *testing.T) {
 	beforeStyles := a.styles.Title.Render("x")
 
 	newCfg := config.Config{
-		Theme:               "dracula",
-		RefreshInterval:     30,
-		JobHistoryDays:      14,
-		LogViewerLines:      20000,
-		KeybindMode:         config.KeybindEmacs,
-		EnergyEnabled:       true,
-		EnergyHistoryMonths: 3,
+		Theme:           "dracula",
+		RefreshInterval: 30,
+		JobHistoryDays:  14,
+		LogViewerLines:  20000,
+		KeybindMode:     config.KeybindEmacs,
 	}
 
 	a = updateApp(a, modals.SettingsAppliedMsg{Config: newCfg})

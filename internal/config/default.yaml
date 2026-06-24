@@ -4,5 +4,3 @@ refresh_interval: 5
 job_history_days: 7
 log_viewer_lines: 10000
 keybind_mode: vim
-energy_enabled: false
-energy_history_months: 6

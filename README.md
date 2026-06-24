@@ -76,7 +76,7 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `/` | Filter (`col:value` or substring) |
 | `Esc` | Close / clear the filter |
 | `o` | Cycle sort order |
-| `r` / `p` / `e` | Users tab: Running / Pending / Energy pane |
+| `r` / `p` | Users tab: Running / Pending pane |
 | `m` / `u` / `a` / `j` | Priority tab: My / All Users / Accounts / Jobs pane |
 | `r` | Refresh now (on the Users tab, `r` switches pane instead) |
 | `L` | Cluster load (scrollable popup) |
@@ -91,7 +91,7 @@ Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refres
 - Slurm CLIs on `PATH`: `squeue`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
 - A login node where those commands talk to your cluster
 
-Job history and energy come from the controller (`scontrol show jobs`) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl` — `sacct`/`slurmdbd` is never queried, so those views reflect jobs stoei has observed (running, pending, and recently finished), building up over time. Run `stoei reset` to clear the journal.
+Job history comes from the controller (`scontrol show jobs`) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl` — `sacct`/`slurmdbd` is never queried, so the history reflects jobs stoei has observed (running, pending, and recently finished), building up over time. Run `stoei reset` to clear the journal.
 
 ## Development
 

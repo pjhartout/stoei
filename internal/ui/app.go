@@ -146,8 +146,8 @@ func NewWithLogRing(s *store.Store, client store.SlurmClient, ring *components.L
 }
 
 // NewWithConfig constructs the root model from cfg: the theme, keymap, refresh
-// intervals, history/energy windows, and log-viewer line count are all derived
-// from the configuration rather than hardcoded. configPath is where the settings
+// intervals, history window, and log-viewer line count are all derived from the
+// configuration rather than hardcoded. configPath is where the settings
 // modal persists changes ("" disables persistence, for tests).
 func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.LogRing, cfg config.Config, configPath string) App {
 	t := theme.ByName(cfg.Theme)
@@ -172,7 +172,7 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 		spinnerActive: true,
 		jobs:          tabs.NewJobs(s, username, styles),
 		nodes:         tabs.NewNodes(s, styles),
-		users:         tabs.NewUsers(s, styles, cfg.EnergyHistoryMonths),
+		users:         tabs.NewUsers(s, styles),
 		priority:      tabs.NewPriority(s, styles, username),
 		logsTab:       tabs.NewLogs(ring, styles),
 		sidebar:       components.NewSidebar(styles),
@@ -285,21 +285,18 @@ func (a *App) dispatchHeavy() tea.Cmd {
 	a.store.SetLoading(store.SectionFairShare, gFair)
 	gPend := a.store.NextGen(store.SectionPendingPrio)
 	a.store.SetLoading(store.SectionPendingPrio, gPend)
-	gEnergy := a.store.NextGen(store.SectionEnergy)
-	a.store.SetLoading(store.SectionEnergy, gEnergy)
 
 	return tea.Batch(
 		fetchNodes(a.client, gNodes),
 		fetchAllUsersJobs(a.client, gAll),
 		fetchFairShare(a.client, gFair),
 		fetchPendingPrio(a.client, gPend),
-		fetchEnergy(a.client, gEnergy, a.cfg.EnergyHistoryMonths),
 	)
 }
 
 // heavyFetchCount is the number of fetches dispatchHeavy batches; the slow-tier
 // in-flight guard clears only after all of them return (see heavyDone).
-const heavyFetchCount = 5
+const heavyFetchCount = 4
 
 // heavyDone records that one heavy-wave fetch returned, clearing heavyInFlight
 // only once all of them have. The guard must not be cleared by whichever fetch
@@ -423,14 +420,6 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.store.SetPendingPrio(msg.entries, msg.gen, msg.err)
 		a.observe(store.SectionPendingPrio, msg.err)
 		a.priority.Refresh()
-		a.frame.dirty = true
-		return a, nil, true
-
-	case energyMsg:
-		a.heavyDone()
-		a.store.SetEnergy(msg.records, msg.gen, msg.err)
-		a.observe(store.SectionEnergy, msg.err)
-		a.users.Refresh() // Energy pane derives from energy records.
 		a.frame.dirty = true
 		return a, nil, true
 	}
@@ -641,7 +630,7 @@ func tabForKey(msg tea.KeyPressMsg) (tabIndex, bool) {
 // not visible while data is already on screen.
 func (a *App) manualRefresh() tea.Cmd {
 	a.frame.dirty = true
-	// Re-dispatch every wave. History/energy refresh from the controller journal
+	// Re-dispatch every wave. History refreshes from the controller journal
 	// (throttled), so a manual refresh re-runs the live fetches without ever
 	// touching slurmdbd.
 	return tea.Batch(
@@ -887,11 +876,10 @@ func (a *App) rebuildStyles() {
 
 // applyConfig persists the new config and applies it live: it swaps the theme
 // (rebuilds styles and re-themes every sub-model), swaps the keymap (so the
-// footer/help reflect the new preset), updates the refresh intervals, and pushes
-// the new energy-months label to the Users tab. The history/energy/log-line
-// windows are read from a.cfg on the next dispatch, so updating a.cfg suffices.
-// A manual refresh is triggered so the new history/energy windows take effect at
-// once.
+// footer/help reflect the new preset), and updates the refresh intervals. The
+// history/log-line windows are read from a.cfg on the next dispatch, so updating
+// a.cfg suffices. A manual refresh is triggered so the new history window takes
+// effect at once.
 func (a *App) applyConfig(cfg config.Config) tea.Cmd {
 	themeChanged := cfg.Theme != a.cfg.Theme
 	a.cfg = cfg
@@ -903,7 +891,6 @@ func (a *App) applyConfig(cfg config.Config) tea.Cmd {
 	a.keys = keys.BuildKeyMap(cfg.KeybindMode)
 	a.applyKeyModeToTabs()
 	a.intervals = intervalsFromConfig(cfg)
-	a.users.SetEnergyMonths(cfg.EnergyHistoryMonths)
 
 	if a.configPath != "" {
 		if err := config.Save(a.configPath, cfg); err != nil {
@@ -912,7 +899,7 @@ func (a *App) applyConfig(cfg config.Config) tea.Cmd {
 	}
 
 	a.frame.dirty = true
-	// Re-fetch so the new history/energy windows are reflected immediately.
+	// Re-fetch so the new history window is reflected immediately.
 	return a.manualRefresh()
 }
 

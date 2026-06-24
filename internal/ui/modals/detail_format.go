@@ -30,30 +30,6 @@ var scontrolJobCategories = []fieldCategory{
 	{"Scheduling", []string{"Priority", "Nice", "Contiguous", "Licenses", "Network", "Power", "NtasksPerN:B:S:C", "CoreSpec", "Shared", "OverSubscribe"}},
 }
 
-// sacctFieldDisplay maps raw sacct field keys to friendlier display labels for
-// the historical (completed-job) detail view.
-var sacctFieldDisplay = map[string]string{
-	"JobID": "Job ID", "JobName": "Job Name", "User": "User", "Account": "Account",
-	"Partition": "Partition", "State": "State", "ExitCode": "Exit Code",
-	"Start": "Start Time", "End": "End Time", "Elapsed": "Elapsed Time",
-	"TimelimitRaw": "Time Limit (min)", "NNodes": "Nodes", "NCPUS": "CPUs",
-	"NTasks": "Tasks", "ReqMem": "Requested Memory", "MaxRSS": "Max RSS",
-	"MaxVMSize": "Max VM Size", "NodeList": "Node List", "WorkDir": "Work Directory",
-	"StdOut": "StdOut Path", "StdErr": "StdErr Path", "Submit": "Submit Time",
-	"Priority": "Priority", "QOS": "QOS",
-}
-
-// sacctJobCategories groups sacct fields into titled sections, used as the
-// fallback layout when a job has completed and only historical data is available.
-var sacctJobCategories = []fieldCategory{
-	{"Identity", []string{"JobID", "JobName", "User", "Account", "QOS"}},
-	{"Status", []string{"State", "ExitCode", "Priority"}},
-	{"Resources", []string{"Partition", "NNodes", "NCPUS", "NTasks", "ReqMem", "MaxRSS", "MaxVMSize"}},
-	{"Nodes", []string{"NodeList"}},
-	{"Timing", []string{"Submit", "Start", "End", "Elapsed", "TimelimitRaw"}},
-	{"Paths", []string{"WorkDir", "StdOut", "StdErr"}},
-}
-
 // nodeCategories groups the fields of "scontrol show node" output into the
 // titled sections shown in the node-detail modal.
 var nodeCategories = []fieldCategory{
@@ -70,17 +46,11 @@ var nodeCategories = []fieldCategory{
 // values align in a column.
 const labelWidth = 24
 
-// formatJobDetail renders a JobDetail's fields, choosing the scontrol or sacct
-// category set from its Source. An sacct source (a completed job) gets a
-// historical-data header above the categorized fields.
+// formatJobDetail renders a JobDetail's "scontrol show jobid" fields grouped by
+// category.
 func formatJobDetail(detail store.JobDetail, styles theme.Styles) string {
 	if len(detail.Fields) == 0 {
 		return styles.Subtle.Render("No job information could be parsed.")
-	}
-	if detail.Source == "sacct" {
-		header := styles.Subtle.Render("(i) Historical data from sacct (job completed)")
-		body := formatCategorized(detail.Fields, sacctJobCategories, sacctFieldDisplay, styles)
-		return header + "\n" + body
 	}
 	return formatCategorized(detail.Fields, scontrolJobCategories, nil, styles)
 }

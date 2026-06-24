@@ -24,8 +24,6 @@ type (
 	FairShareEntry = slurm.FairShareEntry
 	// PriorityEntry is one pending job's priority breakdown from sprio.
 	PriorityEntry = slurm.PriorityEntry
-	// EnergyRecord is one completed job from the energy-history query.
-	EnergyRecord = slurm.EnergyRecord
 	// JobDetail is the parsed key/value detail for a single job.
 	JobDetail = slurm.JobDetail
 	// GPUEntry is a single GPU allocation parsed from a TRES or Gres string.
