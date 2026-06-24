@@ -71,7 +71,6 @@ func TestFetchEachDatasetType(t *testing.T) {
 		FairShareData:       []store.FairShareEntry{{Account: "acct"}},
 		PendingPriorityData: []store.PriorityEntry{{JobID: "1"}},
 		EnergyData:          []store.EnergyRecord{{JobID: "1"}},
-		WaitTimeData:        []store.WaitTimeRecord{{JobID: "1"}},
 	}
 
 	if m := fetchNodes(client, 1)().(nodesMsg); m.gen != 1 || len(m.nodes) != 1 || m.err != nil {
@@ -88,9 +87,6 @@ func TestFetchEachDatasetType(t *testing.T) {
 	}
 	if m := fetchEnergy(client, 5, 3)().(energyMsg); m.gen != 5 || len(m.records) != 1 {
 		t.Errorf("energy msg = %+v", m)
-	}
-	if m := fetchWaitTime(client, 6, 1)().(waitTimeMsg); m.gen != 6 || len(m.records) != 1 {
-		t.Errorf("waitTime msg = %+v", m)
 	}
 }
 

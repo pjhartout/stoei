@@ -17,13 +17,7 @@ func TestDeriveClusterStats(t *testing.T) {
 		{ID: "1002_[0-3]", User: "bob", Partition: "cpu", State: "PD", TRES: "cpu=2,mem=4G"},
 		{ID: "1003", User: "carol", Partition: "gpu", State: "RUNNING", NodeList: "node01", TRES: "cpu=8"},
 	}
-	wait := []slurm.WaitTimeRecord{
-		{JobID: "1", Partition: "gpu", State: "COMPLETED", Submit: "2024-01-01T00:00:00", Start: "2024-01-01T00:10:00"},
-		{JobID: "2", Partition: "gpu", State: "COMPLETED", Submit: "2024-01-01T00:00:00", Start: "2024-01-01T00:30:00"},
-		{JobID: "3", Partition: "cpu", State: "COMPLETED", Submit: "2024-01-01T00:00:00", Start: "2024-01-01T01:00:00"},
-	}
-
-	s := DeriveClusterStats(nodes, allUsers, wait)
+	s := DeriveClusterStats(nodes, allUsers)
 
 	// Node counts: draining excluded from totals.
 	if s.TotalNodes != 2 || s.FreeNodes != 1 || s.AllocatedNodes != 1 || s.DrainingNodes != 1 {
@@ -65,16 +59,6 @@ func TestDeriveClusterStats(t *testing.T) {
 	if cpuPart.JobsCount != 4 || cpuPart.CPUs != 8 || cpuPart.MemoryGB != 16.0 || cpuPart.GPUs != 0 {
 		t.Errorf("cpu partition = %+v; want jobs 4 cpu 8 mem 16 gpu 0", cpuPart)
 	}
-
-	// Wait stats: gpu has [600,1800] -> mean/median 1200, min 600, max 1800.
-	gpuWait := s.WaitStatsByPartition["gpu"]
-	if gpuWait.JobCount != 2 || gpuWait.MeanSeconds != 1200 || gpuWait.MedianSeconds != 1200 || gpuWait.MinSeconds != 600 || gpuWait.MaxSeconds != 1800 {
-		t.Errorf("gpu wait = %+v; want 2 1200 1200 600 1800", gpuWait)
-	}
-	cpuWait := s.WaitStatsByPartition["cpu"]
-	if cpuWait.JobCount != 1 || cpuWait.MeanSeconds != 3600 || cpuWait.MedianSeconds != 3600 {
-		t.Errorf("cpu wait = %+v; want 1 3600 3600", cpuWait)
-	}
 }
 
 func TestDeriveClusterStatsNoNodes(t *testing.T) {
@@ -82,7 +66,7 @@ func TestDeriveClusterStatsNoNodes(t *testing.T) {
 	allUsers := []slurm.AllUsersJob{
 		{ID: "9_[0-9]", User: "x", Partition: "p", State: "PENDING", TRES: "cpu=1,mem=1G"},
 	}
-	s := DeriveClusterStats(nil, allUsers, nil)
+	s := DeriveClusterStats(nil, allUsers)
 	if s.TotalNodes != 0 {
 		t.Errorf("total nodes = %d; want 0", s.TotalNodes)
 	}
@@ -96,7 +80,7 @@ func TestDeriveClusterStatsGresFallback(t *testing.T) {
 	nodes := []slurm.Node{
 		{State: "MIXED", CPUTot: "8", CPUAlloc: "8", RealMem: "1024", AllocMem: "1024", Gres: "gpu:a100:4"},
 	}
-	s := DeriveClusterStats(nodes, nil, nil)
+	s := DeriveClusterStats(nodes, nil)
 	if s.TotalGPUs != 4 || s.AllocatedGPUs != 4 {
 		t.Errorf("gres fallback gpus = total %d alloc %d; want 4 4", s.TotalGPUs, s.AllocatedGPUs)
 	}

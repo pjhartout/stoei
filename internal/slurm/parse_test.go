@@ -405,31 +405,3 @@ func TestParseEnergyRecordsStateFilter(t *testing.T) {
 		t.Errorf("kept wrong records: %+v", records)
 	}
 }
-
-func TestParseWaitTimeRecords(t *testing.T) {
-	records := ParseWaitTimeRecords(readFixture(t, "sacct_wait_time.txt"))
-	// The fixture has 8 rows; one is PENDING with Unknown start and is dropped.
-	if len(records) != 7 {
-		t.Fatalf("got %d records, want 7 (pending dropped)", len(records))
-	}
-	for _, r := range records {
-		if isUnknownTimestamp(r.Start) {
-			t.Errorf("record with unknown start was not dropped: %+v", r)
-		}
-	}
-	// A kept record yields a sensible wait time.
-	if secs, ok := WaitTimeSeconds(records[0].Submit, records[0].Start); !ok || secs != 300 {
-		t.Errorf("record[0] wait = %v (ok=%v), want 300", secs, ok)
-	}
-}
-
-func TestParseWaitTimeRecordsDropsPending(t *testing.T) {
-	in := "1|gpu|RUNNING|2024-01-15T10:00:00|2024-01-15T10:05:00\n" +
-		"2|gpu|PENDING|2024-01-15T10:50:00|Unknown\n" +
-		"3|gpu|PENDING|2024-01-15T10:50:00|\n" +
-		"4|gpu|RUNNING|2024-01-15T10:00:00|None"
-	records := ParseWaitTimeRecords(in)
-	if len(records) != 1 || records[0].JobID != "1" {
-		t.Errorf("got %+v, want only job 1", records)
-	}
-}

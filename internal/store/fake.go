@@ -21,7 +21,6 @@ type FakeClient struct {
 	FairShareData       []slurm.FairShareEntry
 	PendingPriorityData []slurm.PriorityEntry
 	EnergyData          []slurm.EnergyRecord
-	WaitTimeData        []slurm.WaitTimeRecord
 	JobDetailData       slurm.JobDetail
 	NodeDetailData      slurm.JobDetail
 	CompletedJobData    slurm.HistoryJob
@@ -37,7 +36,6 @@ type FakeClient struct {
 	FairShareErr       error
 	PendingPriorityErr error
 	EnergyHistoryErr   error
-	WaitTimeErr        error
 	JobDetailErr       error
 	NodeDetailErr      error
 	CancelJobErr       error
@@ -107,11 +105,6 @@ func (f *FakeClient) PendingPriority(_ context.Context) ([]slurm.PriorityEntry, 
 func (f *FakeClient) EnergyHistory(_ context.Context, months int) ([]slurm.EnergyRecord, error) {
 	f.LastEnergyMonths = months
 	return f.EnergyData, f.EnergyHistoryErr
-}
-
-// WaitTimeHistory implements SlurmClient.
-func (f *FakeClient) WaitTimeHistory(_ context.Context, _ int) ([]slurm.WaitTimeRecord, error) {
-	return f.WaitTimeData, f.WaitTimeErr
 }
 
 // JobDetail implements SlurmClient.

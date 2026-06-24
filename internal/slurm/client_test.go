@@ -150,20 +150,6 @@ func TestClientEnergyHistoryFromJournal(t *testing.T) {
 	}
 }
 
-func TestClientWaitTimeHistoryFromJournal(t *testing.T) {
-	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_jobs.txt")}}
-	c := NewClient(r, WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")))
-
-	records, err := c.WaitTimeHistory(context.Background(), 1)
-	if err != nil {
-		t.Fatal(err)
-	}
-	// Wait-time covers jobs that started: 1001, 1002, 1003 (1004 is still pending).
-	if len(records) != 3 {
-		t.Errorf("got %d records, want 3 (started jobs)", len(records))
-	}
-}
-
 func TestClientClusterNodesCommand(t *testing.T) {
 	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_nodes.txt")}}
 	c := NewClient(r, WithUsername("alice"))

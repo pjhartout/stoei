@@ -287,8 +287,6 @@ func (a *App) dispatchHeavy() tea.Cmd {
 	a.store.SetLoading(store.SectionPendingPrio, gPend)
 	gEnergy := a.store.NextGen(store.SectionEnergy)
 	a.store.SetLoading(store.SectionEnergy, gEnergy)
-	gWait := a.store.NextGen(store.SectionWaitTime)
-	a.store.SetLoading(store.SectionWaitTime, gWait)
 
 	return tea.Batch(
 		fetchNodes(a.client, gNodes),
@@ -296,23 +294,17 @@ func (a *App) dispatchHeavy() tea.Cmd {
 		fetchFairShare(a.client, gFair),
 		fetchPendingPrio(a.client, gPend),
 		fetchEnergy(a.client, gEnergy, a.cfg.EnergyHistoryMonths),
-		fetchWaitTime(a.client, gWait, waitTimeHours),
 	)
 }
 
-// waitTimeHours is the per-partition wait-time lookback window. It is a fixed
-// constant rather than a user-configurable setting.
-const waitTimeHours = 1
-
 // heavyFetchCount is the number of fetches dispatchHeavy batches; the slow-tier
 // in-flight guard clears only after all of them return (see heavyDone).
-const heavyFetchCount = 6
+const heavyFetchCount = 5
 
 // heavyDone records that one heavy-wave fetch returned, clearing heavyInFlight
 // only once all of them have. The guard must not be cleared by whichever fetch
-// finishes first — waitTime in particular returns instantly during a slurmdbd
-// cooldown — or a slow tick would re-dispatch the whole wave while the heavier
-// squeue/scontrol fetches are still running.
+// finishes first, or a slow tick would re-dispatch the whole wave while the
+// others are still running.
 func (a *App) heavyDone() {
 	if a.heavyPending > 0 {
 		a.heavyPending--
@@ -439,14 +431,6 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.store.SetEnergy(msg.records, msg.gen, msg.err)
 		a.observe(store.SectionEnergy, msg.err)
 		a.users.Refresh() // Energy pane derives from energy records.
-		a.frame.dirty = true
-		return a, nil, true
-
-	case waitTimeMsg:
-		a.heavyDone()
-		a.store.SetWaitTime(msg.records, msg.gen, msg.err)
-		a.observe(store.SectionWaitTime, msg.err)
-		a.refreshSidebar() // Wait-time stats derive from wait-time records.
 		a.frame.dirty = true
 		return a, nil, true
 	}
@@ -657,9 +641,9 @@ func tabForKey(msg tea.KeyPressMsg) (tabIndex, bool) {
 // not visible while data is already on screen.
 func (a *App) manualRefresh() tea.Cmd {
 	a.frame.dirty = true
-	// Re-dispatch every wave. sacct-backed fetches (history/energy/wait-time) are
-	// served from the persistent cache until its TTL expires, so a manual refresh
-	// updates the cheap live data without forcing a fresh head-node sacct query.
+	// Re-dispatch every wave. History/energy refresh from the controller journal
+	// (throttled), so a manual refresh re-runs the live fetches without ever
+	// touching slurmdbd.
 	return tea.Batch(
 		a.dispatchRunning(),
 		a.dispatchHistory(),

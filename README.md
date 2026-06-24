@@ -12,7 +12,7 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 - Completed-job history merged into the Jobs tab
 - Job detail view (`Enter` or `i`) and a log viewer with search and `$EDITOR`
 - Tabs for Jobs, Nodes, Users, Priority, and Logs
-- Cluster-load sidebar: free vs. allocated nodes/CPU/memory/GPU, pending queue, and wait times
+- Cluster-load sidebar: free vs. allocated nodes/CPU/memory/GPU, and the pending queue
 - Quick filtering (`/`), sorting (`o`), and job cancellation (`c`)
 - Configurable themes and vim/emacs keybindings
 
@@ -91,7 +91,7 @@ Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refres
 - Slurm CLIs on `PATH`: `squeue`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
 - A login node where those commands talk to your cluster
 
-Job history, energy, and wait-time come from the controller (`scontrol show jobs`) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl` — `sacct`/`slurmdbd` is never queried, so those views reflect jobs stoei has observed (running, pending, and recently finished), building up over time.
+Job history and energy come from the controller (`scontrol show jobs`) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl` — `sacct`/`slurmdbd` is never queried, so those views reflect jobs stoei has observed (running, pending, and recently finished), building up over time. Run `stoei reset` to clear the journal.
 
 ## Development
 

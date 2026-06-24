@@ -86,13 +86,6 @@ type energyMsg struct {
 	err     error
 }
 
-// waitTimeMsg carries a wait-time history fetch result.
-type waitTimeMsg struct {
-	gen     uint64
-	records []store.WaitTimeRecord
-	err     error
-}
-
 // runFetch executes fn under a fresh timeout context and recovers from any panic,
 // converting it into an error so a fetch Cmd never crashes the program (I8). All
 // Slurm IO happens here, inside the Cmd closure goroutine (I1).
@@ -216,16 +209,5 @@ func fetchEnergy(client store.SlurmClient, gen uint64, months int) tea.Cmd {
 			return client.EnergyHistory(ctx, months)
 		})
 		return energyMsg{gen: gen, records: records, err: err}
-	}
-}
-
-// fetchWaitTime returns a Cmd that loads wait-time history over the last hours
-// hours as a waitTimeMsg.
-func fetchWaitTime(client store.SlurmClient, gen uint64, hours int) tea.Cmd {
-	return func() tea.Msg {
-		records, err := runFetch(func(ctx context.Context) ([]store.WaitTimeRecord, error) {
-			return client.WaitTimeHistory(ctx, hours)
-		})
-		return waitTimeMsg{gen: gen, records: records, err: err}
 	}
 }

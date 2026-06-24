@@ -26,8 +26,6 @@ type (
 	PriorityEntry = slurm.PriorityEntry
 	// EnergyRecord is one completed job from the energy-history query.
 	EnergyRecord = slurm.EnergyRecord
-	// WaitTimeRecord is one job from the wait-time query.
-	WaitTimeRecord = slurm.WaitTimeRecord
 	// JobDetail is the parsed key/value detail for a single job.
 	JobDetail = slurm.JobDetail
 	// GPUEntry is a single GPU allocation parsed from a TRES or Gres string.

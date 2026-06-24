@@ -149,14 +149,3 @@ type EnergyRecord struct {
 	AllocTRES string
 	State     string
 }
-
-// WaitTimeRecord is one job from the wait-time sacct query with usable submit and
-// start timestamps, holding its five columns. Pending jobs (those without a real
-// Start time) are filtered out before this is produced.
-type WaitTimeRecord struct {
-	JobID     string
-	Partition string
-	State     string
-	Submit    string
-	Start     string
-}

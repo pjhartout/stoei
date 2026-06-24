@@ -45,9 +45,6 @@ type ClusterStats struct {
 	PendingGPUs        int
 	PendingGPUsByType  map[string]int
 	PendingByPartition map[string]PendingPartitionStats
-
-	WaitStatsByPartition map[string]PartitionWaitStats
-	WaitStatsHours       int
 }
 
 // FreeNodesPct returns the percentage of free nodes.
@@ -91,23 +88,19 @@ func (s ClusterStats) GPUTypeFreePct(gpuType string) float64 {
 	return float64(ta.Total-ta.Allocated) / float64(ta.Total) * 100.0
 }
 
-// newClusterStats returns a ClusterStats with all maps initialised and the
-// wait-stats window defaulting to 1 hour.
+// newClusterStats returns a ClusterStats with all maps initialised.
 func newClusterStats() ClusterStats {
 	return ClusterStats{
-		GPUsByType:           map[string]GPUTotalAlloc{},
-		PendingGPUsByType:    map[string]int{},
-		PendingByPartition:   map[string]PendingPartitionStats{},
-		WaitStatsByPartition: map[string]PartitionWaitStats{},
-		WaitStatsHours:       1,
+		GPUsByType:         map[string]GPUTotalAlloc{},
+		PendingGPUsByType:  map[string]int{},
+		PendingByPartition: map[string]PendingPartitionStats{},
 	}
 }
 
-// DeriveClusterStats computes cluster statistics from nodes, all-users jobs (for
-// pending resources), and wait-time records. It handles draining nodes, GPU
-// accounting from CfgTRES/AllocTRES with a Gres fallback, array-expanded pending
-// aggregation, and per-partition wait-time stats.
-func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob, waitTimeJobs []slurm.WaitTimeRecord) ClusterStats {
+// DeriveClusterStats computes cluster statistics from nodes and all-users jobs
+// (for pending resources). It handles draining nodes, GPU accounting from
+// CfgTRES/AllocTRES with a Gres fallback, and array-expanded pending aggregation.
+func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob) ClusterStats {
 	stats := newClusterStats()
 
 	if len(nodes) == 0 {
@@ -132,11 +125,6 @@ func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob, wa
 	}
 
 	aggregatePending(allUsersJobs, &stats)
-
-	if len(waitTimeJobs) > 0 {
-		stats.WaitStatsByPartition = CalculatePartitionWaitStats(waitTimeJobs)
-		stats.WaitStatsHours = 1
-	}
 
 	return stats
 }

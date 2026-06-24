@@ -37,9 +37,6 @@ type SlurmClient interface {
 	// EnergyHistory returns completed jobs across all users over the last months
 	// months for energy estimation.
 	EnergyHistory(ctx context.Context, months int) ([]slurm.EnergyRecord, error)
-	// WaitTimeHistory returns all-users jobs that started within the last hours
-	// hours, for wait-time analysis.
-	WaitTimeHistory(ctx context.Context, hours int) ([]slurm.WaitTimeRecord, error)
 	// JobDetail returns the parsed Key=Value detail for a single job.
 	JobDetail(ctx context.Context, jobID string) (slurm.JobDetail, error)
 	// NodeDetail returns the parsed Key=Value detail for a single node.

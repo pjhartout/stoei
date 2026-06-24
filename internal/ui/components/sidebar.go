@@ -32,9 +32,8 @@ const SidebarMinTermWidth = 100
 const gbPerTB = 1024.0
 
 // Sidebar renders cluster-wide load statistics from the store's derived
-// ClusterStats: free-vs-allocated nodes/CPU/memory/GPU by type, array-expanded
-// pending resources per partition, and per-partition wait-time stats. It renders
-// from data only and never fetches.
+// ClusterStats: free-vs-allocated nodes/CPU/memory/GPU by type and array-expanded
+// pending resources per partition. It renders from data only and never fetches.
 type Sidebar struct {
 	styles theme.Styles
 	stats  store.ClusterStats
@@ -117,7 +116,6 @@ func (s *Sidebar) body() string {
 	lines = append(lines, s.cpuSection()...)
 	lines = append(lines, s.memorySection()...)
 	lines = append(lines, s.gpuSection()...)
-	lines = append(lines, s.waitTimeSection()...)
 	lines = append(lines, s.pendingSection()...)
 
 	// Size the title rule to the widest stats line so the underline spans the
@@ -209,31 +207,6 @@ func (s *Sidebar) gpuSection() []string {
 		}
 	}
 	return nil
-}
-
-// waitTimeSection renders the per-partition wait-time block (mean/median/range
-// for jobs started in the recent window), or nothing when no stats are present.
-func (s *Sidebar) waitTimeSection() []string {
-	st := s.stats
-	if len(st.WaitStatsByPartition) == 0 {
-		return nil
-	}
-	lines := []string{
-		s.styles.Text.Bold(true).Render("Wait Times"),
-		s.styles.Subtle.Render(fmt.Sprintf("Jobs started in last %dh", st.WaitStatsHours)),
-		s.styles.Subtle.Render("(mean/median/range)"),
-	}
-	for _, part := range sortedKeysFold(st.WaitStatsByPartition) {
-		w := st.WaitStatsByPartition[part]
-		lines = append(lines, fmt.Sprintf("  %s: %s/%s/%s-%s",
-			part,
-			store.FormatWaitTime(w.MeanSeconds),
-			store.FormatWaitTime(w.MedianSeconds),
-			store.FormatWaitTime(w.MinSeconds),
-			store.FormatWaitTime(w.MaxSeconds),
-		))
-	}
-	return append(lines, "")
 }
 
 // pendingSection renders the per-partition pending-queue block (job counts and

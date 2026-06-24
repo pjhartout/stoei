@@ -499,30 +499,6 @@ func ParseEnergyRecords(raw string) []EnergyRecord {
 	return records
 }
 
-// waitTimeFieldCount is the column count of the wait-time sacct query.
-const waitTimeFieldCount = 5
-
-// ParseWaitTimeRecords parses pipe-delimited wait-time sacct output into
-// WaitTimeRecord values, dropping rows whose Start time is unknown/empty (still
-// pending). Rows with fewer than five fields are skipped.
-func ParseWaitTimeRecords(raw string) []WaitTimeRecord {
-	var records []WaitTimeRecord
-	for _, parts := range iterPipeRows(raw, waitTimeFieldCount, false) {
-		start := strings.TrimSpace(parts[4])
-		if isUnknownTimestamp(start) {
-			continue
-		}
-		records = append(records, WaitTimeRecord{
-			JobID:     parts[0],
-			Partition: parts[1],
-			State:     parts[2],
-			Submit:    parts[3],
-			Start:     parts[4],
-		})
-	}
-	return records
-}
-
 // iterPipeRows yields the pipe-separated fields of each non-blank line in out
 // that has at least numFields columns, optionally trimming each field.
 func iterPipeRows(out string, numFields int, strip bool) [][]string {

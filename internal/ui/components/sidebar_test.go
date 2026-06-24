@@ -24,7 +24,7 @@ func TestSidebarRendersFreeAndGPUByType(t *testing.T) {
 			Fields:    map[string]string{"NodeName": "gpu01"},
 		},
 	}
-	stats := store.DeriveClusterStats(nodes, nil, nil)
+	stats := store.DeriveClusterStats(nodes, nil)
 
 	s := NewSidebar(styles())
 	s.SetStats(stats, true)
@@ -39,17 +39,14 @@ func TestSidebarRendersFreeAndGPUByType(t *testing.T) {
 	}
 }
 
-func TestSidebarRendersPendingAndWaitTime(t *testing.T) {
+func TestSidebarRendersPending(t *testing.T) {
 	all := []store.AllUsersJob{
 		{ID: "5000", User: "bob", State: "PENDING", Partition: "gpu", TRES: "cpu=8,mem=16G,gres/gpu:a100=2"},
-	}
-	wait := []store.WaitTimeRecord{
-		{JobID: "1", Partition: "gpu", State: "RUNNING", Submit: "2024-01-01T00:00:00", Start: "2024-01-01T00:05:00"},
 	}
 	nodes := []store.Node{
 		{Name: "n1", State: "IDLE", CPUTot: "8", Fields: map[string]string{"NodeName": "n1"}},
 	}
-	stats := store.DeriveClusterStats(nodes, all, wait)
+	stats := store.DeriveClusterStats(nodes, all)
 
 	s := NewSidebar(styles())
 	s.SetStats(stats, true)
@@ -60,13 +57,6 @@ func TestSidebarRendersPendingAndWaitTime(t *testing.T) {
 	}
 	if !strings.Contains(view, "gpu: 1 jobs") {
 		t.Errorf("sidebar missing per-partition pending; view:\n%s", view)
-	}
-	if !strings.Contains(view, "Wait Times") {
-		t.Errorf("sidebar missing wait times; view:\n%s", view)
-	}
-	// 5 minutes wait → "5m" mean/median.
-	if !strings.Contains(view, "5m") {
-		t.Errorf("sidebar missing wait-time value; view:\n%s", view)
 	}
 }
 

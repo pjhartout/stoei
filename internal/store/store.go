@@ -56,8 +56,6 @@ const (
 	SectionPendingPrio
 	// SectionEnergy is the energy-history data.
 	SectionEnergy
-	// SectionWaitTime is the wait-time history data.
-	SectionWaitTime
 	// numSections is the count of sections; keep last.
 	numSections
 )
@@ -80,8 +78,6 @@ func (s Section) String() string {
 		return "pending_priority"
 	case SectionEnergy:
 		return "energy"
-	case SectionWaitTime:
-		return "wait_time"
 	default:
 		return "unknown"
 	}
@@ -136,11 +132,8 @@ type Store struct {
 	Energy     []slurm.EnergyRecord
 	EnergyMeta Meta
 
-	WaitTime     []slurm.WaitTimeRecord
-	WaitTimeMeta Meta
-
-	// ClusterStats is recomputed from Nodes, AllUsersJobs, and WaitTime whenever
-	// any of those three sections is applied.
+	// ClusterStats is recomputed from Nodes and AllUsersJobs whenever either
+	// section is applied.
 	ClusterStats ClusterStats
 
 	// now is the injectable clock used to stamp LastUpdated; tests override it so
@@ -196,8 +189,6 @@ func (s *Store) State(section Section) State {
 		return s.PendingPrioMeta.State
 	case SectionEnergy:
 		return s.EnergyMeta.State
-	case SectionWaitTime:
-		return s.WaitTimeMeta.State
 	default:
 		return StateIdle
 	}
@@ -233,8 +224,6 @@ func (s *Store) SectionErr(section Section) error {
 		return s.PendingPrioMeta.Err
 	case SectionEnergy:
 		return s.EnergyMeta.Err
-	case SectionWaitTime:
-		return s.WaitTimeMeta.Err
 	default:
 		return nil
 	}
@@ -262,8 +251,6 @@ func (s *Store) SetLoading(section Section, gen uint64) {
 		s.PendingPrioMeta.State = StateLoading
 	case SectionEnergy:
 		s.EnergyMeta.State = StateLoading
-	case SectionWaitTime:
-		s.WaitTimeMeta.State = StateLoading
 	}
 }
 
@@ -426,24 +413,11 @@ func (s *Store) SetEnergy(data []slurm.EnergyRecord, gen uint64, err error) {
 	s.applyMeta(&s.EnergyMeta, err)
 }
 
-// SetWaitTime applies a wait-time fetch result and recomputes cluster stats
-// (per-partition wait stats depend on it).
-func (s *Store) SetWaitTime(data []slurm.WaitTimeRecord, gen uint64, err error) {
-	if s.stale(SectionWaitTime, gen) {
-		return
-	}
-	if err == nil {
-		s.WaitTime = data
-	}
-	s.applyMeta(&s.WaitTimeMeta, err)
-	s.recomputeClusterStats()
-}
-
 // recomputeClusterStats refreshes the derived ClusterStats from the current
-// nodes, all-users jobs, and wait-time data. It is called by every setter whose
-// dataset feeds the derivation.
+// nodes and all-users jobs. It is called by every setter whose dataset feeds the
+// derivation.
 func (s *Store) recomputeClusterStats() {
-	s.ClusterStats = DeriveClusterStats(s.Nodes, s.AllUsersJobs, s.WaitTime)
+	s.ClusterStats = DeriveClusterStats(s.Nodes, s.AllUsersJobs)
 }
 
 // EnergyStats returns the per-user energy summary derived from the current energy

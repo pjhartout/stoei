@@ -136,18 +136,17 @@ func TestSlowTickReArmsOwnTierExactlyOnce(t *testing.T) {
 
 // TestHeavyGuardClearsOnlyAfterAllFetchesReturn asserts the in-flight guard is
 // cleared only once every heavy fetch has returned — not when whichever finishes
-// first does (waitTime returns instantly during a slurmdbd cooldown). Otherwise a
-// slow tick would re-dispatch the heavy wave while fetches are still running.
+// first does. Otherwise a slow tick would re-dispatch the heavy wave while fetches
+// are still running.
 func TestHeavyGuardClearsOnlyAfterAllFetchesReturn(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
 	a.heavyInFlight = true
 	a.heavyPending = heavyFetchCount
 
 	g := func(s store.Section) uint64 { return a.store.Gen(s) }
-	// Five of six results arrive, waitTime first. The guard must stay set, so
-	// handleSlowTick (which checks !heavyInFlight) cannot re-dispatch.
+	// Four of five results arrive. The guard must stay set, so handleSlowTick
+	// (which checks !heavyInFlight) cannot re-dispatch.
 	partial := []tea.Msg{
-		waitTimeMsg{gen: g(store.SectionWaitTime)},
 		nodesMsg{gen: g(store.SectionNodes)},
 		allUsersJobsMsg{gen: g(store.SectionAllUsersJobs)},
 		fairShareMsg{gen: g(store.SectionFairShare)},
@@ -159,16 +158,16 @@ func TestHeavyGuardClearsOnlyAfterAllFetchesReturn(t *testing.T) {
 		cur = next.(App)
 	}
 	if !cur.heavyInFlight {
-		t.Fatal("heavyInFlight cleared after only 5/6 heavy results returned")
+		t.Fatal("heavyInFlight cleared after only 4/5 heavy results returned")
 	}
 	if cur.heavyPending != 1 {
-		t.Fatalf("heavyPending = %d after 5 results; want 1", cur.heavyPending)
+		t.Fatalf("heavyPending = %d after 4 results; want 1", cur.heavyPending)
 	}
 
-	// The sixth result clears the guard.
+	// The fifth result clears the guard.
 	next, _ := cur.Update(energyMsg{gen: g(store.SectionEnergy)})
 	if next.(App).heavyInFlight {
-		t.Error("heavyInFlight still set after all 6 heavy results returned")
+		t.Error("heavyInFlight still set after all 5 heavy results returned")
 	}
 }
 

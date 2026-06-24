@@ -12,8 +12,8 @@ import (
 )
 
 // controllerFetchThrottle bounds how often "scontrol show jobs" is run to refresh
-// the job journal. History, energy, and wait-time all derive from the journal and
-// may ask for a refresh near-simultaneously; within this window the existing
+// the job journal. History and energy both derive from the journal and may ask
+// for a refresh near-simultaneously; within this window the existing
 // journal is reused so the controller is queried at most once per refresh wave.
 const controllerFetchThrottle = 3 * time.Second
 
@@ -26,9 +26,9 @@ var (
 )
 
 // Client builds Slurm commands and parses their output. It wraps a Runner (the
-// only seam to the OS). Job history, energy, and wait-time come from the
-// controller ("scontrol show jobs") accumulated into a persistent journal, never
-// from slurmdbd/sacct. A zero Client is not usable; construct one with NewClient.
+// only seam to the OS). Job history and energy come from the controller
+// ("scontrol show jobs") accumulated into a persistent journal, never from
+// slurmdbd/sacct. A zero Client is not usable; construct one with NewClient.
 type Client struct {
 	runner Runner
 	// username is the resolved current user, used by the per-user getters.
@@ -38,7 +38,7 @@ type Client struct {
 	now func() time.Time
 
 	// journal is the persistent record of observed controller jobs; nil disables
-	// it (history/energy/wait-time then reflect only the latest controller fetch).
+	// it (history/energy then reflect only the latest controller fetch).
 	journal *jobJournal
 
 	mu        sync.Mutex
@@ -109,8 +109,8 @@ func (c *Client) Available(ctx context.Context) error {
 }
 
 // refreshControllerJobs runs "scontrol show jobs" and merges the result into the
-// persistent journal, throttled so a wave of near-simultaneous history/energy/
-// wait-time fetches queries the controller at most once. It is a no-op when the
+// persistent journal, throttled so a wave of near-simultaneous history/energy
+// fetches queries the controller at most once. It is a no-op when the
 // journal is disabled. Holding mu across the run serializes the wave: the first
 // caller fetches, the rest fall inside the throttle window and reuse the journal.
 func (c *Client) refreshControllerJobs(ctx context.Context) error {
@@ -227,17 +227,6 @@ func (c *Client) EnergyHistory(ctx context.Context, _ int) ([]EnergyRecord, erro
 		return nil, err
 	}
 	return EnergyRecordsFrom(jobs), nil
-}
-
-// WaitTimeHistory returns jobs that have started (all users) for wait-time
-// analysis, derived from the controller-jobs journal rather than sacct. The hours
-// argument is accepted for API compatibility but no longer bounds the window.
-func (c *Client) WaitTimeHistory(ctx context.Context, _ int) ([]WaitTimeRecord, error) {
-	jobs, err := c.journalJobs(ctx)
-	if err != nil {
-		return nil, err
-	}
-	return WaitTimeRecordsFrom(jobs), nil
 }
 
 // ClusterNodes returns every cluster node via "scontrol show nodes".
