@@ -36,11 +36,11 @@ func TestDeriveClusterStats(t *testing.T) {
 	if s.TotalGPUs != 12 || s.AllocatedGPUs != 3 {
 		t.Errorf("gpus = total %d alloc %d; want 12 3", s.TotalGPUs, s.AllocatedGPUs)
 	}
-	if got := s.GPUsByType["h200"]; got.Total != 4 || got.Allocated != 0 {
-		t.Errorf("h200 = %+v; want {4 0}", got)
+	if got := s.GPUsByType["H200"]; got.Total != 4 || got.Allocated != 0 {
+		t.Errorf("H200 = %+v; want {4 0}", got)
 	}
-	if got := s.GPUsByType["a100"]; got.Total != 8 || got.Allocated != 3 {
-		t.Errorf("a100 = %+v; want {8 3}", got)
+	if got := s.GPUsByType["A100"]; got.Total != 8 || got.Allocated != 3 {
+		t.Errorf("A100 = %+v; want {8 3}", got)
 	}
 
 	// Pending: array 1002_[0-3] expands to 4; plus 1 plain = 5 jobs.
@@ -48,11 +48,11 @@ func TestDeriveClusterStats(t *testing.T) {
 		t.Errorf("pending = jobs %d cpu %d mem %v gpu %d; want 5 12 24.0 2",
 			s.PendingJobsCount, s.PendingCPUs, s.PendingMemoryGB, s.PendingGPUs)
 	}
-	if got := s.PendingGPUsByType["h200"]; got != 2 {
-		t.Errorf("pending h200 = %d; want 2", got)
+	if got := s.PendingGPUsByType["H200"]; got != 2 {
+		t.Errorf("pending H200 = %d; want 2", got)
 	}
 	gpuPart := s.PendingByPartition["gpu"]
-	if gpuPart.JobsCount != 1 || gpuPart.CPUs != 4 || gpuPart.MemoryGB != 8.0 || gpuPart.GPUs != 2 || gpuPart.GPUsByType["h200"] != 2 {
+	if gpuPart.JobsCount != 1 || gpuPart.CPUs != 4 || gpuPart.MemoryGB != 8.0 || gpuPart.GPUs != 2 || gpuPart.GPUsByType["H200"] != 2 {
 		t.Errorf("gpu partition = %+v; want jobs 1 cpu 4 mem 8 gpu 2 h200 2", gpuPart)
 	}
 	cpuPart := s.PendingByPartition["cpu"]
@@ -86,6 +86,48 @@ func TestDeriveClusterStatsGresFallback(t *testing.T) {
 	}
 	if got := s.GPUsByType["A100"]; got.Total != 4 || got.Allocated != 4 {
 		t.Errorf("A100 = %+v; want {4 4}", got)
+	}
+}
+
+func TestDeriveClusterStatsParsesAllocTRESEndToEnd(t *testing.T) {
+	// Regression: a MIXED GPU node must report its real partial allocation rather
+	// than being rounded up to fully allocated. This drives the full production
+	// path (raw scontrol text -> ParseNodes -> DeriveClusterStats); the parser has
+	// to capture CfgTRES/AllocTRES even though their values embed "=", otherwise
+	// the store falls back to a state heuristic that counts every MIXED/ALLOCATED
+	// node's GPUs as wholly in use.
+	raw := "NodeName=hpcl9104 State=MIXED CPUTot=64 CPUAlloc=48 RealMemory=512000 AllocMem=384000\n" +
+		"   Gres=gpu:h100:4\n" +
+		"   CfgTRES=cpu=64,mem=512000M,billing=64,gres/gpu=4,gres/gpu:h100=4\n" +
+		"   AllocTRES=cpu=48,mem=384000M,gres/gpu=3,gres/gpu:h100=3\n"
+	s := DeriveClusterStats(slurm.ParseNodes(raw), nil)
+	if got := s.GPUsByType["H100"]; got.Total != 4 || got.Allocated != 3 {
+		t.Errorf("H100 = %+v; want {4 3} (1 GPU still free on a MIXED node)", got)
+	}
+	if s.TotalGPUs != 4 || s.AllocatedGPUs != 3 {
+		t.Errorf("gpus = total %d alloc %d; want 4 3", s.TotalGPUs, s.AllocatedGPUs)
+	}
+}
+
+func TestDeriveClusterStatsDrainingGPUs(t *testing.T) {
+	// A draining GPU node's capacity is reported separately (DrainingGPUsByType) and
+	// kept out of the schedulable totals; MIG profiles are bucketed by type. Mirrors
+	// the real IDLE+DRAIN MIG node hpcl9101.
+	nodes := []slurm.Node{
+		{State: "IDLE+DRAIN", CPUTot: "152",
+			CfgTRES: "cpu=152,mem=1000000M,gres/gpu=22,gres/gpu:h100_pcie_1g.10gb=16,gres/gpu:h100_pcie_2g.20gb=6",
+			Gres:    "gpu:h100_pcie_2g.20gb:6,gpu:h100_pcie_1g.10gb:16"},
+	}
+	s := DeriveClusterStats(nodes, nil)
+	if s.TotalGPUs != 0 || s.AllocatedGPUs != 0 || len(s.GPUsByType) != 0 {
+		t.Errorf("draining node leaked into schedulable totals: total %d alloc %d byType %v",
+			s.TotalGPUs, s.AllocatedGPUs, s.GPUsByType)
+	}
+	if s.DrainingNodes != 1 {
+		t.Errorf("DrainingNodes = %d; want 1", s.DrainingNodes)
+	}
+	if s.DrainingGPUsByType["H100_PCIE_1G.10GB"] != 16 || s.DrainingGPUsByType["H100_PCIE_2G.20GB"] != 6 {
+		t.Errorf("DrainingGPUsByType = %v; want H100_PCIE_1G.10GB:16 H100_PCIE_2G.20GB:6", s.DrainingGPUsByType)
 	}
 }
 

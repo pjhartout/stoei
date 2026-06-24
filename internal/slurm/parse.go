@@ -78,16 +78,10 @@ var nodeKeyPattern = regexp.MustCompile(`^(\w+(?:[/:]\w+)*)=([^\s=]+)`)
 type kv struct{ key, value string }
 
 // parseNodeLine extracts the Key=Value pairs from a single (already stripped)
-// node line, emulating a non-overlapping scan of the pattern
-//
-//	(\w+(?:[/:]\w+)*)=([^\s=]+(?:\s+[^\s=]+)*?)(?=\s+\w+(?:[/:]\w+)*=|$)
-//
-// The value extends across whitespace, consuming additional "[^\s=]+" tokens, but
-// stops as soon as the remainder begins a new "\s+Key=" anchor or the line ends;
-// the non-greedy value takes the shortest span that satisfies that boundary. When
-// no match starts at the current position the scan advances one byte, which is
-// what lets a value such as "CfgTRES=cpu=192,..." be skipped until the final
-// "gres/gpu:h200=8" anchors a valid match.
+// node line. Each value runs from just after its "=" to the next " Key=" anchor
+// (or the end of the line), so a value may itself contain spaces (a multi-word
+// "Reason=bbusch [root@…]") and "=" signs (a "CfgTRES=cpu=192,…,gres/gpu:h200=8"
+// TRES string). A position that does not begin a "Key=" head advances one byte.
 func parseNodeLine(line string) []kv {
 	var out []kv
 	for i := 0; i < len(line); {
@@ -99,23 +93,10 @@ func parseNodeLine(line string) []kv {
 		key := line[i+head[2] : i+head[3]]
 		valStart := i + head[4]
 		valEnd := i + head[5] // end of the first value token
-		// Extend the value across "\s+[^\s=]+" tokens, choosing the shortest span
-		// (non-greedy) for which the next position begins a "\s+Key=" anchor or the
-		// line ends. If no reachable boundary exists (because the next character is
-		// "=", as in "CfgTRES=cpu=192,..."), the whole match fails and the scan
-		// advances one byte, so this anchor is skipped entirely.
-		matched := true
+		// Extend the value to the next " Key=" anchor or end of line, absorbing any
+		// intervening spaces and "=" signs.
 		for !nodeBoundary(line, valEnd) {
-			next := nodeNextValueToken(line, valEnd)
-			if next == valEnd {
-				matched = false
-				break
-			}
-			valEnd = next
-		}
-		if !matched {
-			i++
-			continue
+			valEnd++
 		}
 		out = append(out, kv{key: key, value: strings.TrimSpace(line[valStart:valEnd])})
 		i = valEnd
@@ -145,26 +126,6 @@ func nodeBoundary(line string, p int) bool {
 // nodeKeyHeadEqual matches a "Key=" head at the start of a string, used by
 // nodeBoundary to detect the next anchor.
 var nodeKeyHeadEqual = regexp.MustCompile(`^(\w+(?:[/:]\w+)*)=`)
-
-// nodeNextValueToken returns the end offset after consuming one "\s+[^\s=]+"
-// continuation token starting at p, or p unchanged when none can be consumed.
-func nodeNextValueToken(line string, p int) int {
-	j := p
-	for j < len(line) && (line[j] == ' ' || line[j] == '\t') {
-		j++
-	}
-	if j == p || j >= len(line) {
-		return p
-	}
-	k := j
-	for k < len(line) && line[k] != ' ' && line[k] != '\t' && line[k] != '=' {
-		k++
-	}
-	if k == j {
-		return p
-	}
-	return k
-}
 
 // nodeFromFields lifts the convenience accessors out of a parsed field map.
 func nodeFromFields(fields map[string]string) Node {

@@ -37,7 +37,11 @@ type ClusterStats struct {
 	TotalGPUs         int
 	AllocatedGPUs     int
 	GPUsByType        map[string]GPUTotalAlloc
-	DrainingNodes     int
+	// DrainingGPUsByType holds the GPU capacity, by type, on draining nodes. It is
+	// kept apart from GPUsByType because draining capacity is not schedulable, so
+	// it is shown on its own line rather than folded into the free totals.
+	DrainingGPUsByType map[string]int
+	DrainingNodes      int
 
 	PendingJobsCount   int
 	PendingCPUs        int
@@ -92,6 +96,7 @@ func (s ClusterStats) GPUTypeFreePct(gpuType string) float64 {
 func newClusterStats() ClusterStats {
 	return ClusterStats{
 		GPUsByType:         map[string]GPUTotalAlloc{},
+		DrainingGPUsByType: map[string]int{},
 		PendingGPUsByType:  map[string]int{},
 		PendingByPartition: map[string]PendingPartitionStats{},
 	}
@@ -114,13 +119,15 @@ func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob) Cl
 		parseNodeCPUs(node, &stats, !isDraining)
 		parseNodeMemory(node, &stats, !isDraining)
 
-		if !isDraining {
-			processGPUEntries(slurm.ParseGPUEntries(node.CfgTRES), &stats, false)
-			processGPUEntries(slurm.ParseGPUEntries(node.AllocTRES), &stats, true)
+		if isDraining {
+			addDrainingGPUs(node, &stats)
+			continue
 		}
 
+		processGPUEntries(slurm.ParseGPUEntries(node.CfgTRES), &stats, false)
+		processGPUEntries(slurm.ParseGPUEntries(node.AllocTRES), &stats, true)
 		if node.CfgTRES == "" && node.AllocTRES == "" {
-			parseGPUsFromGres(node, state, &stats, !isDraining)
+			parseGPUsFromGres(node, state, &stats)
 		}
 	}
 
@@ -184,44 +191,52 @@ func emptyToZero(s string) string {
 	return s
 }
 
-// processGPUEntries folds GPU entries into the per-type totals/allocations,
-// skipping generic "gpu" entries when specific models are present.
+// processGPUEntries folds GPU entries into the per-type totals/allocations.
+// AggregateGPUCounts upper-cases the type key and drops generic "gpu" entries when
+// specific models are present, so a model reported via TRES ("h200") and via the
+// Gres fallback ("H200") share one bucket, matching the node-view convention.
 func processGPUEntries(entries []slurm.GPUEntry, stats *ClusterStats, isAllocated bool) {
-	hasSpecific := slurm.HasSpecificGPUTypes(entries)
-	for _, e := range entries {
-		if hasSpecific && strings.ToLower(e.Type) == "gpu" {
-			continue
-		}
-		ta := stats.GPUsByType[e.Type]
+	for typ, count := range slurm.AggregateGPUCounts(entries, true) {
+		ta := stats.GPUsByType[typ]
 		if isAllocated {
-			ta.Allocated += e.Count
-			stats.AllocatedGPUs += e.Count
+			ta.Allocated += count
+			stats.AllocatedGPUs += count
 		} else {
-			ta.Total += e.Count
-			stats.TotalGPUs += e.Count
+			ta.Total += count
+			stats.TotalGPUs += count
 		}
-		stats.GPUsByType[e.Type] = ta
+		stats.GPUsByType[typ] = ta
 	}
 }
 
 // parseGPUsFromGres is the fallback GPU accounting from the Gres field used when
-// TRES data is absent. It estimates allocation from node state (an ALLOCATED or
-// MIXED node is treated as having all its GPUs in use).
-func parseGPUsFromGres(node slurm.Node, state string, stats *ClusterStats, includeTotal bool) {
-	entries := slurm.ParseGPUFromGres(node.Gres)
-	for _, e := range entries {
-		if includeTotal {
-			ta := stats.GPUsByType[e.Type]
-			ta.Total += e.Count
-			stats.GPUsByType[e.Type] = ta
-			stats.TotalGPUs += e.Count
+// TRES data is absent (non-draining nodes only). It estimates allocation from node
+// state (an ALLOCATED or MIXED node is treated as having all its GPUs in use).
+func parseGPUsFromGres(node slurm.Node, state string, stats *ClusterStats) {
+	allocated := strings.Contains(state, "ALLOCATED") || strings.Contains(state, "MIXED")
+	for typ, count := range slurm.AggregateGPUCounts(slurm.ParseGPUFromGres(node.Gres), true) {
+		ta := stats.GPUsByType[typ]
+		ta.Total += count
+		stats.TotalGPUs += count
+		if allocated {
+			ta.Allocated += count
+			stats.AllocatedGPUs += count
 		}
-		if includeTotal && (strings.Contains(state, "ALLOCATED") || strings.Contains(state, "MIXED")) {
-			ta := stats.GPUsByType[e.Type]
-			ta.Allocated += e.Count
-			stats.GPUsByType[e.Type] = ta
-			stats.AllocatedGPUs += e.Count
-		}
+		stats.GPUsByType[typ] = ta
+	}
+}
+
+// addDrainingGPUs records a draining node's configured GPUs by type. Draining
+// capacity is tracked apart from the schedulable totals (it cannot accept new
+// jobs) and surfaced on its own overview line. GPU types come from CfgTRES,
+// falling back to the Gres field.
+func addDrainingGPUs(node slurm.Node, stats *ClusterStats) {
+	counts := slurm.AggregateGPUCounts(slurm.ParseGPUEntries(node.CfgTRES), true)
+	if len(counts) == 0 {
+		counts = slurm.AggregateGPUCounts(slurm.ParseGPUFromGres(node.Gres), true)
+	}
+	for typ, count := range counts {
+		stats.DrainingGPUsByType[typ] += count
 	}
 }
 
@@ -268,10 +283,11 @@ func aggregatePending(allUsersJobs []slurm.AllUsersJob, stats *ClusterStats) {
 
 		for _, e := range res.GPUs {
 			scaled := e.Count * arraySize
+			typ := strings.ToUpper(e.Type)
 			pendingGPUs += scaled
 			ps.GPUs += scaled
-			pendingGPUsByType[e.Type] += scaled
-			ps.GPUsByType[e.Type] += scaled
+			pendingGPUsByType[typ] += scaled
+			ps.GPUsByType[typ] += scaled
 		}
 
 		pendingByPartition[partitionKey] = ps

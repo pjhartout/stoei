@@ -125,6 +125,7 @@ func TestFormatGPUTypes(t *testing.T) {
 		{"empty", map[string]int{}, ""},
 		{"single", map[string]int{"H200": 8}, "8x H200"},
 		{"sorted", map[string]int{"V100": 2, "A100": 4}, "4x A100, 2x V100"},
+		{"mig shortened", map[string]int{"H100_PCIE_1G.10GB": 16, "H100_PCIE_2G.20GB": 6}, "16x 1g.10gb, 6x 2g.20gb"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -132,6 +133,23 @@ func TestFormatGPUTypes(t *testing.T) {
 				t.Errorf("FormatGPUTypes(%v) = %q, want %q", tt.in, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestShortGPULabel(t *testing.T) {
+	tests := []struct{ in, want string }{
+		{"H100", "H100"},                             // full GPU model unchanged
+		{"A100", "A100"},                             // full GPU model unchanged
+		{"GPU", "GPU"},                               // generic unchanged
+		{"H100_PCIE_1G.10GB", "1g.10gb"},             // device-prefixed MIG
+		{"H100_PCIE_2G.20GB", "2g.20gb"},             // device-prefixed MIG
+		{"1G.5GB", "1g.5gb"},                         // bare MIG profile
+		{"NVIDIA_A100_80GB_PCIE_1G.10GB", "1g.10gb"}, // long device prefix
+	}
+	for _, tt := range tests {
+		if got := ShortGPULabel(tt.in); got != tt.want {
+			t.Errorf("ShortGPULabel(%q) = %q, want %q", tt.in, got, tt.want)
+		}
 	}
 }
 

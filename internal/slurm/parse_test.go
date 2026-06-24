@@ -69,14 +69,14 @@ func TestParseNodes(t *testing.T) {
 	if n.Gres != "gpu:h200:8(S:0-1)" {
 		t.Errorf("Gres = %q", n.Gres)
 	}
-	// The CfgTRES/AllocTRES lines embed "=" inside comma values; matching Python,
-	// the named CfgTRES/AllocTRES keys are NOT captured and only the final
-	// gres/gpu:h200 token survives. Assert the documented quirk explicitly.
-	if got := n.Fields["gres/gpu:h200"]; got != "6" {
-		t.Errorf("gres/gpu:h200 = %q, want 6", got)
+	// The CfgTRES/AllocTRES values embed "=" inside their comma-separated TRES;
+	// they must still be captured whole so the store can read real allocated GPU
+	// counts instead of estimating from node state.
+	if n.CfgTRES != "cpu=192,mem=2000000M,billing=192,gres/gpu=8,gres/gpu:h200=8" {
+		t.Errorf("CfgTRES = %q", n.CfgTRES)
 	}
-	if _, ok := n.Fields["CfgTRES"]; ok {
-		t.Errorf("CfgTRES unexpectedly captured: %q", n.Fields["CfgTRES"])
+	if n.AllocTRES != "cpu=144,mem=650000M,gres/gpu=6,gres/gpu:h200=6" {
+		t.Errorf("AllocTRES = %q", n.AllocTRES)
 	}
 }
 

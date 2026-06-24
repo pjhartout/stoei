@@ -107,7 +107,21 @@ func FormatGPUTypes(counts map[string]int) string {
 	sort.Strings(types)
 	parts := make([]string, len(types))
 	for i, t := range types {
-		parts[i] = strconv.Itoa(counts[t]) + "x " + t
+		parts[i] = strconv.Itoa(counts[t]) + "x " + ShortGPULabel(t)
 	}
 	return strings.Join(parts, ", ")
+}
+
+// migProfile matches an NVIDIA MIG profile such as "1g.10gb" embedded in a GRES
+// type string like "h100_pcie_1g.10gb".
+var migProfile = regexp.MustCompile(`(?i)\d+g\.\d+gb`)
+
+// ShortGPULabel renders a GPU type for display. A MIG type is shortened to its
+// bare profile ("H100_PCIE_1G.10GB" -> "1g.10gb"); any other type is returned
+// unchanged.
+func ShortGPULabel(typ string) string {
+	if m := migProfile.FindString(typ); m != "" {
+		return strings.ToLower(m)
+	}
+	return typ
 }

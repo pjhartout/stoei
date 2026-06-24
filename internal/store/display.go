@@ -1,6 +1,17 @@
 package store
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/pjhartout/stoei/internal/slurm"
+)
+
+// ShortGPULabel renders a GPU type for display, shortening MIG profiles (e.g.
+// "H100_PCIE_1G.10GB" -> "1g.10gb"). It wraps slurm.ShortGPULabel so the UI layer
+// can reach it without importing slurm directly.
+func ShortGPULabel(typ string) string {
+	return slurm.ShortGPULabel(typ)
+}
 
 // Fair-share color thresholds shared by the Priority tab and the user/account
 // detail modals so the two views never drift.

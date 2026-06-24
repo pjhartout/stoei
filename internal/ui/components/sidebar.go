@@ -138,49 +138,46 @@ func (s *Sidebar) colorPct(pct float64) string {
 	return style.Render(fmt.Sprintf("%.1f%%", pct))
 }
 
-// nodesSection renders the Nodes block.
+// nodesSection renders the Nodes block as a single "free/total free (pct)" line.
 func (s *Sidebar) nodesSection() []string {
 	st := s.stats
-	lines := []string{
-		s.styles.Text.Bold(true).Render("Nodes:"),
-		"  Free: " + s.colorPct(st.FreeNodesPct()),
-		fmt.Sprintf("  %d/%d available", st.FreeNodes, st.TotalNodes),
-	}
+	line := fmt.Sprintf("  %d/%d free (%s)", st.FreeNodes, st.TotalNodes, s.colorPct(st.FreeNodesPct()))
 	if st.DrainingNodes > 0 {
-		lines = append(lines, s.styles.Subtle.Render(fmt.Sprintf("  (%d draining)", st.DrainingNodes)))
+		line += s.styles.Subtle.Render(fmt.Sprintf(" · %d drain", st.DrainingNodes))
 	}
-	return append(lines, "")
+	return []string{s.styles.Text.Bold(true).Render("Nodes:"), line, ""}
 }
 
-// cpuSection renders the CPUs block.
+// cpuSection renders the CPUs block as a single line.
 func (s *Sidebar) cpuSection() []string {
 	st := s.stats
 	return []string{
 		s.styles.Text.Bold(true).Render("CPUs:"),
-		"  Free: " + s.colorPct(st.FreeCPUsPct()),
-		fmt.Sprintf("  %d/%d available", st.TotalCPUs-st.AllocatedCPUs, st.TotalCPUs),
+		fmt.Sprintf("  %d/%d free (%s)", st.TotalCPUs-st.AllocatedCPUs, st.TotalCPUs, s.colorPct(st.FreeCPUsPct())),
 		"",
 	}
 }
 
-// memorySection renders the Memory block.
+// memorySection renders the Memory block as a single line.
 func (s *Sidebar) memorySection() []string {
 	st := s.stats
+	free := st.TotalMemoryGB - st.AllocatedMemoryGB
 	return []string{
 		s.styles.Text.Bold(true).Render("Memory:"),
-		"  Free: " + s.colorPct(st.FreeMemoryPct()),
-		fmt.Sprintf("  %.1f/%.1f GB", st.TotalMemoryGB-st.AllocatedMemoryGB, st.TotalMemoryGB),
+		fmt.Sprintf("  %s free (%s)", memPair(free, st.TotalMemoryGB), s.colorPct(st.FreeMemoryPct())),
 		"",
 	}
 }
 
-// gpuSection renders the GPUs block, broken down by GPU type when types are
-// known and falling back to a single total otherwise. The "gpu" type is
-// relabeled "generic".
+// gpuSection renders the GPUs block: schedulable capacity broken down by GPU type
+// (or a single total when types are unknown), followed by any draining-node
+// capacity on its own lines. The generic "gpu" bucket is relabeled "generic" and
+// MIG profiles are shortened (see store.ShortGPULabel).
 func (s *Sidebar) gpuSection() []string {
 	st := s.stats
+	var rows []string
+
 	if len(st.GPUsByType) > 0 {
-		lines := []string{s.styles.Text.Bold(true).Render("GPUs:")}
 		types := make([]string, 0, len(st.GPUsByType))
 		for t := range st.GPUsByType {
 			types = append(types, t)
@@ -188,37 +185,52 @@ func (s *Sidebar) gpuSection() []string {
 		sort.Strings(types)
 		for _, t := range types {
 			ta := st.GPUsByType[t]
-			label := t
-			if t == "gpu" {
-				label = "generic"
-			}
-			lines = append(lines, fmt.Sprintf("  %s: %d/%d (%s)",
-				label, ta.Allocated, ta.Total, s.colorPct(st.GPUTypeFreePct(t))))
+			rows = append(rows, fmt.Sprintf("  %s %d/%d (%s)",
+				s.gpuLabel(t), ta.Allocated, ta.Total, s.colorPct(st.GPUTypeFreePct(t))))
 		}
-		return append(lines, "")
+	} else if st.TotalGPUs > 0 {
+		rows = append(rows, fmt.Sprintf("  %d/%d free (%s)",
+			st.TotalGPUs-st.AllocatedGPUs, st.TotalGPUs, s.colorPct(st.FreeGPUsPct())))
 	}
 
-	if st.TotalGPUs > 0 {
-		return []string{
-			s.styles.Text.Bold(true).Render("GPUs:"),
-			fmt.Sprintf("  Total: %d", st.TotalGPUs),
-			fmt.Sprintf("  Free: %d (%s)", st.TotalGPUs-st.AllocatedGPUs, s.colorPct(st.FreeGPUsPct())),
-			"",
+	if len(st.DrainingGPUsByType) > 0 {
+		types := make([]string, 0, len(st.DrainingGPUsByType))
+		for t := range st.DrainingGPUsByType {
+			types = append(types, t)
+		}
+		sort.Strings(types)
+		for _, t := range types {
+			rows = append(rows, s.styles.Subtle.Render(
+				fmt.Sprintf("  %s %d (drain)", s.gpuLabel(t), st.DrainingGPUsByType[t])))
 		}
 	}
-	return nil
+
+	if len(rows) == 0 {
+		return nil
+	}
+	return append(append([]string{s.styles.Text.Bold(true).Render("GPUs:")}, rows...), "")
 }
 
-// pendingSection renders the per-partition pending-queue block (job counts and
-// requested CPUs/memory/GPUs), or nothing when there are no pending jobs.
+// gpuLabel renders a GPU type for the sidebar: the generic "gpu" bucket becomes
+// "generic" and MIG profiles are shortened (e.g. "1g.10gb").
+func (s *Sidebar) gpuLabel(typ string) string {
+	if strings.EqualFold(typ, "gpu") {
+		return "generic"
+	}
+	return store.ShortGPULabel(typ)
+}
+
+// pendingSection renders the pending-queue block as one compact line per
+// partition — "name Nj·Cc·memG·gpus" with zero fields omitted — or nothing when
+// there are no pending jobs.
 func (s *Sidebar) pendingSection() []string {
 	st := s.stats
 	if st.PendingJobsCount <= 0 {
 		return nil
 	}
-	lines := []string{s.styles.Text.Bold(true).Render("Pending Queue")}
+	lines := []string{s.styles.Text.Bold(true).Render("Pending:")}
 	if len(st.PendingByPartition) == 0 {
-		return append(lines, "  (No partition breakdown available)")
+		return append(lines, "  (no partition breakdown)")
 	}
 
 	for _, part := range sortedKeysFold(st.PendingByPartition) {
@@ -227,41 +239,57 @@ func (s *Sidebar) pendingSection() []string {
 		if name == "" {
 			name = "unknown"
 		}
-		lines = append(lines, fmt.Sprintf("  %s: %d jobs", name, ps.JobsCount))
+		segs := []string{fmt.Sprintf("%dj", ps.JobsCount)}
 		if ps.CPUs > 0 {
-			lines = append(lines, fmt.Sprintf("    CPUs: %d", ps.CPUs))
+			segs = append(segs, fmt.Sprintf("%dc", ps.CPUs))
 		}
 		if ps.MemoryGB > 0 {
-			lines = append(lines, "    Memory: "+formatMemoryGB(ps.MemoryGB))
+			segs = append(segs, compactMem(ps.MemoryGB))
 		}
-		if len(ps.GPUsByType) > 0 {
-			lines = append(lines, "    GPUs:")
-			gtypes := make([]string, 0, len(ps.GPUsByType))
-			for t := range ps.GPUsByType {
-				gtypes = append(gtypes, t)
-			}
-			sort.Strings(gtypes)
-			for _, t := range gtypes {
-				label := t
-				if t == "gpu" {
-					label = "generic"
-				}
-				lines = append(lines, fmt.Sprintf("      %s: %d", label, ps.GPUsByType[t]))
-			}
-		} else if ps.GPUs > 0 {
-			lines = append(lines, fmt.Sprintf("    GPUs: %d", ps.GPUs))
+		if gpus := pendingGPUs(ps); gpus != "" {
+			segs = append(segs, gpus)
 		}
+		lines = append(lines, fmt.Sprintf("  %s %s", name, strings.Join(segs, "·")))
 	}
 	return lines
 }
 
-// formatMemoryGB renders a memory amount in GB, switching to TB once it reaches
-// one terabyte.
-func formatMemoryGB(memoryGB float64) string {
-	if memoryGB >= gbPerTB {
-		return fmt.Sprintf("%.1f TB", memoryGB/gbPerTB)
+// pendingGPUs renders a partition's pending GPU request compactly, e.g. "2×H200"
+// or "2×H200,4×1g.10gb", or "" when none are requested.
+func pendingGPUs(ps store.PendingPartitionStats) string {
+	if len(ps.GPUsByType) == 0 {
+		if ps.GPUs > 0 {
+			return fmt.Sprintf("%d×gpu", ps.GPUs)
+		}
+		return ""
 	}
-	return fmt.Sprintf("%.1f GB", memoryGB)
+	types := make([]string, 0, len(ps.GPUsByType))
+	for t := range ps.GPUsByType {
+		types = append(types, t)
+	}
+	sort.Strings(types)
+	parts := make([]string, len(types))
+	for i, t := range types {
+		parts[i] = fmt.Sprintf("%d×%s", ps.GPUsByType[t], store.ShortGPULabel(t))
+	}
+	return strings.Join(parts, ",")
+}
+
+// compactMem renders a memory amount without a space — "120G", "1.9T".
+func compactMem(gb float64) string {
+	if gb >= gbPerTB {
+		return fmt.Sprintf("%.1fT", gb/gbPerTB)
+	}
+	return fmt.Sprintf("%.0fG", gb)
+}
+
+// memPair renders "free/total" memory in a shared unit — "192/256 GB",
+// "1.9/2.0 TB".
+func memPair(freeGB, totalGB float64) string {
+	if totalGB >= gbPerTB {
+		return fmt.Sprintf("%.1f/%.1f TB", freeGB/gbPerTB, totalGB/gbPerTB)
+	}
+	return fmt.Sprintf("%.0f/%.0f GB", freeGB, totalGB)
 }
 
 // sortedKeysFold returns the map's keys sorted case-insensitively.
