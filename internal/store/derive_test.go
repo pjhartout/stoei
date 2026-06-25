@@ -89,6 +89,23 @@ func TestDeriveClusterStatsGresFallback(t *testing.T) {
 	}
 }
 
+func TestDeriveClusterStatsNamesGenericTRESFromGres(t *testing.T) {
+	// Real-world config: CfgTRES/AllocTRES report GPUs generically ("gres/gpu=4")
+	// while the model lives only in the Gres field ("gpu:l40s:4"). The model must
+	// be lifted from Gres so the overview shows L40S rather than a generic bucket.
+	nodes := []slurm.Node{
+		{State: "MIXED", CPUTot: "256", CPUAlloc: "32", RealMem: "760000", AllocMem: "192000",
+			Gres: "gpu:l40s:4(S:0)", CfgTRES: "cpu=256,mem=760000M,gres/gpu=4", AllocTRES: "cpu=32,mem=192G,gres/gpu=4"},
+	}
+	s := DeriveClusterStats(nodes, nil)
+	if got := s.GPUsByType["L40S"]; got.Total != 4 || got.Allocated != 4 {
+		t.Errorf("L40S = %+v; want {4 4}", got)
+	}
+	if _, ok := s.GPUsByType["GPU"]; ok {
+		t.Errorf("generic bucket present; want it folded into L40S: %v", s.GPUsByType)
+	}
+}
+
 func TestDeriveClusterStatsParsesAllocTRESEndToEnd(t *testing.T) {
 	// Regression: a MIXED GPU node must report its real partial allocation rather
 	// than being rounded up to fully allocated. This drives the full production

@@ -119,15 +119,17 @@ func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob) Cl
 		parseNodeCPUs(node, &stats, !isDraining)
 		parseNodeMemory(node, &stats, !isDraining)
 
+		model := nodeGPUModel(node)
+
 		if isDraining {
-			addDrainingGPUs(node, &stats)
+			addDrainingGPUs(node, model, &stats)
 			continue
 		}
 
-		processGPUEntries(slurm.ParseGPUEntries(node.CfgTRES), &stats, false)
-		processGPUEntries(slurm.ParseGPUEntries(node.AllocTRES), &stats, true)
+		processGPUEntries(relabelGeneric(slurm.ParseGPUEntries(node.CfgTRES), model), &stats, false)
+		processGPUEntries(relabelGeneric(slurm.ParseGPUEntries(node.AllocTRES), model), &stats, true)
 		if node.CfgTRES == "" && node.AllocTRES == "" {
-			parseGPUsFromGres(node, state, &stats)
+			parseGPUsFromGres(node, model, state, &stats)
 		}
 	}
 
@@ -191,6 +193,41 @@ func emptyToZero(s string) string {
 	return s
 }
 
+// nodeGPUModel returns the GPU model named in a node's Gres field, used to name
+// generic ("gpu") TRES entries that carry a count but no model — a common Slurm
+// config where CfgTRES reports "gres/gpu=4" while Gres carries "gpu:l40s:4". It
+// returns "" when the Gres names no model or more than one (nothing to infer).
+func nodeGPUModel(node slurm.Node) string {
+	model := ""
+	for _, e := range slurm.ParseGPUFromGres(node.Gres) {
+		if strings.EqualFold(e.Type, "gpu") {
+			continue
+		}
+		if model != "" && model != e.Type {
+			return ""
+		}
+		model = e.Type // ParseGPUFromGres upper-cases the type
+	}
+	return model
+}
+
+// relabelGeneric rewrites generic "gpu" entries to model. It is a no-op when model
+// is empty or the list already carries a specific model (in which case the generic
+// entry is a duplicate that AggregateGPUCounts drops, not one to relabel).
+func relabelGeneric(entries []slurm.GPUEntry, model string) []slurm.GPUEntry {
+	if model == "" || slurm.HasSpecificGPUTypes(entries) {
+		return entries
+	}
+	out := make([]slurm.GPUEntry, len(entries))
+	for i, e := range entries {
+		if strings.EqualFold(e.Type, "gpu") {
+			e.Type = model
+		}
+		out[i] = e
+	}
+	return out
+}
+
 // processGPUEntries folds GPU entries into the per-type totals/allocations.
 // AggregateGPUCounts upper-cases the type key and drops generic "gpu" entries when
 // specific models are present, so a model reported via TRES ("h200") and via the
@@ -212,9 +249,10 @@ func processGPUEntries(entries []slurm.GPUEntry, stats *ClusterStats, isAllocate
 // parseGPUsFromGres is the fallback GPU accounting from the Gres field used when
 // TRES data is absent (non-draining nodes only). It estimates allocation from node
 // state (an ALLOCATED or MIXED node is treated as having all its GPUs in use).
-func parseGPUsFromGres(node slurm.Node, state string, stats *ClusterStats) {
+func parseGPUsFromGres(node slurm.Node, model, state string, stats *ClusterStats) {
 	allocated := strings.Contains(state, "ALLOCATED") || strings.Contains(state, "MIXED")
-	for typ, count := range slurm.AggregateGPUCounts(slurm.ParseGPUFromGres(node.Gres), true) {
+	entries := relabelGeneric(slurm.ParseGPUFromGres(node.Gres), model)
+	for typ, count := range slurm.AggregateGPUCounts(entries, true) {
 		ta := stats.GPUsByType[typ]
 		ta.Total += count
 		stats.TotalGPUs += count
@@ -230,10 +268,10 @@ func parseGPUsFromGres(node slurm.Node, state string, stats *ClusterStats) {
 // capacity is tracked apart from the schedulable totals (it cannot accept new
 // jobs) and surfaced on its own overview line. GPU types come from CfgTRES,
 // falling back to the Gres field.
-func addDrainingGPUs(node slurm.Node, stats *ClusterStats) {
-	counts := slurm.AggregateGPUCounts(slurm.ParseGPUEntries(node.CfgTRES), true)
+func addDrainingGPUs(node slurm.Node, model string, stats *ClusterStats) {
+	counts := slurm.AggregateGPUCounts(relabelGeneric(slurm.ParseGPUEntries(node.CfgTRES), model), true)
 	if len(counts) == 0 {
-		counts = slurm.AggregateGPUCounts(slurm.ParseGPUFromGres(node.Gres), true)
+		counts = slurm.AggregateGPUCounts(relabelGeneric(slurm.ParseGPUFromGres(node.Gres), model), true)
 	}
 	for typ, count := range counts {
 		stats.DrainingGPUsByType[typ] += count

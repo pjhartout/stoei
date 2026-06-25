@@ -103,11 +103,12 @@ func DeriveNodeDisplays(nodes []slurm.Node) []NodeDisplay {
 // applying the CfgTRES→Gres total fallback and the AllocTRES→state-based alloc
 // fallback.
 func nodeGPUs(node slurm.Node, state string) (total, alloc int, types string) {
+	model := nodeGPUModel(node)
 	var counts map[string]int
 
 	switch {
 	case node.CfgTRES != "":
-		entries := slurm.ParseGPUEntries(node.CfgTRES)
+		entries := relabelGeneric(slurm.ParseGPUEntries(node.CfgTRES), model)
 		counts = slurm.AggregateGPUCounts(entries, true)
 		total = slurm.CalculateTotalGPUs(entries, true)
 	case strings.Contains(strings.ToLower(node.Gres), "gpu:"):
@@ -119,7 +120,7 @@ func nodeGPUs(node slurm.Node, state string) (total, alloc int, types string) {
 
 	switch {
 	case node.AllocTRES != "":
-		alloc = slurm.CalculateTotalGPUs(slurm.ParseGPUEntries(node.AllocTRES), true)
+		alloc = slurm.CalculateTotalGPUs(relabelGeneric(slurm.ParseGPUEntries(node.AllocTRES), model), true)
 	case total > 0:
 		up := strings.ToUpper(state)
 		if strings.Contains(up, "ALLOCATED") || strings.Contains(up, "MIXED") {
