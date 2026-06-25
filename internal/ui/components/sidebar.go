@@ -141,7 +141,7 @@ func (s *Sidebar) colorPct(pct float64) string {
 // nodesSection renders the Nodes block as a single "free/total free (pct)" line.
 func (s *Sidebar) nodesSection() []string {
 	st := s.stats
-	line := fmt.Sprintf("  %d/%d free (%s)", st.FreeNodes, st.TotalNodes, s.colorPct(st.FreeNodesPct()))
+	line := fmt.Sprintf("%d/%d free (%s)", st.FreeNodes, st.TotalNodes, s.colorPct(st.FreeNodesPct()))
 	if st.DrainingNodes > 0 {
 		line += s.styles.Subtle.Render(fmt.Sprintf(" · %d drain", st.DrainingNodes))
 	}
@@ -153,7 +153,7 @@ func (s *Sidebar) cpuSection() []string {
 	st := s.stats
 	return []string{
 		s.styles.Text.Bold(true).Render("CPUs:"),
-		fmt.Sprintf("  %d/%d free (%s)", st.TotalCPUs-st.AllocatedCPUs, st.TotalCPUs, s.colorPct(st.FreeCPUsPct())),
+		fmt.Sprintf("%d/%d free (%s)", st.TotalCPUs-st.AllocatedCPUs, st.TotalCPUs, s.colorPct(st.FreeCPUsPct())),
 		"",
 	}
 }
@@ -164,7 +164,7 @@ func (s *Sidebar) memorySection() []string {
 	free := st.TotalMemoryGB - st.AllocatedMemoryGB
 	return []string{
 		s.styles.Text.Bold(true).Render("Memory:"),
-		fmt.Sprintf("  %s free (%s)", memPair(free, st.TotalMemoryGB), s.colorPct(st.FreeMemoryPct())),
+		fmt.Sprintf("%s free (%s)", memPair(free, st.TotalMemoryGB), s.colorPct(st.FreeMemoryPct())),
 		"",
 	}
 }
@@ -185,11 +185,11 @@ func (s *Sidebar) gpuSection() []string {
 		sort.Strings(types)
 		for _, t := range types {
 			ta := st.GPUsByType[t]
-			rows = append(rows, fmt.Sprintf("  %s %d/%d (%s)",
+			rows = append(rows, fmt.Sprintf("%s %d/%d (%s)",
 				s.gpuLabel(t), ta.Allocated, ta.Total, s.colorPct(st.GPUTypeFreePct(t))))
 		}
 	} else if st.TotalGPUs > 0 {
-		rows = append(rows, fmt.Sprintf("  %d/%d free (%s)",
+		rows = append(rows, fmt.Sprintf("%d/%d free (%s)",
 			st.TotalGPUs-st.AllocatedGPUs, st.TotalGPUs, s.colorPct(st.FreeGPUsPct())))
 	}
 
@@ -201,7 +201,7 @@ func (s *Sidebar) gpuSection() []string {
 		sort.Strings(types)
 		for _, t := range types {
 			rows = append(rows, s.styles.Subtle.Render(
-				fmt.Sprintf("  %s %d (drain)", s.gpuLabel(t), st.DrainingGPUsByType[t])))
+				fmt.Sprintf("%s %d (drain)", s.gpuLabel(t), st.DrainingGPUsByType[t])))
 		}
 	}
 
@@ -230,7 +230,7 @@ func (s *Sidebar) pendingSection() []string {
 	}
 	lines := []string{s.styles.Text.Bold(true).Render("Pending:")}
 	if len(st.PendingByPartition) == 0 {
-		return append(lines, "  (no partition breakdown)")
+		return append(lines, "(no partition breakdown)")
 	}
 
 	for _, part := range sortedKeysFold(st.PendingByPartition) {
@@ -249,7 +249,7 @@ func (s *Sidebar) pendingSection() []string {
 		if gpus := pendingGPUs(ps); gpus != "" {
 			segs = append(segs, gpus)
 		}
-		lines = append(lines, fmt.Sprintf("  %s %s", name, strings.Join(segs, "·")))
+		lines = append(lines, fmt.Sprintf("%s %s", name, strings.Join(segs, "·")))
 	}
 	return lines
 }
