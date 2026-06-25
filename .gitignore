@@ -94,3 +94,4 @@ dmypy.json
 
 # Local planning documents
 docs/plans/
+.claude/settings.local.json
