@@ -59,6 +59,12 @@ stoei
 
 stoei runs the Slurm CLIs (`squeue`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. It never queries `sacct`/slurmdbd. Check the version with `stoei --version`.
 
+> [!WARNING]
+> stoei polls the Slurm controller (headnode) directly on every refresh, since
+> it reads live state via `squeue`/`scontrol` rather than the accounting
+> database. On busy clusters a short refresh interval multiplied across many
+> users adds load to slurmctld — raise the refresh interval if your admins ask.
+
 ### Keyboard shortcuts
 
 The table shows the default **vim** preset; in **emacs** mode the global, filter,
