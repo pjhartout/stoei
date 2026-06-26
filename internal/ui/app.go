@@ -105,6 +105,11 @@ type App struct {
 	// spinnerActive is true while the loading-spinner animation tick is in flight,
 	// so it is started at most once and stopped when nothing is loading.
 	spinnerActive bool
+	// blurred is true while the terminal reports it has lost focus. Both tick tiers
+	// keep re-arming but skip dispatching Slurm fetches while blurred, so a
+	// backgrounded session stops polling the controller; regaining focus triggers an
+	// immediate refresh. Terminals that do not report focus never set it.
+	blurred bool
 
 	// unavailable holds the Slurm-availability error; non-nil renders the
 	// full-screen unavailable screen.
@@ -239,23 +244,26 @@ func (a *App) dispatchRunning() tea.Cmd {
 	return fetchRunningJobs(a.client, gen)
 }
 
-// maxCompletionLookups caps how many just-finished jobs are looked up via
-// scontrol after a single running-jobs refresh, bounding the burst on the
-// controller when a large array drains at once. Any beyond the cap are not
-// auto-recovered (history has no ticker); a manual refresh re-reads the journal
-// while the job is still retained by the controller.
-const maxCompletionLookups = 64
+// completionBulkThreshold is the just-vanished job count above which
+// fetchCompletions switches from one "scontrol show jobid" per id to a single
+// bulk history refresh. A draining array can vanish dozens of jobs in one tick;
+// past this threshold the bulk path is both lighter and complete.
+const completionBulkThreshold = 8
 
-// fetchCompletions returns a batched Cmd that asks the controller for the final
-// record of each just-vanished job ID, so completions observed mid-session reach
-// the history view without a sacct query. It returns nil when nothing vanished.
-// ponytail: caps the burst at maxCompletionLookups; a manual refresh re-reads the rest.
+// fetchCompletions returns a Cmd that records the final state of just-vanished
+// jobs in history, so completions observed mid-session reach the history view.
+// For a small batch it asks the controller for each job's record directly; once
+// the batch exceeds completionBulkThreshold (a draining array) it instead runs
+// one bulk "scontrol show jobs" history refresh (throttled at the client), which
+// captures every retained job in a single controller call rather than dozens —
+// and, unlike the per-id path, drops none of them. Returns nil when nothing
+// vanished.
 func (a *App) fetchCompletions(ids []string) tea.Cmd {
 	if len(ids) == 0 {
 		return nil
 	}
-	if len(ids) > maxCompletionLookups {
-		ids = ids[:maxCompletionLookups]
+	if len(ids) > completionBulkThreshold {
+		return a.dispatchHistory()
 	}
 	cmds := make([]tea.Cmd, len(ids))
 	for i, id := range ids {
@@ -331,6 +339,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return a.handleKey(msg)
+
+	case tea.FocusMsg:
+		a.blurred = false
+		return a, a.manualRefresh() // resume with fresh data on return
+
+	case tea.BlurMsg:
+		a.blurred = true
+		return a, nil
 
 	case availabilityMsg:
 		a.availChecked = true
@@ -625,28 +641,34 @@ func tabForKey(msg tea.KeyPressMsg) (tabIndex, bool) {
 	return 0, false
 }
 
-// manualRefresh re-dispatches the minimal-critical and heavy waves, bumping every
-// generation so superseded in-flight results are dropped (I4). The caller owns any
-// user-visible feedback (the 'r' key pushes a toast), since re-fetching alone is
-// not visible while data is already on screen.
+// manualRefresh re-dispatches the running and heavy waves, bumping their
+// generations so superseded in-flight results are dropped (I4). Each wave is
+// skipped while it is already in flight: re-dispatching the heavy wave mid-flight
+// would reset heavyPending under the outstanding fetches and clear the guard
+// early, letting the next slow tick pile on a third wave. History refreshes from
+// the controller journal (throttled at the client), so it is always re-run
+// without ever touching slurmdbd. The caller owns user-visible feedback (the 'r'
+// key pushes a toast), since re-fetching alone is not visible while data is on
+// screen.
 func (a *App) manualRefresh() tea.Cmd {
 	a.frame.dirty = true
-	// Re-dispatch every wave. History refreshes from the controller journal
-	// (throttled), so a manual refresh re-runs the live fetches without ever
-	// touching slurmdbd.
-	return tea.Batch(
-		a.dispatchRunning(),
-		a.dispatchHistory(),
-		a.dispatchHeavy(),
-		a.ensureSpinner(),
-	)
+	cmds := []tea.Cmd{a.dispatchHistory()}
+	if !a.runningInFlight {
+		cmds = append(cmds, a.dispatchRunning())
+	}
+	if !a.heavyInFlight {
+		cmds = append(cmds, a.dispatchHeavy())
+	}
+	cmds = append(cmds, a.ensureSpinner())
+	return tea.Batch(cmds...)
 }
 
-// handleFastTick dispatches a running-jobs refresh when none is in flight and
-// always re-arms exactly the fast tier (I2).
+// handleFastTick dispatches a running-jobs refresh when none is in flight and the
+// terminal is focused, and always re-arms exactly the fast tier (I2) so polling
+// resumes the instant focus returns.
 func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{fastTick(a.intervals.Fast)}
-	if !a.runningInFlight {
+	if !a.blurred && !a.runningInFlight {
 		cmds = append(cmds, a.dispatchRunning())
 	}
 	// Auto-expire transient toasts each cycle so they don't linger indefinitely.
@@ -659,11 +681,11 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
-// handleSlowTick dispatches the heavy batch when none is in flight and always
-// re-arms exactly the slow tier (I2).
+// handleSlowTick dispatches the heavy batch when none is in flight and the
+// terminal is focused, and always re-arms exactly the slow tier (I2).
 func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{slowTick(a.intervals.Slow)}
-	if !a.heavyInFlight {
+	if !a.blurred && !a.heavyInFlight {
 		cmds = append(cmds, a.dispatchHeavy())
 	}
 	cmds = append(cmds, a.ensureSpinner())
@@ -952,6 +974,7 @@ func (a App) View() tea.View {
 
 	v := tea.NewView(content)
 	v.AltScreen = true
+	v.ReportFocus = true // drive the focus/blur backoff (handleFastTick/handleSlowTick)
 	return v
 }
 

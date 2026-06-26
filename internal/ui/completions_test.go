@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/pjhartout/stoei/internal/store"
@@ -57,5 +58,40 @@ func TestRunningJobsNoCompletionsNoLookup(t *testing.T) {
 
 	if fc.LastCompletedJobID != "" {
 		t.Errorf("looked up %q, want no lookup for an unchanged running set", fc.LastCompletedJobID)
+	}
+}
+
+// TestLargeCompletionBurstUsesBulkHistory asserts that when more than
+// completionBulkThreshold jobs vanish in one refresh (a draining array), the app
+// issues a single bulk history refresh instead of one controller lookup per job.
+func TestLargeCompletionBurstUsesBulkHistory(t *testing.T) {
+	fc := &store.FakeClient{}
+	a := newTestApp(t, fc)
+
+	big := make([]store.RunningJob, 0, completionBulkThreshold+2)
+	for i := 0; i < completionBulkThreshold+2; i++ {
+		big = append(big, store.RunningJob{ID: fmt.Sprintf("job-%d", i)})
+	}
+	m, _ := a.Update(runningJobsMsg{gen: 1, jobs: big})
+	a = m.(App)
+	_, cmd := a.Update(runningJobsMsg{gen: 2, jobs: nil}) // the whole set vanishes at once
+
+	var sawHistory, sawCompleted bool
+	for _, msg := range drainCmd(cmd) {
+		switch msg.(type) {
+		case historyMsg:
+			sawHistory = true
+		case completedJobMsg:
+			sawCompleted = true
+		}
+	}
+	if !sawHistory {
+		t.Error("large completion burst did not trigger a bulk history refresh")
+	}
+	if sawCompleted {
+		t.Error("large burst issued per-job controller lookups; want one bulk refresh")
+	}
+	if fc.LastCompletedJobID != "" {
+		t.Errorf("per-job lookup happened (%q); want none for a bulk burst", fc.LastCompletedJobID)
 	}
 }
