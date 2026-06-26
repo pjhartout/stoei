@@ -1,6 +1,6 @@
 # Default stoei configuration. Values out of range are clamped to these on load.
 theme: nord
-refresh_interval: 5
+refresh_interval: 10
 job_history_days: 7
 log_viewer_lines: 10000
 keybind_mode: vim

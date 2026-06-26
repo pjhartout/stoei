@@ -7,11 +7,11 @@ import (
 
 func TestDefaultIntervals(t *testing.T) {
 	iv := DefaultIntervals()
-	if iv.Fast != 5*time.Second {
-		t.Errorf("fast = %v; want 5s", iv.Fast)
+	if iv.Fast != 10*time.Second {
+		t.Errorf("fast = %v; want 10s", iv.Fast)
 	}
-	if iv.Slow != 20*time.Second {
-		t.Errorf("slow = %v; want 20s", iv.Slow)
+	if iv.Slow != 40*time.Second {
+		t.Errorf("slow = %v; want 40s", iv.Slow)
 	}
 	if iv.Slow != iv.Fast*slowIntervalFactor {
 		t.Errorf("slow (%v) != fast*%d (%v)", iv.Slow, slowIntervalFactor, iv.Fast*slowIntervalFactor)

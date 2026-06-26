@@ -94,14 +94,10 @@ type App struct {
 	detailCache *modals.JobDetailCache
 
 	// runningInFlight guards the fast tier: while a running-jobs fetch is
-	// outstanding a fast tick skips dispatching another (but still re-arms).
+	// outstanding a fast tick skips dispatching another (but still re-arms). The
+	// heavy (slow-tier) fetches are instead guarded per section by their
+	// StateLoading flag, so visibility-gated and tick-driven dispatches never stack.
 	runningInFlight bool
-	// heavyInFlight guards the slow tier the same way for the heavy batch. It is
-	// derived from heavyPending so it clears only once all heavy fetches return,
-	// not when whichever finishes first does.
-	heavyInFlight bool
-	// heavyPending counts the outstanding heavy-wave fetches.
-	heavyPending int
 	// spinnerActive is true while the loading-spinner animation tick is in flight,
 	// so it is started at most once and stopped when nothing is loading.
 	spinnerActive bool
@@ -223,7 +219,7 @@ func (a App) Init() tea.Cmd {
 		a.dispatchRunning(),
 		a.dispatchHistory(),
 	)
-	heavy := a.dispatchHeavy()
+	heavy := a.dispatchHeavyVisible()
 
 	return tea.Batch(
 		tea.RequestBackgroundColor,
@@ -280,42 +276,55 @@ func (a *App) dispatchHistory() tea.Cmd {
 	return fetchHistory(a.client, gen, a.cfg.JobHistoryDays)
 }
 
-// dispatchHeavy bumps every heavy section's generation, marks each loading, sets
-// the in-flight guard, and returns a batched Cmd for the whole wave.
-func (a *App) dispatchHeavy() tea.Cmd {
-	a.heavyInFlight = true
-	a.heavyPending = heavyFetchCount
-
-	gNodes := a.store.NextGen(store.SectionNodes)
-	a.store.SetLoading(store.SectionNodes, gNodes)
-	gAll := a.store.NextGen(store.SectionAllUsersJobs)
-	a.store.SetLoading(store.SectionAllUsersJobs, gAll)
-	gFair := a.store.NextGen(store.SectionFairShare)
-	a.store.SetLoading(store.SectionFairShare, gFair)
-	gPend := a.store.NextGen(store.SectionPendingPrio)
-	a.store.SetLoading(store.SectionPendingPrio, gPend)
-
-	return tea.Batch(
-		fetchNodes(a.client, gNodes),
-		fetchAllUsersJobs(a.client, gAll),
-		fetchFairShare(a.client, gFair),
-		fetchPendingPrio(a.client, gPend),
-	)
+// dispatchHeavyVisible dispatches the heavy fetches whose data the UI can
+// currently surface, leaving the rest unpolled to keep load off the controller.
+// Nodes and all-users jobs are always refreshed: they feed the cluster sidebar,
+// the always-available 'L' cluster-load modal, the Jobs My-Usage banner, and the
+// Users tab, so a consumer is reachable from any tab. Fair-share and
+// pending-priority are shown only on the Priority tab and the user/account detail
+// modals (reachable from the Priority and Users tabs), so they are polled only
+// while one of those tabs is active. Each fetch is guarded by its section's
+// StateLoading flag (dispatchSection), so a slow tick and a tab-switch fetch never
+// stack a duplicate, and generation tags drop any superseded result.
+func (a *App) dispatchHeavyVisible() tea.Cmd {
+	cmds := []tea.Cmd{
+		a.dispatchSection(store.SectionNodes),
+		a.dispatchSection(store.SectionAllUsersJobs),
+	}
+	if a.tabNeedsPriorityData(a.active) {
+		cmds = append(cmds, a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio))
+	}
+	return tea.Batch(cmds...)
 }
 
-// heavyFetchCount is the number of fetches dispatchHeavy batches; the slow-tier
-// in-flight guard clears only after all of them return (see heavyDone).
-const heavyFetchCount = 4
+// tabNeedsPriorityData reports whether tab t renders fair-share / pending-priority
+// data: the Priority tab directly, and the Users tab through the user/account
+// detail modal.
+func (a *App) tabNeedsPriorityData(t tabIndex) bool {
+	return t == tabPriority || t == tabUsers
+}
 
-// heavyDone records that one heavy-wave fetch returned, clearing heavyInFlight
-// only once all of them have. The guard must not be cleared by whichever fetch
-// finishes first, or a slow tick would re-dispatch the whole wave while the
-// others are still running.
-func (a *App) heavyDone() {
-	if a.heavyPending > 0 {
-		a.heavyPending--
+// dispatchSection bumps a heavy section's generation, marks it loading, and
+// returns its fetch Cmd — unless it is already loading, in which case it returns
+// nil so a concurrent dispatch is not stacked on top.
+func (a *App) dispatchSection(section store.Section) tea.Cmd {
+	if a.store.State(section) == store.StateLoading {
+		return nil
 	}
-	a.heavyInFlight = a.heavyPending > 0
+	gen := a.store.NextGen(section)
+	a.store.SetLoading(section, gen)
+	switch section {
+	case store.SectionNodes:
+		return fetchNodes(a.client, gen)
+	case store.SectionAllUsersJobs:
+		return fetchAllUsersJobs(a.client, gen)
+	case store.SectionFairShare:
+		return fetchFairShare(a.client, gen)
+	case store.SectionPendingPrio:
+		return fetchPendingPrio(a.client, gen)
+	default:
+		return nil
+	}
 }
 
 // Update is the heart of the model: it wires window-size fanout, background
@@ -374,9 +383,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 }
 
 // handleDataMsg applies an async fetch result to the store and refreshes the
-// affected views, returning handled=false for non-data messages. The six
-// heavy-wave results call heavyDone so the slow-tier guard clears only once all
-// of them return, not when whichever finishes first does.
+// affected views, returning handled=false for non-data messages. Each heavy-wave
+// result clears its own section's loading flag through the store setter, so the
+// per-section dispatch guard releases independently.
 func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case runningJobsMsg:
@@ -406,7 +415,6 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case nodesMsg:
-		a.heavyDone()
 		a.store.SetNodes(msg.nodes, msg.gen, msg.err)
 		a.observe(store.SectionNodes, msg.err)
 		a.nodes.Refresh()
@@ -415,7 +423,6 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case allUsersJobsMsg:
-		a.heavyDone()
 		a.store.SetAllUsersJobs(msg.jobs, msg.gen, msg.err)
 		a.observe(store.SectionAllUsersJobs, msg.err)
 		a.jobs.Refresh()   // My-Usage banner derives from all-users jobs.
@@ -425,7 +432,6 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case fairShareMsg:
-		a.heavyDone()
 		a.store.SetFairShare(msg.entries, msg.gen, msg.err)
 		a.observe(store.SectionFairShare, msg.err)
 		a.priority.Refresh()
@@ -433,7 +439,6 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case pendingPrioMsg:
-		a.heavyDone()
 		a.store.SetPendingPrio(msg.entries, msg.gen, msg.err)
 		a.observe(store.SectionPendingPrio, msg.err)
 		a.priority.Refresh()
@@ -520,19 +525,16 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	}
 
 	if idx, ok := tabForKey(msg); ok {
-		a.active = idx
-		a.frame.dirty = true
-		return a, nil
+		cmd := a.setActive(idx)
+		return a, cmd
 	}
 	switch msg.String() {
 	case "tab":
-		a.active = (a.active + 1) % numTabs
-		a.frame.dirty = true
-		return a, nil
+		cmd := a.setActive((a.active + 1) % numTabs)
+		return a, cmd
 	case "shift+tab":
-		a.active = (a.active + numTabs - 1) % numTabs
-		a.frame.dirty = true
-		return a, nil
+		cmd := a.setActive((a.active + numTabs - 1) % numTabs)
+		return a, cmd
 	}
 
 	return a.routeToActive(msg)
@@ -641,14 +643,34 @@ func tabForKey(msg tea.KeyPressMsg) (tabIndex, bool) {
 	return 0, false
 }
 
-// manualRefresh re-dispatches the running and heavy waves, bumping their
-// generations so superseded in-flight results are dropped (I4). Each wave is
-// skipped while it is already in flight: re-dispatching the heavy wave mid-flight
-// would reset heavyPending under the outstanding fetches and clear the guard
-// early, letting the next slow tick pile on a third wave. History refreshes from
-// the controller journal (throttled at the client), so it is always re-run
-// without ever touching slurmdbd. The caller owns user-visible feedback (the 'r'
-// key pushes a toast), since re-fetching alone is not visible while data is on
+// setActive switches the active tab to idx (a no-op when it is already active) and
+// fetches any heavy data the new tab needs but that went unpolled while it was
+// hidden, so the tab shows fresh data on arrival rather than waiting for the next
+// slow tick. Nodes and all-users are polled every tick regardless, so only the
+// Priority/Users fair-share + pending-priority become newly needed; they are
+// fetched when entering one of those tabs from outside. The dispatch self-skips
+// while its section is already loading, bounding the cost of rapid tab cycling.
+func (a *App) setActive(idx tabIndex) tea.Cmd {
+	if idx == a.active {
+		return nil
+	}
+	prev := a.active
+	a.active = idx
+	a.frame.dirty = true
+	if a.tabNeedsPriorityData(idx) && !a.tabNeedsPriorityData(prev) {
+		return tea.Batch(a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio), a.ensureSpinner())
+	}
+	return nil
+}
+
+// manualRefresh re-fetches the running jobs, the journal history, and the visible
+// heavy data, bumping their generations so superseded in-flight results are
+// dropped (I4). The running fetch is skipped while one is in flight; the heavy
+// fetches self-skip per section while already loading (dispatchSection), and only
+// the data the visible UI needs is refreshed (dispatchHeavyVisible). History
+// refreshes from the controller journal (throttled at the client), so it is always
+// re-run without ever touching slurmdbd. The caller owns user-visible feedback (the
+// 'r' key pushes a toast), since re-fetching alone is not visible while data is on
 // screen.
 func (a *App) manualRefresh() tea.Cmd {
 	a.frame.dirty = true
@@ -656,10 +678,7 @@ func (a *App) manualRefresh() tea.Cmd {
 	if !a.runningInFlight {
 		cmds = append(cmds, a.dispatchRunning())
 	}
-	if !a.heavyInFlight {
-		cmds = append(cmds, a.dispatchHeavy())
-	}
-	cmds = append(cmds, a.ensureSpinner())
+	cmds = append(cmds, a.dispatchHeavyVisible(), a.ensureSpinner())
 	return tea.Batch(cmds...)
 }
 
@@ -681,12 +700,13 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
-// handleSlowTick dispatches the heavy batch when none is in flight and the
-// terminal is focused, and always re-arms exactly the slow tier (I2).
+// handleSlowTick dispatches the visible heavy fetches when the terminal is focused
+// and always re-arms exactly the slow tier (I2). Each fetch self-skips while its
+// section is already loading, so a tick never stacks a duplicate.
 func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{slowTick(a.intervals.Slow)}
-	if !a.blurred && !a.heavyInFlight {
-		cmds = append(cmds, a.dispatchHeavy())
+	if !a.blurred {
+		cmds = append(cmds, a.dispatchHeavyVisible())
 	}
 	cmds = append(cmds, a.ensureSpinner())
 	return a, tea.Batch(cmds...)
