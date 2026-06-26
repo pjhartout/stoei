@@ -397,7 +397,7 @@ func (v *LogViewer) openInEditor() tea.Cmd {
 		return toast("No editor found (set $EDITOR)")
 	}
 	// #nosec G204 -- editor comes from $EDITOR/a fixed fallback list, path is a
-	// validated log path from scontrol/sacct.
+	// validated log path from scontrol.
 	cmd := exec.Command(editor, v.path)
 	return tea.ExecProcess(cmd, func(err error) tea.Msg {
 		return editorDoneMsg{err: err}

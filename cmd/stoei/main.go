@@ -54,7 +54,7 @@ func main() {
 
 	// Wire the one-way dependency chain: a Runner shells out to Slurm, the Client
 	// builds/parses commands, the Store holds the data, and the root model renders
-	// it. Job history and energy come from the controller ("scontrol show jobs")
+	// it. Job history comes from the controller ("scontrol show jobs")
 	// accumulated into a persistent on-disk journal — never slurmdbd/sacct —
 	// so the head node is not queried at all; squeue, scontrol, and the rest run
 	// live. The alt-screen is a View field in Bubble Tea v2, so NewProgram takes

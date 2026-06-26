@@ -57,9 +57,9 @@ type RunningJob struct {
 	Raw        []string
 }
 
-// HistoryJob is one job from the sacct history query. It mirrors the ten-column
-// sacct format "JobID,JobName,State,Restart,Elapsed,ExitCode,NodeList,Submit,
-// Start,End". Raw holds every pipe-separated field of the row.
+// HistoryJob is one job from the controller journal (scontrol show jobs). It
+// mirrors the ten-column layout "JobID,JobName,State,Restart,Elapsed,ExitCode,
+// NodeList,Submit,Start,End". Raw holds every pipe-separated field of the row.
 type HistoryJob struct {
 	ID       string
 	Name     string

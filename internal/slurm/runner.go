@@ -66,7 +66,7 @@ func hasHardFailureSignal(stderr string) bool {
 
 // ExecRunner is the production Runner. It shells out with exec.CommandContext so
 // that cancelling the context kills the underlying process (for example an
-// orphaned sacct).
+// orphaned squeue).
 type ExecRunner struct{}
 
 // Run executes the command and returns its stdout. It captures stderr separately
