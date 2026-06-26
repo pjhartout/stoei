@@ -40,7 +40,7 @@ func ParseControllerJobs(raw string) []ControllerJob {
 			continue
 		}
 		jobs = append(jobs, ControllerJob{
-			ID:        f["JobId"],
+			ID:        controllerJobID(f),
 			User:      userName(f["UserId"]),
 			Name:      f["JobName"],
 			State:     baseState(f["JobState"]),
@@ -57,6 +57,25 @@ func ParseControllerJobs(raw string) []ControllerJob {
 		})
 	}
 	return jobs
+}
+
+// controllerJobID returns the job id keyed to match squeue %i. A dispatched
+// array task is reported by scontrol with a distinct per-task JobId (e.g. 12350)
+// alongside ArrayJobId/ArrayTaskId, but squeue and the completion overlay key it
+// as "<ArrayJobId>_<ArrayTaskId>" (e.g. 12345_3). Using that form keeps the
+// journal/history id aligned so the live running row dedups the journal copy and
+// a completion supersedes it; otherwise the array task lingers as a frozen,
+// duplicate RUNNING row. Only a single numeric ArrayTaskId is rewritten; a
+// pending range or list keeps the raw JobId (it is the array-leader id, not the
+// frozen-RUNNING case).
+func controllerJobID(f map[string]string) string {
+	aj, at := f["ArrayJobId"], f["ArrayTaskId"]
+	if aj != "" && at != "" {
+		if _, err := strconv.Atoi(at); err == nil {
+			return aj + "_" + at
+		}
+	}
+	return f["JobId"]
 }
 
 // userName extracts the login name from a scontrol "UserId=name(uid)" value.

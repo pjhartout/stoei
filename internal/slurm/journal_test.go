@@ -20,6 +20,26 @@ func TestParseControllerJobs(t *testing.T) {
 	}
 }
 
+func TestParseControllerJobsArrayTaskID(t *testing.T) {
+	// A dispatched array task: scontrol reports a distinct per-task JobId, but
+	// squeue %i (and the completion overlay) key it as "<ArrayJobId>_<ArrayTaskId>".
+	// ParseControllerJobs must use the squeue-style id so the journal/history row
+	// dedups against the live running row instead of leaving a frozen duplicate.
+	raw := "JobId=12350 ArrayJobId=12345 ArrayTaskId=3 JobName=train\n" +
+		"   UserId=alice(1000) GroupId=alice(1000)\n" +
+		"   JobState=RUNNING Reason=None\n" +
+		"   RunTime=00:10:00 SubmitTime=2024-01-15T10:30:00 StartTime=2024-01-15T10:35:00 EndTime=Unknown\n" +
+		"   Partition=gpu NumNodes=1 NumCPUs=8\n" +
+		"   NodeList=gpu-node-05"
+	jobs := ParseControllerJobs(raw)
+	if len(jobs) != 1 {
+		t.Fatalf("got %d jobs, want 1", len(jobs))
+	}
+	if jobs[0].ID != "12345_3" {
+		t.Errorf("array task ID = %q, want 12345_3 (squeue-style, not the raw per-task JobId)", jobs[0].ID)
+	}
+}
+
 func TestJournalPersistsAndKeepsTerminalFinal(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "jobs.jsonl")
 	j := newJobJournal(path)

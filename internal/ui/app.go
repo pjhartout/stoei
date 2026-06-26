@@ -241,14 +241,15 @@ func (a *App) dispatchRunning() tea.Cmd {
 
 // maxCompletionLookups caps how many just-finished jobs are looked up via
 // scontrol after a single running-jobs refresh, bounding the burst on the
-// controller when a large array drains at once. Any beyond the cap are picked up
-// by the next cached sacct refresh.
+// controller when a large array drains at once. Any beyond the cap are not
+// auto-recovered (history has no ticker); a manual refresh re-reads the journal
+// while the job is still retained by the controller.
 const maxCompletionLookups = 64
 
 // fetchCompletions returns a batched Cmd that asks the controller for the final
 // record of each just-vanished job ID, so completions observed mid-session reach
 // the history view without a sacct query. It returns nil when nothing vanished.
-// ponytail: caps the burst at maxCompletionLookups; the daily sacct covers the rest.
+// ponytail: caps the burst at maxCompletionLookups; a manual refresh re-reads the rest.
 func (a *App) fetchCompletions(ids []string) tea.Cmd {
 	if len(ids) == 0 {
 		return nil

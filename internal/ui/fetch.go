@@ -128,10 +128,10 @@ func fetchRunningJobs(client store.SlurmClient, gen uint64) tea.Cmd {
 	}
 }
 
-// fetchCompletedJob returns a Cmd that asks the controller (scontrol, not sacct)
-// for the final record of a job that just left the running queue, reporting it as
-// a completedJobMsg. A lookup error or a non-terminal/expired job yields found
-// false and is silently dropped — the cached sacct refresh covers it.
+// fetchCompletedJob returns a Cmd that asks the controller (scontrol) for the
+// final record of a job that just left the running queue, reporting it as a
+// completedJobMsg. A lookup error or a non-terminal/expired job yields found
+// false and is silently dropped.
 func fetchCompletedJob(client store.SlurmClient, id string) tea.Cmd {
 	return func() tea.Msg {
 		var found bool
