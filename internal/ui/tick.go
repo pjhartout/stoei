@@ -10,7 +10,7 @@ import (
 // tier (4x the fast interval) drives the heavy batch sections. These are the
 // fallback defaults; the live intervals are derived from the user config.
 const (
-	defaultFastInterval = 5 * time.Second
+	defaultFastInterval = 10 * time.Second
 	slowIntervalFactor  = 4
 )
 
@@ -21,7 +21,7 @@ type Intervals struct {
 	Slow time.Duration
 }
 
-// DefaultIntervals returns the locked default refresh intervals (5s fast, 20s
+// DefaultIntervals returns the locked default refresh intervals (10s fast, 40s
 // slow).
 func DefaultIntervals() Intervals {
 	return Intervals{

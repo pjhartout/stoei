@@ -120,7 +120,6 @@ func TestFastTickReArmsButSkipsFetchWhenInFlight(t *testing.T) {
 // TestSlowTickReArmsOwnTierExactlyOnce asserts I2 for the slow tier.
 func TestSlowTickReArmsOwnTierExactlyOnce(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
-	a.heavyInFlight = false
 
 	_, cmd := a.Update(slowTickMsg{at: time.Now()})
 	msgs := drainCmd(cmd)
@@ -134,39 +133,92 @@ func TestSlowTickReArmsOwnTierExactlyOnce(t *testing.T) {
 	}
 }
 
-// TestHeavyGuardClearsOnlyAfterAllFetchesReturn asserts the in-flight guard is
-// cleared only once every heavy fetch has returned — not when whichever finishes
-// first does. Otherwise a slow tick would re-dispatch the heavy wave while fetches
-// are still running.
-func TestHeavyGuardClearsOnlyAfterAllFetchesReturn(t *testing.T) {
+// TestDispatchHeavyVisibleByTab pins the visibility predicate: nodes and all-users
+// are always polled (they feed the sidebar / 'L' modal / banners), while
+// fair-share and pending-priority are polled only while the Priority or Users tab
+// is active.
+func TestDispatchHeavyVisibleByTab(t *testing.T) {
+	cases := []struct {
+		name   string
+		active tabIndex
+		want   map[string]bool
+	}{
+		{"jobs", tabJobs, map[string]bool{"nodes": true, "allusers": true}},
+		{"nodes", tabNodes, map[string]bool{"nodes": true, "allusers": true}},
+		{"logs", tabLogs, map[string]bool{"nodes": true, "allusers": true}},
+		{"priority", tabPriority, map[string]bool{"nodes": true, "allusers": true, "fairshare": true, "pendingprio": true}},
+		{"users", tabUsers, map[string]bool{"nodes": true, "allusers": true, "fairshare": true, "pendingprio": true}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			a := newTestApp(t, &store.FakeClient{})
+			a.active = tc.active
+			got := map[string]bool{}
+			for _, msg := range drainCmd(a.dispatchHeavyVisible()) {
+				switch msg.(type) {
+				case nodesMsg:
+					got["nodes"] = true
+				case allUsersJobsMsg:
+					got["allusers"] = true
+				case fairShareMsg:
+					got["fairshare"] = true
+				case pendingPrioMsg:
+					got["pendingprio"] = true
+				}
+			}
+			for _, s := range []string{"nodes", "allusers", "fairshare", "pendingprio"} {
+				if got[s] != tc.want[s] {
+					t.Errorf("section %q dispatched=%v, want=%v", s, got[s], tc.want[s])
+				}
+			}
+		})
+	}
+}
+
+// TestHeavySectionGuardSkipsWhileLoading asserts a needed section already loading
+// is not re-dispatched (the per-section replacement for the old monolithic guard).
+func TestHeavySectionGuardSkipsWhileLoading(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
-	a.heavyInFlight = true
-	a.heavyPending = heavyFetchCount
 
-	g := func(s store.Section) uint64 { return a.store.Gen(s) }
-	// Three of four results arrive. The guard must stay set, so handleSlowTick
-	// (which checks !heavyInFlight) cannot re-dispatch.
-	partial := []tea.Msg{
-		nodesMsg{gen: g(store.SectionNodes)},
-		allUsersJobsMsg{gen: g(store.SectionAllUsersJobs)},
-		fairShareMsg{gen: g(store.SectionFairShare)},
-	}
-	cur := a
-	for _, msg := range partial {
-		next, _ := cur.Update(msg)
-		cur = next.(App)
-	}
-	if !cur.heavyInFlight {
-		t.Fatal("heavyInFlight cleared after only 3/4 heavy results returned")
-	}
-	if cur.heavyPending != 1 {
-		t.Fatalf("heavyPending = %d after 3 results; want 1", cur.heavyPending)
-	}
+	gNodes := a.store.NextGen(store.SectionNodes)
+	a.store.SetLoading(store.SectionNodes, gNodes)
 
-	// The fourth result clears the guard.
-	next, _ := cur.Update(pendingPrioMsg{gen: g(store.SectionPendingPrio)})
-	if next.(App).heavyInFlight {
-		t.Error("heavyInFlight still set after all 4 heavy results returned")
+	var sawNodes, sawAllUsers bool
+	for _, msg := range drainCmd(a.dispatchHeavyVisible()) {
+		switch msg.(type) {
+		case nodesMsg:
+			sawNodes = true
+		case allUsersJobsMsg:
+			sawAllUsers = true
+		}
+	}
+	if sawNodes {
+		t.Error("re-dispatched nodes while it was already loading")
+	}
+	if !sawAllUsers {
+		t.Error("did not dispatch all-users jobs (not loading, sidebar visible)")
+	}
+	if got := a.store.Gen(store.SectionNodes); got != gNodes {
+		t.Errorf("nodes generation bumped (%d→%d) while loading", gNodes, got)
+	}
+}
+
+// TestSetActiveSwitchesAndNoOps asserts a tab switch updates the active tab and
+// returns a fetch for the newly-visible data, while re-selecting the active tab is
+// a no-op.
+func TestSetActiveSwitchesAndNoOps(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.active = tabJobs
+
+	cmd := a.setActive(tabPriority)
+	if a.active != tabPriority {
+		t.Fatalf("active = %v, want tabPriority", a.active)
+	}
+	if cmd == nil {
+		t.Error("switching tabs returned nil; want a fetch for the newly-visible data")
+	}
+	if cmd := a.setActive(tabPriority); cmd != nil {
+		t.Error("setActive to the already-active tab returned a non-nil Cmd")
 	}
 }
 
@@ -216,28 +268,20 @@ func TestBlurStopsPollingButKeepsTicking(t *testing.T) {
 	}
 }
 
-// TestManualRefreshSkipsHeavyWhileInFlight asserts manualRefresh does not pile a
-// second heavy wave on top of one already in flight — which would reset
-// heavyPending under the outstanding fetches and let a slow tick add a third.
-func TestManualRefreshSkipsHeavyWhileInFlight(t *testing.T) {
+// TestManualRefreshSkipsLoadingSection asserts manualRefresh does not re-dispatch a
+// heavy section already loading — the per-section guard that replaced the old
+// heavyPending counter (whose miscount let a slow tick stack a third wave).
+func TestManualRefreshSkipsLoadingSection(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
-	a.heavyInFlight = true
-	a.heavyPending = heavyFetchCount
-	genBefore := a.store.Gen(store.SectionNodes)
+	a.active = tabJobs // narrow: dispatchHeavyVisible needs only all-users jobs
 
-	cmd := a.manualRefresh()
+	g := a.store.NextGen(store.SectionAllUsersJobs)
+	a.store.SetLoading(store.SectionAllUsersJobs, g)
 
-	for _, msg := range drainCmd(cmd) {
-		switch msg.(type) {
-		case nodesMsg, allUsersJobsMsg, fairShareMsg, pendingPrioMsg:
-			t.Error("manualRefresh dispatched a heavy fetch while the wave was in flight")
-		}
-	}
-	if g := a.store.Gen(store.SectionNodes); g != genBefore {
-		t.Errorf("nodes generation bumped (%d→%d) by a skipped heavy dispatch", genBefore, g)
-	}
-	if a.heavyPending != heavyFetchCount {
-		t.Errorf("heavyPending = %d; want %d (untouched while in flight)", a.heavyPending, heavyFetchCount)
+	a.manualRefresh()
+
+	if got := a.store.Gen(store.SectionAllUsersJobs); got != g {
+		t.Errorf("all-users generation bumped (%d→%d); manualRefresh must skip a loading section", g, got)
 	}
 }
 
