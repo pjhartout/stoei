@@ -16,8 +16,8 @@ var (
 	arrayRange = regexp.MustCompile(`^(\d+)-(\d+)$`)
 )
 
-// NormalizeArrayJobID strips bracket-based array range notation that scontrol and
-// sacct cannot accept, while leaving single array task IDs intact. For example
+// NormalizeArrayJobID strips bracket-based array range notation that scontrol
+// cannot accept, while leaving single array task IDs intact. For example
 // "12345_[0-99]" becomes "12345" but "12345_5" is unchanged.
 func NormalizeArrayJobID(jobID string) string {
 	if jobID == "" {

@@ -37,7 +37,7 @@ type jobDetailLoadedMsg struct {
 
 // JobDetail is the scrollable job-detail modal opened by Enter on a Jobs row or
 // by the "i" job-id prompt. It fetches client.JobDetail in a Cmd (non-blocking,
-// spinner while loading), renders the scontrol/sacct fields by category, and
+// spinner while loading), renders the scontrol fields by category, and
 // offers o/e to open the job's stdout/stderr in the log viewer. The cache and the
 // live job state are supplied by the root so the modal stays a pure view of one
 // job.

@@ -71,3 +71,50 @@ func TestMergedJobsEmpty(t *testing.T) {
 		t.Errorf("MergedJobs on empty store = %+v, want empty", got)
 	}
 }
+
+// TestMergedJobsRelabelsStaleRunningHistory covers a history job the journal
+// still records as RUNNING but that has left the live queue (its completion was
+// never observed). Once squeue has loaded, such a row is relabeled rather than
+// shown as a frozen RUNNING; a genuinely running job stays live.
+func TestMergedJobsRelabelsStaleRunningHistory(t *testing.T) {
+	s := New()
+	// squeue loaded successfully and still shows A running.
+	g := s.NextGen(SectionRunningJobs)
+	s.SetRunningJobs([]slurm.RunningJob{{ID: "A", State: "RUNNING", Time: "1:00"}}, g, nil)
+	// The journal records A (still running) and B (RUNNING but gone from the queue).
+	s.HistoryJobs = []slurm.HistoryJob{
+		{ID: "A", State: "RUNNING"},
+		{ID: "B", State: "RUNNING"},
+	}
+
+	byID := map[string]MergedJob{}
+	for _, j := range s.MergedJobs() {
+		byID[j.ID] = j
+	}
+
+	if a := byID["A"]; a.State != "RUNNING" || !a.Active {
+		t.Errorf("A = %+v, want live RUNNING (Active)", a)
+	}
+	b, ok := byID["B"]
+	if !ok {
+		t.Fatal("B missing from merged jobs")
+	}
+	if b.State != "UNKNOWN" {
+		t.Errorf("B state = %q, want UNKNOWN (stale RUNNING relabeled)", b.State)
+	}
+	if b.Active {
+		t.Error("B active = true, want false (history row)")
+	}
+}
+
+// TestMergedJobsKeepsHistoryRunningBeforeSqueueLoads guards the relabel: with no
+// successful running-jobs fetch yet there is no trustworthy squeue snapshot, so a
+// non-terminal history row must be shown verbatim, not relabeled.
+func TestMergedJobsKeepsHistoryRunningBeforeSqueueLoads(t *testing.T) {
+	s := New()
+	s.HistoryJobs = []slurm.HistoryJob{{ID: "B", State: "RUNNING"}}
+	got := s.MergedJobs()
+	if len(got) != 1 || got[0].State != "RUNNING" {
+		t.Errorf("before squeue loads, history state must be left as-is; got %+v", got)
+	}
+}

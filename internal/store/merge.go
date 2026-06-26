@@ -1,5 +1,14 @@
 package store
 
+import "github.com/pjhartout/stoei/internal/slurm"
+
+// endedHistoryState is the state shown for a history job the journal still
+// records as non-terminal but that is no longer in the live queue: its
+// completion was never observed (it aged out of the controller, overflowed the
+// completion-lookup burst cap, or was running when a prior session ended). Such a
+// row would otherwise display a frozen RUNNING. It maps to the neutral color role.
+const endedHistoryState = "UNKNOWN"
+
 // MergedJob is one row of the Jobs tab's unified job list: the current user's
 // running/pending jobs followed by their completed/failed history jobs. It is the
 // display shape the Jobs tab renders (JobID, Name, State, Time, Nodes, NodeList,
@@ -62,15 +71,22 @@ func (s *Store) MergedJobs() []MergedJob {
 	}
 
 	// History jobs, skipping any already present as a running job. Nodes is empty
-	// because the journal history view omits it.
+	// because the journal history view omits it. Once squeue has loaded, a history
+	// job the journal still marks non-terminal but that is absent from the live
+	// queue has necessarily ended (a genuinely running/pending job is in squeue and
+	// was deduped above), so its stale RUNNING is shown as ended rather than frozen.
 	for _, job := range s.HistoryJobs {
 		if _, running := runningIDs[job.ID]; running {
 			continue
 		}
+		state := job.State
+		if s.runningLoaded && !slurm.IsTerminalState(state) {
+			state = endedHistoryState
+		}
 		merged = append(merged, MergedJob{
 			ID:         job.ID,
 			Name:       job.Name,
-			State:      job.State,
+			State:      state,
 			Time:       job.Elapsed,
 			Nodes:      "",
 			NodeList:   job.NodeList,

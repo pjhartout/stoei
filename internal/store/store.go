@@ -100,6 +100,10 @@ type Store struct {
 
 	RunningJobs     []slurm.RunningJob
 	RunningJobsMeta Meta
+	// runningLoaded becomes true after the first successful running-jobs fetch and
+	// stays true. Until then MergedJobs has no trustworthy squeue snapshot to tell a
+	// stale history RUNNING row from a live one, so it leaves history states as-is.
+	runningLoaded bool
 
 	// HistoryJobs is the public history view: the session-completion overlay
 	// followed by the journal base, rebuilt whenever either changes. Readers use
@@ -283,6 +287,7 @@ func (s *Store) SetRunningJobs(data []slurm.RunningJob, gen uint64, err error) [
 			}
 		}
 		s.RunningJobs = data
+		s.runningLoaded = true
 	}
 	s.applyMeta(&s.RunningJobsMeta, err)
 	return vanished
