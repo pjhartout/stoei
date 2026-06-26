@@ -289,8 +289,9 @@ var terminalJobStates = map[string]bool{
 	"PREEMPTED": true, "REVOKED": true, "SPECIAL_EXIT": true,
 }
 
-// isTerminalState reports whether a JobState string denotes a finished job.
-func isTerminalState(state string) bool {
+// IsTerminalState reports whether a JobState string denotes a finished job. The
+// base state is the first token, so "CANCELLED by 1001" classifies as terminal.
+func IsTerminalState(state string) bool {
 	base, _, _ := strings.Cut(strings.TrimSpace(state), " ")
 	return terminalJobStates[base]
 }
@@ -301,8 +302,7 @@ func isTerminalState(state string) bool {
 // head-node sacct query. The controller retains a finished job only briefly
 // (MinJobAge), so the caller must look it up promptly on completion. found is
 // false — with a nil error — when the controller no longer has the job or it is
-// not yet in a terminal state; the next cached sacct refresh then covers it. It
-// never falls back to sacct.
+// not yet in a terminal state. It never falls back to sacct.
 func (c *Client) CompletedJobRecord(ctx context.Context, jobID string) (HistoryJob, bool, error) {
 	normalized := NormalizeArrayJobID(jobID)
 	if err := validateJobID(normalized); err != nil {
@@ -313,7 +313,7 @@ func (c *Client) CompletedJobRecord(ctx context.Context, jobID string) (HistoryJ
 		return HistoryJob{}, false, err
 	}
 	f := ParseScontrolFields(strings.TrimSpace(string(out)))
-	if f["JobId"] == "" || !isTerminalState(f["JobState"]) {
+	if f["JobId"] == "" || !IsTerminalState(f["JobState"]) {
 		return HistoryJob{}, false, nil
 	}
 	return HistoryJob{

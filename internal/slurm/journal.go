@@ -62,7 +62,7 @@ func (j *jobJournal) upsert(jobs []ControllerJob) error {
 		if job.ID == "" {
 			continue
 		}
-		if existing, ok := recs[job.ID]; ok && isTerminalState(existing.State) {
+		if existing, ok := recs[job.ID]; ok && IsTerminalState(existing.State) {
 			existing.LastSeen = now
 			recs[job.ID] = existing
 			continue

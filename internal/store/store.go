@@ -102,14 +102,14 @@ type Store struct {
 	RunningJobsMeta Meta
 
 	// HistoryJobs is the public history view: the session-completion overlay
-	// followed by the sacct base, rebuilt whenever either changes. Readers use it
-	// directly; historyBase and completed are the inputs rebuildHistory merges.
+	// followed by the journal base, rebuilt whenever either changes. Readers use
+	// it directly; historyBase and completed are the inputs rebuildHistory merges.
 	HistoryJobs  []slurm.HistoryJob
 	HistoryStats slurm.HistoryStats
 	HistoryMeta  Meta
-	// historyBase is the most recent sacct history result; completed holds jobs
-	// observed finishing this session (from scontrol), kept apart so the overlay
-	// survives a sacct refresh until that refresh includes the job.
+	// historyBase is the most recent controller-journal history result; completed
+	// holds jobs observed finishing this session (from scontrol), kept apart so the
+	// overlay survives a journal refresh until that refresh includes the job.
 	historyBase []slurm.HistoryJob
 	completed   []slurm.HistoryJob
 
@@ -289,9 +289,9 @@ func (s *Store) SetRunningJobs(data []slurm.RunningJob, gen uint64, err error) [
 }
 
 // SetHistory applies a job-history fetch result, dropping stale generations. The
-// sacct result is the history base; the session-observed completions overlay is
+// journal result is the history base; the session-observed completions overlay is
 // re-applied on top (rebuildHistory) so a job that finished mid-session stays
-// visible until a sacct refresh absorbs it.
+// visible until a journal refresh absorbs it.
 func (s *Store) SetHistory(jobs []slurm.HistoryJob, stats slurm.HistoryStats, gen uint64, err error) {
 	if s.stale(SectionHistory, gen) {
 		return
@@ -305,9 +305,9 @@ func (s *Store) SetHistory(jobs []slurm.HistoryJob, stats slurm.HistoryStats, ge
 }
 
 // AddCompletedJob records a job observed finishing this session (sourced from
-// scontrol, not sacct) so it appears in the history view immediately. The newest
-// record wins for a duplicate ID; entries the sacct base already covers are
-// dropped on the next rebuild.
+// scontrol) so it appears in the history view immediately. The newest record wins
+// for a duplicate ID; entries the journal base already covers in a terminal state
+// are dropped on the next rebuild.
 func (s *Store) AddCompletedJob(job slurm.HistoryJob) {
 	overlay := make([]slurm.HistoryJob, 0, len(s.completed)+1)
 	overlay = append(overlay, job) // newest first
@@ -321,23 +321,37 @@ func (s *Store) AddCompletedJob(job slurm.HistoryJob) {
 }
 
 // rebuildHistory recomputes the public HistoryJobs as the session-completion
-// overlay followed by the sacct base, dropping overlay entries the base already
-// carries (the sacct record is authoritative once it lands).
+// overlay followed by the journal base. The base is authoritative only for jobs
+// it records in a terminal state: it also snapshots running/pending jobs, so an
+// overlay entry (a freshly observed completion) supersedes a stale non-terminal
+// base record for the same id. Without this, a job that was running when stoei
+// started stays frozen as RUNNING after it finishes, because the base's stale
+// RUNNING snapshot would shadow the overlay's terminal record.
 func (s *Store) rebuildHistory() {
-	baseIDs := make(map[string]struct{}, len(s.historyBase))
+	terminalBase := make(map[string]bool, len(s.historyBase))
 	for _, j := range s.historyBase {
-		baseIDs[j.ID] = struct{}{}
+		if slurm.IsTerminalState(j.State) {
+			terminalBase[j.ID] = true
+		}
 	}
 	kept := make([]slurm.HistoryJob, 0, len(s.completed))
+	overlayIDs := make(map[string]struct{}, len(s.completed))
 	for _, j := range s.completed {
-		if _, ok := baseIDs[j.ID]; !ok {
-			kept = append(kept, j)
+		if terminalBase[j.ID] {
+			continue // the base holds the final record; drop the overlay copy.
 		}
+		kept = append(kept, j)
+		overlayIDs[j.ID] = struct{}{}
 	}
 	s.completed = kept
 	merged := make([]slurm.HistoryJob, 0, len(kept)+len(s.historyBase))
 	merged = append(merged, kept...)
-	merged = append(merged, s.historyBase...)
+	for _, j := range s.historyBase {
+		if _, ok := overlayIDs[j.ID]; ok {
+			continue // superseded by a fresher overlay completion.
+		}
+		merged = append(merged, j)
+	}
 	s.HistoryJobs = merged
 }
 

@@ -40,15 +40,48 @@ func TestAddCompletedJobMergesAndSacctAbsorbs(t *testing.T) {
 	g1 := s.NextGen(SectionHistory)
 	s.SetHistory([]slurm.HistoryJob{{ID: "old"}}, slurm.HistoryStats{}, g1, nil)
 
-	s.AddCompletedJob(slurm.HistoryJob{ID: "new", State: "COMPLETED"})
+	s.AddCompletedJob(slurm.HistoryJob{ID: "new", State: "COMPLETED", Elapsed: "overlay"})
 	if len(s.HistoryJobs) != 2 || s.HistoryJobs[0].ID != "new" || s.HistoryJobs[1].ID != "old" {
 		t.Fatalf("history = %+v, want overlay [new] before base [old]", s.HistoryJobs)
 	}
 
-	// A later sacct refresh that now includes "new" must not duplicate it.
+	// A later journal refresh that now carries "new" in a terminal state is
+	// authoritative: the overlay copy is pruned and the base record shown (no dup).
+	// The terminal base record (Elapsed "base") must replace the overlay copy,
+	// which exercises the terminal-prune branch in rebuildHistory.
 	g2 := s.NextGen(SectionHistory)
-	s.SetHistory([]slurm.HistoryJob{{ID: "new"}, {ID: "old"}}, slurm.HistoryStats{}, g2, nil)
+	s.SetHistory([]slurm.HistoryJob{
+		{ID: "new", State: "COMPLETED", Elapsed: "base"},
+		{ID: "old", State: "COMPLETED", Elapsed: "base"},
+	}, slurm.HistoryStats{}, g2, nil)
 	if len(s.HistoryJobs) != 2 {
-		t.Errorf("after sacct absorbs the completion, history len = %d, want 2 (no dup)", len(s.HistoryJobs))
+		t.Fatalf("after the journal absorbs the completion, history len = %d, want 2 (no dup)", len(s.HistoryJobs))
+	}
+	for _, j := range s.HistoryJobs {
+		if j.ID == "new" && j.Elapsed != "base" {
+			t.Errorf("job new Elapsed = %q, want \"base\" (terminal base must prune and replace the overlay copy)", j.Elapsed)
+		}
+	}
+}
+
+// TestAddCompletedJobSupersedesRunningBase covers the journal-era case: the
+// history base (sourced from the scontrol journal) carries a job that was
+// RUNNING when it was snapshotted. When that job finishes, the freshly observed
+// terminal record (overlay) must win over the stale RUNNING base record, so the
+// job flips to COMPLETED instead of staying frozen as RUNNING.
+func TestAddCompletedJobSupersedesRunningBase(t *testing.T) {
+	s := New()
+	g1 := s.NextGen(SectionHistory)
+	// The journal base snapshotted job 123 while it was still running.
+	s.SetHistory([]slurm.HistoryJob{{ID: "123", State: "RUNNING", Elapsed: "1:00:00"}}, slurm.HistoryStats{}, g1, nil)
+
+	// Job 123 finishes; the controller lookup reports the terminal record.
+	s.AddCompletedJob(slurm.HistoryJob{ID: "123", State: "COMPLETED", Elapsed: "1:05:00"})
+
+	if len(s.HistoryJobs) != 1 {
+		t.Fatalf("history = %+v, want a single row for job 123 (no dup)", s.HistoryJobs)
+	}
+	if got := s.HistoryJobs[0].State; got != "COMPLETED" {
+		t.Errorf("job 123 state = %q, want COMPLETED (overlay must win over stale RUNNING base)", got)
 	}
 }
