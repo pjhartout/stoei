@@ -170,6 +170,77 @@ func TestHeavyGuardClearsOnlyAfterAllFetchesReturn(t *testing.T) {
 	}
 }
 
+// TestBlurStopsPollingButKeepsTicking asserts a blurred terminal stops dispatching
+// Slurm fetches on both tiers while still re-arming each ticker, and that regaining
+// focus resumes with a refresh.
+func TestBlurStopsPollingButKeepsTicking(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+
+	m, _ := a.Update(tea.BlurMsg{})
+	a = m.(App)
+
+	_, fcmd := a.Update(fastTickMsg{at: time.Now()})
+	fmsgs := drainCmd(fcmd)
+	if fast, _ := countTickMsgs(fmsgs); fast != 1 {
+		t.Errorf("blurred fast tick re-arms = %d; want 1", fast)
+	}
+	for _, msg := range fmsgs {
+		if _, ok := msg.(runningJobsMsg); ok {
+			t.Error("blurred fast tick dispatched a running-jobs fetch")
+		}
+	}
+
+	_, scmd := a.Update(slowTickMsg{at: time.Now()})
+	smsgs := drainCmd(scmd)
+	if _, slow := countTickMsgs(smsgs); slow != 1 {
+		t.Errorf("blurred slow tick re-arms = %d; want 1", slow)
+	}
+	for _, msg := range smsgs {
+		switch msg.(type) {
+		case nodesMsg, allUsersJobsMsg, fairShareMsg, pendingPrioMsg:
+			t.Error("blurred slow tick dispatched a heavy fetch")
+		}
+	}
+
+	// Regaining focus dispatches a refresh wave immediately.
+	_, focusCmd := a.Update(tea.FocusMsg{})
+	var resumed bool
+	for _, msg := range drainCmd(focusCmd) {
+		switch msg.(type) {
+		case runningJobsMsg, nodesMsg, historyMsg:
+			resumed = true
+		}
+	}
+	if !resumed {
+		t.Error("regaining focus did not dispatch a refresh")
+	}
+}
+
+// TestManualRefreshSkipsHeavyWhileInFlight asserts manualRefresh does not pile a
+// second heavy wave on top of one already in flight — which would reset
+// heavyPending under the outstanding fetches and let a slow tick add a third.
+func TestManualRefreshSkipsHeavyWhileInFlight(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.heavyInFlight = true
+	a.heavyPending = heavyFetchCount
+	genBefore := a.store.Gen(store.SectionNodes)
+
+	cmd := a.manualRefresh()
+
+	for _, msg := range drainCmd(cmd) {
+		switch msg.(type) {
+		case nodesMsg, allUsersJobsMsg, fairShareMsg, pendingPrioMsg:
+			t.Error("manualRefresh dispatched a heavy fetch while the wave was in flight")
+		}
+	}
+	if g := a.store.Gen(store.SectionNodes); g != genBefore {
+		t.Errorf("nodes generation bumped (%d→%d) by a skipped heavy dispatch", genBefore, g)
+	}
+	if a.heavyPending != heavyFetchCount {
+		t.Errorf("heavyPending = %d; want %d (untouched while in flight)", a.heavyPending, heavyFetchCount)
+	}
+}
+
 // TestUnavailableScreenRendered asserts that an unavailable client makes the
 // model render the full-screen unavailable screen rather than the tab bar.
 func TestUnavailableScreenRendered(t *testing.T) {
