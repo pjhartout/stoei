@@ -39,24 +39,32 @@ func ParseControllerJobs(raw string) []ControllerJob {
 		if f["JobId"] == "" {
 			continue
 		}
-		jobs = append(jobs, ControllerJob{
-			ID:        controllerJobID(f),
-			User:      userName(f["UserId"]),
-			Name:      f["JobName"],
-			State:     baseState(f["JobState"]),
-			Partition: f["Partition"],
-			Submit:    f["SubmitTime"],
-			Start:     f["StartTime"],
-			End:       f["EndTime"],
-			Elapsed:   f["RunTime"],
-			ExitCode:  f["ExitCode"],
-			Restart:   f["Restarts"],
-			NodeList:  f["NodeList"],
-			NCPUS:     f["NumCPUs"],
-			AllocTRES: f["TRES"],
-		})
+		jobs = append(jobs, controllerJobFromFields(f))
 	}
 	return jobs
+}
+
+// controllerJobFromFields builds a ControllerJob from one parsed scontrol
+// Key=Value block. The id is keyed to match squeue %i (controllerJobID) and the
+// state is reduced to its base token, so a single "scontrol show jobid" block and
+// a block from "scontrol show jobs" yield the same shape.
+func controllerJobFromFields(f map[string]string) ControllerJob {
+	return ControllerJob{
+		ID:        controllerJobID(f),
+		User:      userName(f["UserId"]),
+		Name:      f["JobName"],
+		State:     baseState(f["JobState"]),
+		Partition: f["Partition"],
+		Submit:    f["SubmitTime"],
+		Start:     f["StartTime"],
+		End:       f["EndTime"],
+		Elapsed:   f["RunTime"],
+		ExitCode:  f["ExitCode"],
+		Restart:   f["Restarts"],
+		NodeList:  f["NodeList"],
+		NCPUS:     f["NumCPUs"],
+		AllocTRES: f["TRES"],
+	}
 }
 
 // controllerJobID returns the job id keyed to match squeue %i. A dispatched

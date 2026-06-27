@@ -316,6 +316,14 @@ func (c *Client) CompletedJobRecord(ctx context.Context, jobID string) (HistoryJ
 	if f["JobId"] == "" || !IsTerminalState(f["JobState"]) {
 		return HistoryJob{}, false, nil
 	}
+	// Persist the terminal record to the journal so the final state survives a
+	// restart. The in-memory completion overlay does not, and "scontrol show jobs"
+	// may never observe this job again once the controller ages it out (MinJobAge),
+	// so without this the journal keeps its last RUNNING snapshot. Best-effort: a
+	// journal write must not fail the lookup.
+	if c.journal != nil {
+		_ = c.journal.upsert([]ControllerJob{controllerJobFromFields(f)})
+	}
 	return HistoryJob{
 		ID:       jobID,
 		Name:     f["JobName"],

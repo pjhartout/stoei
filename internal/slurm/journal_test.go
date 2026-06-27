@@ -1,10 +1,42 @@
 package slurm
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
 )
+
+// TestCompletedJobRecordPersistsToJournal asserts a mid-session completion observed
+// via "scontrol show jobid" is written to the durable journal, so its terminal
+// state survives a restart instead of reverting to the last RUNNING snapshot.
+func TestCompletedJobRecordPersistsToJournal(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.jsonl")
+	out := "JobId=777 JobName=train UserId=alice(1000) JobState=COMPLETED " +
+		"ExitCode=0:0 Restarts=0 RunTime=01:00:00 NodeList=n01 " +
+		"SubmitTime=2024-01-15T06:00:00 StartTime=2024-01-15T06:05:00 EndTime=2024-01-15T07:05:00"
+	r := &fixtureRunner{outputs: map[string]string{"scontrol": out}}
+	c := NewClient(r, WithUsername("alice"), WithJournal(path))
+
+	if _, found, err := c.CompletedJobRecord(context.Background(), "777"); err != nil || !found {
+		t.Fatalf("CompletedJobRecord: found=%v err=%v", found, err)
+	}
+
+	// Re-read the journal from disk, as a restart would.
+	var rec *ControllerJob
+	for _, j := range newJobJournal(path).all() {
+		if j.ID == "777" {
+			j := j
+			rec = &j
+		}
+	}
+	if rec == nil {
+		t.Fatal("job 777 was not persisted to the journal (its completion is lost on restart)")
+	}
+	if !IsTerminalState(rec.State) {
+		t.Errorf("journal state for 777 = %q, want a terminal state", rec.State)
+	}
+}
 
 func TestParseControllerJobs(t *testing.T) {
 	jobs := ParseControllerJobs(loadFixture(t, "scontrol_jobs.txt"))
