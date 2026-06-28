@@ -433,6 +433,12 @@ func reselect(t *table.Model, sorted [][]string, id string) {
 // View renders the My-Usage banner, the optional filter input, and the table.
 func (j *Jobs) View() string {
 	banner := j.styles.Subtle.Render(j.banner())
+	// When the last squeue fetch failed but prior rows are still on screen, mark
+	// them stale: SetRunningJobs keeps the previous snapshot on error, so without
+	// this the list looks live while it is frozen at the last good fetch.
+	if j.store.State(store.SectionRunningJobs) == store.StateError && len(j.store.RunningJobs) > 0 {
+		banner += "  " + j.styles.Error.Render("⚠ squeue failed — showing last known jobs")
+	}
 
 	parts := []string{banner, ""}
 	if j.filtering {

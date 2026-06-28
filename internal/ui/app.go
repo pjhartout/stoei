@@ -101,11 +101,6 @@ type App struct {
 	// spinnerActive is true while the loading-spinner animation tick is in flight,
 	// so it is started at most once and stopped when nothing is loading.
 	spinnerActive bool
-	// blurred is true while the terminal reports it has lost focus. Both tick tiers
-	// keep re-arming but skip dispatching Slurm fetches while blurred, so a
-	// backgrounded session stops polling the controller; regaining focus triggers an
-	// immediate refresh. Terminals that do not report focus never set it.
-	blurred bool
 
 	// unavailable holds the Slurm-availability error; non-nil renders the
 	// full-screen unavailable screen.
@@ -348,14 +343,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case tea.KeyPressMsg:
 		return a.handleKey(msg)
-
-	case tea.FocusMsg:
-		a.blurred = false
-		return a, a.manualRefresh() // resume with fresh data on return
-
-	case tea.BlurMsg:
-		a.blurred = true
-		return a, nil
 
 	case availabilityMsg:
 		a.availChecked = true
@@ -682,12 +669,14 @@ func (a *App) manualRefresh() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// handleFastTick dispatches a running-jobs refresh when none is in flight and the
-// terminal is focused, and always re-arms exactly the fast tier (I2) so polling
-// resumes the instant focus returns.
+// handleFastTick dispatches a running-jobs refresh when none is in flight and
+// always re-arms exactly the fast tier (I2). The live squeue list is never gated
+// on terminal focus: focus is not visibility (a visible-but-unfocused pane — a
+// tmux split, a tiling layout — would otherwise silently freeze), so the primary
+// list the user watches always refreshes.
 func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{fastTick(a.intervals.Fast)}
-	if !a.blurred && !a.runningInFlight {
+	if !a.runningInFlight {
 		cmds = append(cmds, a.dispatchRunning())
 	}
 	// Auto-expire transient toasts each cycle so they don't linger indefinitely.
@@ -700,15 +689,13 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
-// handleSlowTick dispatches the visible heavy fetches when the terminal is focused
-// and always re-arms exactly the slow tier (I2). Each fetch self-skips while its
-// section is already loading, so a tick never stacks a duplicate.
+// handleSlowTick dispatches the visible heavy fetches and always re-arms exactly
+// the slow tier (I2). Each fetch self-skips while its section is already loading,
+// so a tick never stacks a duplicate. Controller load is bounded by tab visibility
+// (dispatchHeavyVisible) — what is actually on screen — not by terminal focus.
 func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
 	cmds := []tea.Cmd{slowTick(a.intervals.Slow)}
-	if !a.blurred {
-		cmds = append(cmds, a.dispatchHeavyVisible())
-	}
-	cmds = append(cmds, a.ensureSpinner())
+	cmds = append(cmds, a.dispatchHeavyVisible(), a.ensureSpinner())
 	return a, tea.Batch(cmds...)
 }
 
@@ -994,7 +981,6 @@ func (a App) View() tea.View {
 
 	v := tea.NewView(content)
 	v.AltScreen = true
-	v.ReportFocus = true // drive the focus/blur backoff (handleFastTick/handleSlowTick)
 	return v
 }
 

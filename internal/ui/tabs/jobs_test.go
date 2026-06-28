@@ -1,6 +1,7 @@
 package tabs
 
 import (
+	"errors"
 	"regexp"
 	"strings"
 	"testing"
@@ -10,6 +11,26 @@ import (
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
+
+// TestStaleSqueueBannerWhenErrorWithData asserts that when the latest squeue fetch
+// fails but prior running rows remain on screen, the Jobs view marks them stale so
+// the still-rendered list is not silently trusted.
+func TestStaleSqueueBannerWhenErrorWithData(t *testing.T) {
+	j, st := seedJobs(t, []store.RunningJob{
+		{ID: "1", Name: "train", State: "RUNNING", Time: "1:00", Nodes: "1", NodeList: "n01"},
+	})
+	if strings.Contains(j.View(), "squeue failed") {
+		t.Fatal("stale banner shown while the section is healthy")
+	}
+
+	// A later squeue fetch fails; SetRunningJobs keeps the prior rows.
+	st.SetRunningJobs(nil, st.NextGen(store.SectionRunningJobs), errors.New("squeue down"))
+	j.Refresh()
+
+	if !strings.Contains(j.View(), "squeue failed") {
+		t.Errorf("stale banner missing after a squeue failure with rows present:\n%s", j.View())
+	}
+}
 
 // seedJobs builds a Jobs tab over a store seeded with the given running jobs.
 func seedJobs(t *testing.T, jobs []store.RunningJob) (*Jobs, *store.Store) {
