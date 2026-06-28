@@ -222,49 +222,27 @@ func TestSetActiveSwitchesAndNoOps(t *testing.T) {
 	}
 }
 
-// TestBlurStopsPollingButKeepsTicking asserts a blurred terminal stops dispatching
-// Slurm fetches on both tiers while still re-arming each ticker, and that regaining
-// focus resumes with a refresh.
-func TestBlurStopsPollingButKeepsTicking(t *testing.T) {
+// TestTerminalBlurDoesNotFreezeLiveList asserts the live running tier keeps
+// polling regardless of terminal focus: a tea.BlurMsg must not stop the fast-tier
+// squeue dispatch, since focus is not visibility (a visible-but-unfocused pane
+// would otherwise freeze the list the user is watching).
+func TestTerminalBlurDoesNotFreezeLiveList(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
 
+	// A blur event is now an ordinary, ignored message; it must not latch any state
+	// that suppresses dispatch.
 	m, _ := a.Update(tea.BlurMsg{})
 	a = m.(App)
 
-	_, fcmd := a.Update(fastTickMsg{at: time.Now()})
-	fmsgs := drainCmd(fcmd)
-	if fast, _ := countTickMsgs(fmsgs); fast != 1 {
-		t.Errorf("blurred fast tick re-arms = %d; want 1", fast)
-	}
-	for _, msg := range fmsgs {
+	_, cmd := a.Update(fastTickMsg{at: time.Now()})
+	var sawRunningFetch bool
+	for _, msg := range drainCmd(cmd) {
 		if _, ok := msg.(runningJobsMsg); ok {
-			t.Error("blurred fast tick dispatched a running-jobs fetch")
+			sawRunningFetch = true
 		}
 	}
-
-	_, scmd := a.Update(slowTickMsg{at: time.Now()})
-	smsgs := drainCmd(scmd)
-	if _, slow := countTickMsgs(smsgs); slow != 1 {
-		t.Errorf("blurred slow tick re-arms = %d; want 1", slow)
-	}
-	for _, msg := range smsgs {
-		switch msg.(type) {
-		case nodesMsg, allUsersJobsMsg, fairShareMsg, pendingPrioMsg:
-			t.Error("blurred slow tick dispatched a heavy fetch")
-		}
-	}
-
-	// Regaining focus dispatches a refresh wave immediately.
-	_, focusCmd := a.Update(tea.FocusMsg{})
-	var resumed bool
-	for _, msg := range drainCmd(focusCmd) {
-		switch msg.(type) {
-		case runningJobsMsg, nodesMsg, historyMsg:
-			resumed = true
-		}
-	}
-	if !resumed {
-		t.Error("regaining focus did not dispatch a refresh")
+	if !sawRunningFetch {
+		t.Error("a blurred fast tick did not dispatch a running-jobs fetch (the live list would freeze)")
 	}
 }
 
