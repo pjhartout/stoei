@@ -222,6 +222,65 @@ func TestSetActiveSwitchesAndNoOps(t *testing.T) {
 	}
 }
 
+// TestSlowTickReconcilesHistoryOnJobsTab asserts the slow tier refreshes the job
+// history while the Jobs tab is visible, so a completion the single-shot overlay
+// missed self-heals without a manual refresh.
+func TestSlowTickReconcilesHistoryOnJobsTab(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.active = tabJobs
+	before := a.store.Gen(store.SectionHistory)
+
+	a.Update(slowTickMsg{at: time.Now()})
+
+	if a.store.Gen(store.SectionHistory) == before {
+		t.Error("slow tick on the Jobs tab did not reconcile history (completions would need manual refresh)")
+	}
+}
+
+// TestSlowTickSkipsHistoryOffJobsTab asserts history is not polled while the Jobs
+// tab is hidden (its only consumer), keeping controller load off.
+func TestSlowTickSkipsHistoryOffJobsTab(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.active = tabNodes
+	before := a.store.Gen(store.SectionHistory)
+
+	a.Update(slowTickMsg{at: time.Now()})
+
+	if a.store.Gen(store.SectionHistory) != before {
+		t.Error("slow tick off the Jobs tab dispatched a history fetch; it should stay unpolled")
+	}
+}
+
+// TestEnterJobsTabReconcilesHistory asserts returning to the Jobs tab reconciles
+// history immediately rather than waiting up to a slow interval.
+func TestEnterJobsTabReconcilesHistory(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.active = tabNodes
+	before := a.store.Gen(store.SectionHistory)
+
+	if cmd := a.setActive(tabJobs); cmd == nil {
+		t.Fatal("entering the Jobs tab returned no Cmd")
+	}
+	if a.store.Gen(store.SectionHistory) == before {
+		t.Error("entering the Jobs tab did not reconcile history")
+	}
+}
+
+// TestManualRefreshDispatchesHistoryOnce asserts the dispatchHistoryIfIdle guard
+// keeps manualRefresh from stacking a second history fetch (it dispatches history
+// directly, then dispatchHeavyVisible must self-skip on the same wave).
+func TestManualRefreshDispatchesHistoryOnce(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.active = tabJobs
+	before := a.store.Gen(store.SectionHistory)
+
+	a.manualRefresh()
+
+	if got := a.store.Gen(store.SectionHistory) - before; got != 1 {
+		t.Errorf("manualRefresh bumped the history generation %d times; want 1", got)
+	}
+}
+
 // TestTerminalBlurDoesNotFreezeLiveList asserts the live running tier keeps
 // polling regardless of terminal focus: a tea.BlurMsg must not stop the fast-tier
 // squeue dispatch, since focus is not visibility (a visible-but-unfocused pane

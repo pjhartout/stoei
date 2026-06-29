@@ -271,6 +271,17 @@ func (a *App) dispatchHistory() tea.Cmd {
 	return fetchHistory(a.client, gen, a.cfg.JobHistoryDays)
 }
 
+// dispatchHistoryIfIdle dispatches a history refresh unless one is already in
+// flight, so a slow tick or a tab-entry reconcile never stacks on an outstanding
+// fetch (and on a wave where Init/manualRefresh already dispatched history, this
+// self-skips). The controller call beneath it is throttled at the client (3s).
+func (a *App) dispatchHistoryIfIdle() tea.Cmd {
+	if a.store.State(store.SectionHistory) == store.StateLoading {
+		return nil
+	}
+	return a.dispatchHistory()
+}
+
 // dispatchHeavyVisible dispatches the heavy fetches whose data the UI can
 // currently surface, leaving the rest unpolled to keep load off the controller.
 // Nodes and all-users jobs are always refreshed: they feed the cluster sidebar,
@@ -278,13 +289,20 @@ func (a *App) dispatchHistory() tea.Cmd {
 // Users tab, so a consumer is reachable from any tab. Fair-share and
 // pending-priority are shown only on the Priority tab and the user/account detail
 // modals (reachable from the Priority and Users tabs), so they are polled only
-// while one of those tabs is active. Each fetch is guarded by its section's
-// StateLoading flag (dispatchSection), so a slow tick and a tab-switch fetch never
-// stack a duplicate, and generation tags drop any superseded result.
+// while one of those tabs is active. The job-history base (completed jobs) feeds
+// only the Jobs tab, so it is reconciled while that tab is visible — this is the
+// steady-state path that promotes a finished job to its terminal state when the
+// single-shot completion overlay missed it (e.g. the squeue-vs-scontrol COMPLETING
+// race). Each fetch is guarded by its section's StateLoading flag, so a slow tick
+// and a tab-switch fetch never stack a duplicate, and generation tags drop any
+// superseded result.
 func (a *App) dispatchHeavyVisible() tea.Cmd {
 	cmds := []tea.Cmd{
 		a.dispatchSection(store.SectionNodes),
 		a.dispatchSection(store.SectionAllUsersJobs),
+	}
+	if a.active == tabJobs {
+		cmds = append(cmds, a.dispatchHistoryIfIdle())
 	}
 	if a.tabNeedsPriorityData(a.active) {
 		cmds = append(cmds, a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio))
@@ -635,8 +653,9 @@ func tabForKey(msg tea.KeyPressMsg) (tabIndex, bool) {
 // hidden, so the tab shows fresh data on arrival rather than waiting for the next
 // slow tick. Nodes and all-users are polled every tick regardless, so only the
 // Priority/Users fair-share + pending-priority become newly needed; they are
-// fetched when entering one of those tabs from outside. The dispatch self-skips
-// while its section is already loading, bounding the cost of rapid tab cycling.
+// fetched when entering one of those tabs from outside, and the job history is
+// reconciled when returning to the Jobs tab. The dispatch self-skips while its
+// section is already loading, bounding the cost of rapid tab cycling.
 func (a *App) setActive(idx tabIndex) tea.Cmd {
 	if idx == a.active {
 		return nil
@@ -644,10 +663,19 @@ func (a *App) setActive(idx tabIndex) tea.Cmd {
 	prev := a.active
 	a.active = idx
 	a.frame.dirty = true
-	if a.tabNeedsPriorityData(idx) && !a.tabNeedsPriorityData(prev) {
-		return tea.Batch(a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio), a.ensureSpinner())
+	var cmds []tea.Cmd
+	if idx == tabJobs {
+		// History went unpolled while away; reconcile completed jobs on arrival.
+		cmds = append(cmds, a.dispatchHistoryIfIdle())
 	}
-	return nil
+	if a.tabNeedsPriorityData(idx) && !a.tabNeedsPriorityData(prev) {
+		cmds = append(cmds, a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio))
+	}
+	if len(cmds) == 0 {
+		return nil
+	}
+	cmds = append(cmds, a.ensureSpinner())
+	return tea.Batch(cmds...)
 }
 
 // manualRefresh re-fetches the running jobs, the journal history, and the visible
