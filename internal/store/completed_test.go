@@ -64,6 +64,36 @@ func TestAddCompletedJobMergesAndSacctAbsorbs(t *testing.T) {
 	}
 }
 
+// TestHistoryRefreshHealsStaleRunningToTerminal asserts a periodic history refresh
+// promotes a job the merge had relabeled UNKNOWN (a stale RUNNING base snapshot for
+// a job no longer in the queue) to its real terminal state — i.e. the slow-tick
+// history reconcile fixes a completion the overlay missed, without a manual refresh.
+func TestHistoryRefreshHealsStaleRunningToTerminal(t *testing.T) {
+	s := New()
+	// squeue has loaded (relabel active) and the job is no longer running.
+	s.SetRunningJobs(nil, s.NextGen(SectionRunningJobs), nil)
+	// The startup history snapshot still has the job as RUNNING.
+	s.SetHistory([]slurm.HistoryJob{{ID: "7", State: "RUNNING"}}, slurm.HistoryStats{}, s.NextGen(SectionHistory), nil)
+	if got := mergedStateByID(s, "7"); got != "UNKNOWN" {
+		t.Fatalf("pre-reconcile state for job 7 = %q, want UNKNOWN", got)
+	}
+
+	// A later history refresh observes the terminal record.
+	s.SetHistory([]slurm.HistoryJob{{ID: "7", State: "COMPLETED", Elapsed: "1:00"}}, slurm.HistoryStats{}, s.NextGen(SectionHistory), nil)
+	if got := mergedStateByID(s, "7"); got != "COMPLETED" {
+		t.Errorf("post-reconcile state for job 7 = %q, want COMPLETED (history refresh must heal the stale row)", got)
+	}
+}
+
+func mergedStateByID(s *Store, id string) string {
+	for _, j := range s.MergedJobs() {
+		if j.ID == id {
+			return j.State
+		}
+	}
+	return ""
+}
+
 // TestAddCompletedJobSupersedesRunningBase covers the journal-era case: the
 // history base (sourced from the scontrol journal) carries a job that was
 // RUNNING when it was snapshotted. When that job finishes, the freshly observed
