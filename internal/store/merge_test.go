@@ -63,6 +63,42 @@ func TestMergedJobsOrderDedupAndMapping(t *testing.T) {
 	}
 }
 
+// TestMergedJobsDefaultOrder covers the default display ordering: status groups
+// (pending, then running, then finished history) with newest start first inside
+// each group, and an id tiebreak so equal rows never reshuffle on refresh.
+func TestMergedJobsDefaultOrder(t *testing.T) {
+	s := New()
+	g := s.NextGen(SectionRunningJobs)
+	s.SetRunningJobs([]slurm.RunningJob{
+		{ID: "10", State: "RUNNING", StartTime: "2026-06-30T09:00:00"},
+		{ID: "11", State: "RUNNING", StartTime: "2026-06-30T11:00:00"},
+		// Pending jobs report N/A starts; ordering falls back to submit time.
+		{ID: "12", State: "PENDING", StartTime: "N/A", SubmitTime: "2026-06-30T08:00:00"},
+		{ID: "13", State: "PENDING", StartTime: "N/A", SubmitTime: "2026-06-30T10:00:00"},
+	}, g, nil)
+	s.HistoryJobs = []slurm.HistoryJob{
+		{ID: "1", State: "COMPLETED", Start: "2026-06-30T06:00:00"},
+		{ID: "2", State: "FAILED", Start: "2026-06-30T07:00:00"},
+	}
+
+	var ids []string
+	for _, j := range s.MergedJobs() {
+		ids = append(ids, j.ID)
+	}
+
+	// Pending (newest submit first: 13 then 12), running (newest start first: 11
+	// then 10), finished history (newest start first: 2 then 1).
+	want := []string{"13", "12", "11", "10", "2", "1"}
+	if len(ids) != len(want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ids = %v, want %v", ids, want)
+		}
+	}
+}
+
 // TestMergedJobsEmpty covers the degenerate inputs so a callsite can rely on a
 // non-nil empty slice.
 func TestMergedJobsEmpty(t *testing.T) {

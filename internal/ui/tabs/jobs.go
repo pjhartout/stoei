@@ -325,9 +325,9 @@ func (j *Jobs) Refresh() {
 }
 
 // plainRows builds the markup-free cell values for the merged running-plus-history
-// job list in store order (running/pending jobs first, then deduped completed/
-// failed history jobs). The first column (job id) is the stable key used for
-// filtering, sorting and cursor restoration.
+// job list in store order (the default status grouping — pending, running, then
+// finished — newest start first within each group). The first column (job id) is
+// the stable key used for filtering, sorting and cursor restoration.
 func (j *Jobs) plainRows() [][]string {
 	jobs := j.store.MergedJobs()
 	rows := make([][]string, 0, len(jobs))

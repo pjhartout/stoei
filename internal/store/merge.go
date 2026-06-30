@@ -1,6 +1,12 @@
 package store
 
-import "github.com/pjhartout/stoei/internal/slurm"
+import (
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/pjhartout/stoei/internal/slurm"
+)
 
 // endedHistoryState is the state shown for a history job the journal still
 // records as non-terminal but that is no longer in the live queue: its
@@ -45,11 +51,15 @@ type MergedJob struct {
 }
 
 // MergedJobs returns the unified running-plus-history job list for the Jobs tab.
-// The current user's running/pending jobs come first, tracked in a running-id
-// set; then each history job whose JobID is not already running is appended
-// (dedup) with Nodes left empty and State/Time taken from the journal. This is pure (no
-// IO) and reads only the already-fetched RunningJobs and HistoryJobs, so it is
-// safe to call from Refresh on every tick and unit-testable in isolation.
+// It first builds the list running-first (tracking a running-id set) so each
+// history job whose JobID is already running is deduped away, with Nodes left
+// empty and State/Time taken from the journal. The result is then sorted into the
+// default display order: status group (pending, then running, then other active
+// states, then finished history) and, within each group, newest start first with
+// the job id as a deterministic tiebreaker so a refresh never reshuffles equal
+// rows. The "o" sort cycle overrides this. This is pure (no IO) and reads only the
+// already-fetched RunningJobs and HistoryJobs, so it is safe to call from Refresh
+// on every tick and unit-testable in isolation.
 func (s *Store) MergedJobs() []MergedJob {
 	merged := make([]MergedJob, 0, len(s.RunningJobs)+len(s.HistoryJobs))
 	runningIDs := make(map[string]struct{}, len(s.RunningJobs))
@@ -98,5 +108,53 @@ func (s *Store) MergedJobs() []MergedJob {
 		})
 	}
 
+	sort.SliceStable(merged, func(i, j int) bool {
+		ri, rj := mergedStatusRank(merged[i]), mergedStatusRank(merged[j])
+		if ri != rj {
+			return ri < rj
+		}
+		ti, tj := mergedStartKey(merged[i]), mergedStartKey(merged[j])
+		if !ti.Equal(tj) {
+			return ti.After(tj) // newest start first
+		}
+		return merged[i].ID < merged[j].ID // deterministic tiebreak so refresh never reshuffles
+	})
+
 	return merged
+}
+
+// mergedStatusRank orders the merged list into status groups for the default
+// view: pending first, then running, then any other still-active state, then
+// finished/history rows. Active jobs are classified by their squeue state; history
+// rows (Active == false) always sort last.
+func mergedStatusRank(j MergedJob) int {
+	if !j.Active {
+		return 3
+	}
+	s := strings.ToUpper(strings.TrimSpace(j.State))
+	if i := strings.IndexByte(s, ' '); i >= 0 {
+		s = s[:i]
+	}
+	switch s {
+	case "PENDING", "PD":
+		return 0
+	case "RUNNING", "R":
+		return 1
+	default:
+		return 2
+	}
+}
+
+// mergedStartKey is the timestamp the default view sorts by within a status group:
+// a job's start time, falling back to its submit time when the start is unknown
+// (pending jobs report an N/A start), and the zero time when neither parses (such
+// rows sort last under the newest-first order).
+func mergedStartKey(j MergedJob) time.Time {
+	if t, ok := slurm.ParseSlurmTimestamp(j.StartTime); ok {
+		return t
+	}
+	if t, ok := slurm.ParseSlurmTimestamp(j.SubmitTime); ok {
+		return t
+	}
+	return time.Time{}
 }
