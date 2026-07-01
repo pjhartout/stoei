@@ -145,6 +145,9 @@ func (s *Sidebar) nodesSection() []string {
 	if st.DrainingNodes > 0 {
 		line += s.styles.Subtle.Render(fmt.Sprintf(" · %d drain", st.DrainingNodes))
 	}
+	if st.OfflineNodes > 0 {
+		line += s.styles.Subtle.Render(fmt.Sprintf(" · %d down", st.OfflineNodes))
+	}
 	return []string{s.styles.Text.Bold(true).Render("Nodes:"), line, ""}
 }
 

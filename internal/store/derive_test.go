@@ -148,6 +148,36 @@ func TestDeriveClusterStatsDrainingGPUs(t *testing.T) {
 	}
 }
 
+// TestDeriveClusterStatsExcludesOfflineNodes asserts that offline nodes are kept
+// out of the totals (the denominators): only online nodes count. A DOWN node
+// without a DRAIN flag would otherwise inflate every total, and a
+// DOWN+DRAIN+NOT_RESPONDING node (the real hpcl94 shape) is offline, not draining.
+func TestDeriveClusterStatsExcludesOfflineNodes(t *testing.T) {
+	nodes := []slurm.Node{
+		{State: "IDLE", CPUTot: "10", CPUAlloc: "0", RealMem: "2048", AllocMem: "0", CfgTRES: "cpu=10,gres/gpu:h200=4"},
+		{State: "DOWN", CPUTot: "20", CPUAlloc: "0", RealMem: "4096", AllocMem: "0", CfgTRES: "cpu=20,gres/gpu:a100=8"},
+		{State: "DOWN+DRAIN+NOT_RESPONDING", CPUTot: "40", CPUAlloc: "0", RealMem: "8192", AllocMem: "0", CfgTRES: "cpu=40,gres/gpu:h100=2"},
+	}
+	s := DeriveClusterStats(nodes, nil)
+
+	if s.OfflineNodes != 2 {
+		t.Errorf("OfflineNodes = %d; want 2", s.OfflineNodes)
+	}
+	if s.TotalNodes != 1 || s.FreeNodes != 1 {
+		t.Errorf("nodes = total %d free %d; want total 1 free 1 (offline excluded)", s.TotalNodes, s.FreeNodes)
+	}
+	if s.DrainingNodes != 0 {
+		t.Errorf("DrainingNodes = %d; want 0 (a down+drain node is offline, not draining)", s.DrainingNodes)
+	}
+	if s.TotalCPUs != 10 || s.TotalMemoryGB != 2.0 || s.TotalGPUs != 4 {
+		t.Errorf("totals = cpu %d mem %v gpu %d; want 10 2.0 4 (online node only)",
+			s.TotalCPUs, s.TotalMemoryGB, s.TotalGPUs)
+	}
+	if len(s.DrainingGPUsByType) != 0 {
+		t.Errorf("offline-node GPUs leaked into DrainingGPUsByType: %v", s.DrainingGPUsByType)
+	}
+}
+
 func TestAggregateUserStats(t *testing.T) {
 	jobs := []slurm.AllUsersJob{
 		{ID: "100", User: "alice", Partition: "gpu", State: "RUNNING", NumNodes: "1", NodeList: "node01", TRES: "cpu=8,mem=16G,gres/gpu:h200=2"},

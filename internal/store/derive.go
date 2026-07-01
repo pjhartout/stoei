@@ -42,6 +42,10 @@ type ClusterStats struct {
 	// it is shown on its own line rather than folded into the free totals.
 	DrainingGPUsByType map[string]int
 	DrainingNodes      int
+	// OfflineNodes counts nodes that are unavailable for scheduling — down,
+	// unreachable, in maintenance, or powered off. Their capacity is excluded from
+	// every total so the denominators (free/total ratios) reflect online nodes only.
+	OfflineNodes int
 
 	PendingJobsCount   int
 	PendingCPUs        int
@@ -115,6 +119,12 @@ func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob) Cl
 
 	for _, node := range nodes {
 		state := strings.ToUpper(node.State)
+		if nodeOffline(state) {
+			// Offline nodes offer no schedulable capacity, so they are excluded from
+			// every total — the denominators count online nodes only.
+			stats.OfflineNodes++
+			continue
+		}
 		isDraining := parseNodeState(state, &stats)
 		parseNodeCPUs(node, &stats, !isDraining)
 		parseNodeMemory(node, &stats, !isDraining)
@@ -136,6 +146,22 @@ func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob) Cl
 	aggregatePending(allUsersJobs, &stats)
 
 	return stats
+}
+
+// nodeOffline reports whether an (already upper-cased) node state is offline —
+// unavailable for scheduling because the node is down, not responding, in
+// maintenance, powered off, a future placeholder, or invalidly registered. Its
+// capacity is excluded from the cluster totals so the denominators count online
+// nodes only. A merely draining node is not offline: it still runs its existing
+// jobs and is accounted separately. The trailing "*" is Slurm's not-responding
+// marker.
+func nodeOffline(state string) bool {
+	for _, marker := range []string{"DOWN", "NOT_RESPONDING", "MAINT", "POWER", "FUTURE", "INVAL", "UNKNOWN"} {
+		if strings.Contains(state, marker) {
+			return true
+		}
+	}
+	return strings.Contains(state, "*")
 }
 
 // parseNodeState updates node counts and returns whether the node is draining
