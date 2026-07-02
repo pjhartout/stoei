@@ -2,8 +2,10 @@ package slurm
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -38,37 +40,68 @@ func TestCompletedJobRecordPersistsToJournal(t *testing.T) {
 	}
 }
 
-func TestParseControllerJobs(t *testing.T) {
-	jobs := ParseControllerJobs(loadFixture(t, "scontrol_jobs.txt"))
-	if len(jobs) != 4 {
-		t.Fatalf("got %d jobs, want 4", len(jobs))
+// journalWidths are the per-column widths of JournalSqueueFormat.
+var journalWidths = []int{30, 20, 20, 15, 50, 20, 15, 25, 25, 25, 15, 10, 10, 10, 80}
+
+// journalRow renders one fixed-width squeue -O line in JournalSqueueFormat order.
+func journalRow(t *testing.T, cols ...string) string {
+	t.Helper()
+	if len(cols) != len(journalWidths)+1 {
+		t.Fatalf("journalRow needs %d columns, got %d", len(journalWidths)+1, len(cols))
+	}
+	var b strings.Builder
+	for i, w := range journalWidths {
+		fmt.Fprintf(&b, "%-*s", w, cols[i])
+	}
+	b.WriteString(cols[len(journalWidths)])
+	return b.String()
+}
+
+func TestParseJournalJobs(t *testing.T) {
+	raw := journalRow(t,
+		"1001", "1001", "N/A", "alice", "train", "COMPLETED", "gpu",
+		"2024-01-15T06:00:00", "2024-01-15T06:05:00", "2024-01-15T10:05:00",
+		"4:00:00", "0:0", "2", "32", "gpu-node-[01-04]", "cpu=32,mem=256G,node=4,gres/gpu=16",
+	) + "\n" + journalRow(t,
+		"1002", "1002", "N/A", "alice", "eval", "RUNNING", "cpu",
+		"2024-01-15T11:00:00", "2024-01-15T11:05:00", "N/A",
+		"0:30:00", "0:0", "0", "8", "cpu-node-05", "cpu=8,mem=32G,node=1",
+	)
+	jobs := ParseJournalJobs(raw)
+	if len(jobs) != 2 {
+		t.Fatalf("got %d jobs, want 2", len(jobs))
 	}
 	j := jobs[0]
 	if j.ID != "1001" || j.User != "alice" || j.Name != "train" || j.State != "COMPLETED" ||
-		j.Partition != "gpu" || j.Elapsed != "04:00:00" || j.Restart != "2" || j.NCPUS != "32" ||
+		j.Partition != "gpu" || j.Elapsed != "4:00:00" || j.ExitCode != "0:0" || j.Restart != "2" ||
+		j.NCPUS != "32" || j.NodeList != "gpu-node-[01-04]" ||
 		j.AllocTRES != "cpu=32,mem=256G,node=4,gres/gpu=16" ||
-		j.Start != "2024-01-15T06:05:00" || j.End != "2024-01-15T10:05:00" {
+		j.Submit != "2024-01-15T06:00:00" || j.Start != "2024-01-15T06:05:00" || j.End != "2024-01-15T10:05:00" {
 		t.Errorf("job[0] = %+v", j)
 	}
 }
 
-func TestParseControllerJobsArrayTaskID(t *testing.T) {
-	// A dispatched array task: scontrol reports a distinct per-task JobId, but
-	// squeue %i (and the completion overlay) key it as "<ArrayJobId>_<ArrayTaskId>".
-	// ParseControllerJobs must use the squeue-style id so the journal/history row
-	// dedups against the live running row instead of leaving a frozen duplicate.
-	raw := "JobId=12350 ArrayJobId=12345 ArrayTaskId=3 JobName=train\n" +
-		"   UserId=alice(1000) GroupId=alice(1000)\n" +
-		"   JobState=RUNNING Reason=None\n" +
-		"   RunTime=00:10:00 SubmitTime=2024-01-15T10:30:00 StartTime=2024-01-15T10:35:00 EndTime=Unknown\n" +
-		"   Partition=gpu NumNodes=1 NumCPUs=8\n" +
-		"   NodeList=gpu-node-05"
-	jobs := ParseControllerJobs(raw)
-	if len(jobs) != 1 {
-		t.Fatalf("got %d jobs, want 1", len(jobs))
+func TestParseJournalJobsArrayIDs(t *testing.T) {
+	// Dispatched array tasks must normalize to the %i "<ArrayJobId>_<TaskId>"
+	// form so journal rows dedup against live rows; leaders keep the raw id.
+	raw := journalRow(t,
+		"12350", "12345", "3", "alice", "train", "RUNNING", "gpu",
+		"2024-01-15T10:30:00", "2024-01-15T10:35:00", "N/A",
+		"0:10:00", "0:0", "0", "8", "gpu-node-05", "cpu=8",
+	) + "\n" + journalRow(t,
+		"12400", "12400", "0-99%4", "alice", "sweep", "PENDING", "gpu",
+		"2024-01-15T10:30:00", "N/A", "N/A",
+		"0:00", "0:0", "0", "8", "", "cpu=8",
+	)
+	jobs := ParseJournalJobs(raw)
+	if len(jobs) != 2 {
+		t.Fatalf("got %d jobs, want 2", len(jobs))
 	}
 	if jobs[0].ID != "12345_3" {
-		t.Errorf("array task ID = %q, want 12345_3 (squeue-style, not the raw per-task JobId)", jobs[0].ID)
+		t.Errorf("array task ID = %q, want 12345_3 (squeue %%i form, not the raw per-task JobId)", jobs[0].ID)
+	}
+	if jobs[1].ID != "12400" {
+		t.Errorf("pending array leader ID = %q, want raw 12400", jobs[1].ID)
 	}
 }
 

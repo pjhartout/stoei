@@ -99,10 +99,8 @@ func TestMergedJobsDefaultOrder(t *testing.T) {
 	}
 }
 
-// TestMergedJobsTerminalSqueueRowsSortAsFinished covers finished jobs that still
-// linger in squeue's output (a terminal job stays visible for MinJobAge): they
-// must rank with the finished group, below every pending and running job, not
-// float above the history block as "other active" rows.
+// TestMergedJobsTerminalSqueueRowsSortAsFinished: jobs lingering in squeue in a
+// terminal state must rank with the finished group, below pending and running.
 func TestMergedJobsTerminalSqueueRowsSortAsFinished(t *testing.T) {
 	s := New()
 	g := s.NextGen(SectionRunningJobs)

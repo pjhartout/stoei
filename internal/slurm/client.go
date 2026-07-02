@@ -11,11 +11,10 @@ import (
 	"time"
 )
 
-// controllerFetchThrottle bounds how often "scontrol show jobs" is run to refresh
-// the job journal. Job history derives from the journal; within this window the
-// existing
-// journal is reused so the controller is queried at most once per refresh wave.
-const controllerFetchThrottle = 3 * time.Second
+// journalFetchThrottle bounds how often the per-user journal query is run. Job
+// history derives from the journal; within this window the existing journal is
+// reused so the controller is queried at most once per refresh wave.
+const journalFetchThrottle = 3 * time.Second
 
 // safeUsername and safeJobID validate CLI inputs before they reach a command, so
 // only an alphanumeric-plus-separators username and a numeric job ID (with an
@@ -38,11 +37,11 @@ type Client struct {
 	now func() time.Time
 
 	// journal is the persistent record of observed controller jobs; nil disables
-	// it (history then reflects only the latest controller fetch).
+	// it (history then reflects only the latest journal query).
 	journal *jobJournal
 
 	mu        sync.Mutex
-	lastFetch time.Time // last "scontrol show jobs" time, for the throttle
+	lastFetch time.Time // last journal query time, for the throttle
 }
 
 // Option configures a Client.
@@ -108,50 +107,57 @@ func (c *Client) Available(ctx context.Context) error {
 	return nil
 }
 
-// refreshControllerJobs runs "scontrol show jobs" and merges the result into the
-// persistent journal, throttled so rapid history fetches (e.g. a manual refresh)
-// query the controller at most once. It is a no-op when the
-// journal is disabled. Holding mu across the run serializes the wave: the first
-// caller fetches, the rest fall inside the throttle window and reuse the journal.
-func (c *Client) refreshControllerJobs(ctx context.Context) error {
+// queryJournalJobs runs the per-user "squeue -t all" journal query; user-scoped
+// so the controller never dumps the whole cluster (the old "scontrol show jobs").
+func (c *Client) queryJournalJobs(ctx context.Context) ([]ControllerJob, error) {
+	out, err := c.runner.Run(ctx, "squeue",
+		"-u", c.username,
+		"-t", "all",
+		"--noheader",
+		"-O", JournalSqueueFormat,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return ParseJournalJobs(string(out)), nil
+}
+
+// refreshJournalJobs merges the latest journal query into the persistent
+// journal, throttled and serialized under mu so a refresh wave queries the
+// controller at most once. No-op when the journal is disabled.
+func (c *Client) refreshJournalJobs(ctx context.Context) error {
 	if c.journal == nil {
 		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.lastFetch.IsZero() && c.now().Sub(c.lastFetch) < controllerFetchThrottle {
+	if !c.lastFetch.IsZero() && c.now().Sub(c.lastFetch) < journalFetchThrottle {
 		return nil
 	}
-	out, err := c.runner.Run(ctx, "scontrol", "show", "jobs")
+	jobs, err := c.queryJournalJobs(ctx)
 	if err != nil {
 		return err
 	}
 	c.lastFetch = c.now()
-	return c.journal.upsert(ParseControllerJobs(string(out)))
+	return c.journal.upsert(jobs)
 }
 
 // journalJobs returns the accumulated controller jobs: the journal when enabled,
-// otherwise just the latest controller fetch.
+// otherwise just the latest journal query.
 func (c *Client) journalJobs(ctx context.Context) ([]ControllerJob, error) {
-	if err := c.refreshControllerJobs(ctx); err != nil {
+	if err := c.refreshJournalJobs(ctx); err != nil {
 		return nil, err
 	}
 	if c.journal != nil {
 		return c.journal.all(), nil
 	}
-	out, err := c.runner.Run(ctx, "scontrol", "show", "jobs")
-	if err != nil {
-		return nil, err
-	}
-	return ParseControllerJobs(string(out)), nil
+	return c.queryJournalJobs(ctx)
 }
 
-// RunningJobs returns the current user's running and pending jobs via the
-// pipe-delimited "squeue -o" command with the format string
-// "%i|%j|%T|%M|%D|%R|%V|%S". The fields are deliberately unpadded: squeue
-// truncates a field to its width (a %.8T state renders "COMPLETED" as
-// "COMPLETE"), which broke terminal-state detection for jobs lingering in the
-// queue after finishing; pipe-delimited parsing needs no widths at all.
+// RunningJobs returns the current user's running and pending jobs via
+// pipe-delimited "squeue -o". Fields are unpadded because squeue truncates a
+// field to its width (%.8T turned "COMPLETED" into "COMPLETE", breaking
+// terminal-state detection).
 func (c *Client) RunningJobs(ctx context.Context) ([]RunningJob, error) {
 	if err := validateUsername(c.username); err != nil {
 		return nil, err
@@ -204,11 +210,9 @@ func (c *Client) UserJobs(ctx context.Context, username string) ([]UserJob, erro
 	return ParseUserJobs(string(out)), nil
 }
 
-// JobHistory returns the current user's job history plus aggregate requeue
-// statistics, derived from the controller-jobs journal rather than sacct. The
-// days argument is accepted for API compatibility but no longer bounds the
-// window: history is whatever the journal has accumulated, since the controller
-// has no historical query.
+// JobHistory returns the current user's job history and requeue statistics from
+// the journal (never sacct). days is accepted for API compatibility only;
+// history is whatever the journal has accumulated.
 func (c *Client) JobHistory(ctx context.Context, _ int) ([]HistoryJob, HistoryStats, error) {
 	if err := validateUsername(c.username); err != nil {
 		return nil, HistoryStats{}, err

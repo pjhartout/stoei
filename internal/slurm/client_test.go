@@ -62,8 +62,7 @@ func TestClientRunningJobsCommand(t *testing.T) {
 	if !argsContain(call, "-u") || !argsContain(call, "alice") {
 		t.Errorf("squeue args missing -u alice: %v", call.Args)
 	}
-	// Unpadded fields: squeue truncates a field to its width, so any width here
-	// would corrupt long states/names/nodelists.
+	// Unpadded: squeue truncates each field to its width, corrupting long values.
 	if !argsContain(call, "%i|%j|%T|%M|%D|%R|%V|%S") {
 		t.Errorf("squeue format string mismatch: %v", call.Args)
 	}
@@ -120,20 +119,30 @@ func TestClientUserJobsRejectsBadUsername(t *testing.T) {
 }
 
 func TestClientJobHistoryFromJournal(t *testing.T) {
-	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_jobs.txt")}}
+	out := journalRow(t,
+		"1001", "1001", "N/A", "alice", "train", "COMPLETED", "gpu",
+		"2024-01-15T06:00:00", "2024-01-15T06:05:00", "2024-01-15T10:05:00",
+		"4:00:00", "0:0", "2", "32", "gpu-node-[01-04]", "cpu=32",
+	) + "\n" + journalRow(t,
+		"1002", "1002", "N/A", "alice", "eval", "FAILED", "cpu",
+		"2024-01-15T11:00:00", "2024-01-15T11:05:00", "2024-01-15T11:35:00",
+		"0:30:00", "1:0", "0", "8", "cpu-node-05", "cpu=8",
+	)
+	r := &fixtureRunner{outputs: map[string]string{"squeue": out}}
 	c := NewClient(r, WithUsername("alice"), WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")))
 
 	jobs, stats, err := c.JobHistory(context.Background(), 7)
 	if err != nil {
 		t.Fatal(err)
 	}
-	// alice owns 1001, 1002, 1004 (bob's 1003 is excluded). Requeues: 2+0+0.
-	if len(jobs) != 3 || stats.TotalJobs != 3 || stats.TotalRequeues != 2 || stats.MaxRequeues != 2 {
+	if len(jobs) != 2 || stats.TotalJobs != 2 || stats.TotalRequeues != 2 || stats.MaxRequeues != 2 {
 		t.Errorf("history = %d jobs, stats %+v", len(jobs), stats)
 	}
 	call := lastCall(r)
-	if call.Name != "scontrol" || !argsContain(call, "show") || !argsContain(call, "jobs") {
-		t.Errorf("expected 'scontrol show jobs', got %s %v", call.Name, call.Args)
+	// User-scoped journal query, never a cluster-wide dump.
+	if call.Name != "squeue" || !argsContain(call, "-u") || !argsContain(call, "alice") ||
+		!argsContain(call, "all") || !argsContain(call, JournalSqueueFormat) {
+		t.Errorf("expected per-user squeue -t all journal query, got %s %v", call.Name, call.Args)
 	}
 }
 

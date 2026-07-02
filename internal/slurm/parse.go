@@ -158,9 +158,7 @@ func ParseRunningJobs(raw string) []RunningJob {
 		if len(parts) < minSqueueParts {
 			continue
 		}
-		// The format is unpadded, but trim defensively so a SQUEUE_FORMAT-style
-		// override with widths (or a copy-pasted padded fixture) still parses to
-		// bare values.
+		// The format is unpadded; trim defensively for padded variants.
 		for i := range parts {
 			parts[i] = strings.TrimSpace(parts[i])
 		}

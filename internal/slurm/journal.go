@@ -33,8 +33,9 @@ type journalRecord struct {
 	LastSeen  string
 }
 
-// jobJournal is a disk-backed record of every job stoei has observed via
-// "scontrol show jobs", keyed by job id. Because slurmdbd is no longer queried,
+// jobJournal is a disk-backed record of every job stoei has observed (via the
+// per-user journal query and scontrol completion records), keyed by job id.
+// Because slurmdbd is no longer queried,
 // it is the durable job history: it accumulates across runs, and a job already
 // recorded in a terminal state is never overwritten by a later (stale) record, so
 // final outcomes stick. It is stored as JSON Lines and rewritten atomically; all

@@ -97,7 +97,7 @@ Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refres
 - Slurm CLIs on `PATH`: `squeue`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
 - A login node where those commands talk to your cluster
 
-Job history comes from the controller (`scontrol show jobs`) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl` — `sacct`/`slurmdbd` is never queried, so the history reflects jobs stoei has observed (running, pending, and recently finished), building up over time. Run `stoei reset` to clear the journal.
+Job history comes from the controller (a per-user `squeue -t all` snapshot plus `scontrol show jobid` completion records) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl` — `sacct`/`slurmdbd` is never queried, so the history reflects jobs stoei has observed (running, pending, and recently finished), building up over time. Run `stoei reset` to clear the journal.
 
 ## Development
 

@@ -6,11 +6,9 @@ import (
 	"strings"
 )
 
-// ControllerJob is one job as reported by "scontrol show jobs": the controller's
-// live view, covering running, pending, and recently finished jobs (the
-// controller retains a finished job only briefly). It is the sacct-free source
-// for job history; persisted into the on-disk journal it
-// accumulates across runs into a durable record.
+// ControllerJob is one job from the controller's live view (the per-user
+// "squeue -t all" journal query or a "scontrol show jobid" block); persisted
+// into the journal it is the sacct-free source for job history.
 type ControllerJob struct {
 	ID        string
 	User      string
@@ -28,20 +26,57 @@ type ControllerJob struct {
 	AllocTRES string
 }
 
-// ParseControllerJobs parses "scontrol show jobs" output into one ControllerJob
-// per job block. scontrol separates job blocks with a blank line, and each block
-// is the same Key=Value format as "scontrol show jobid", so ParseScontrolFields
-// handles a single block.
-func ParseControllerJobs(raw string) []ControllerJob {
+// JournalSqueueFormat is the fixed-width "squeue -O" layout of the journal
+// query; tres-alloc is last so the line remainder absorbs long TRES strings.
+const JournalSqueueFormat = "JobId:30,ArrayJobId:20,ArrayTaskId:20,UserName:15," +
+	"Name:50,State:20,Partition:15,SubmitTime:25,StartTime:25,EndTime:25," +
+	"TimeUsed:15,exit_code:10,RestartCnt:10,NumCPUs:10,NodeList:80,tres-alloc:200"
+
+// journalColEnds are the cumulative column end offsets of JournalSqueueFormat,
+// with tres-alloc taking the remainder.
+var journalColEnds = []int{30, 50, 70, 85, 135, 155, 170, 195, 220, 245, 260, 270, 280, 290, 370}
+
+// ParseJournalJobs parses fixed-width "squeue -O" journal output into
+// ControllerJob records, normalizing ids to the squeue %i array form.
+func ParseJournalJobs(raw string) []ControllerJob {
 	var jobs []ControllerJob
-	for _, block := range strings.Split(strings.TrimSpace(raw), "\n\n") {
-		f := ParseScontrolFields(strings.TrimSpace(block))
-		if f["JobId"] == "" {
+	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
+		if strings.TrimSpace(line) == "" {
 			continue
 		}
-		jobs = append(jobs, controllerJobFromFields(f))
+		f := sliceFixedWidth(line, journalColEnds)
+		if f[0] == "" {
+			continue
+		}
+		jobs = append(jobs, ControllerJob{
+			ID:        journalJobID(f[0], f[1], f[2]),
+			User:      f[3],
+			Name:      f[4],
+			State:     baseState(f[5]),
+			Partition: f[6],
+			Submit:    f[7],
+			Start:     f[8],
+			End:       f[9],
+			Elapsed:   f[10],
+			ExitCode:  f[11],
+			Restart:   f[12],
+			NCPUS:     f[13],
+			NodeList:  f[14],
+			AllocTRES: f[15],
+		})
 	}
 	return jobs
+}
+
+// journalJobID rewrites a dispatched array task to "<ArrayJobId>_<ArrayTaskId>"
+// (matching squeue %i); plain jobs and pending array leaders keep the raw id.
+func journalJobID(jobID, arrayJobID, arrayTaskID string) string {
+	if arrayJobID != "" && arrayTaskID != "" {
+		if _, err := strconv.Atoi(arrayTaskID); err == nil {
+			return arrayJobID + "_" + arrayTaskID
+		}
+	}
+	return jobID
 }
 
 // controllerJobFromFields builds a ControllerJob from one parsed scontrol
