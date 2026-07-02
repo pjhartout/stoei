@@ -19,7 +19,7 @@ never imports the UI; the slurm package never imports the store. Three test seam
 
 Async responsiveness is the #1 design driver. All IO happens inside `tea.Cmd`
 closures, never on the Update path. Refresh is two-tier (fast `squeue`, slow
-`sacct`/nodes); each ticker re-arms once from its own handler; store setters drop
+journal/nodes); each ticker re-arms once from its own handler; store setters drop
 stale results by generation tag so the UI never blocks or shows out-of-order data.
 
 ## Maintainability

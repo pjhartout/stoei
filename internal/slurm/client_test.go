@@ -89,35 +89,6 @@ func TestClientAllUsersJobsCommand(t *testing.T) {
 	}
 }
 
-func TestClientUserJobsCommand(t *testing.T) {
-	r := &fixtureRunner{outputs: map[string]string{"squeue": loadFixture(t, "squeue_user.txt")}}
-	c := NewClient(r, WithUsername("alice"))
-
-	jobs, err := c.UserJobs(context.Background(), "bob")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if len(jobs) != 4 {
-		t.Errorf("got %d jobs, want 4", len(jobs))
-	}
-	call := lastCall(r)
-	wantFmt := "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,tres:80"
-	if !argsContain(call, wantFmt) || !argsContain(call, "bob") {
-		t.Errorf("user jobs command mismatch: %v", call.Args)
-	}
-}
-
-func TestClientUserJobsRejectsBadUsername(t *testing.T) {
-	r := &fixtureRunner{outputs: map[string]string{}}
-	c := NewClient(r, WithUsername("alice"))
-	if _, err := c.UserJobs(context.Background(), "bad;rm -rf"); err == nil {
-		t.Error("expected validation error for unsafe username")
-	}
-	if len(r.calls) != 0 {
-		t.Errorf("runner was called despite invalid username: %v", r.calls)
-	}
-}
-
 func TestClientJobHistoryFromJournal(t *testing.T) {
 	out := journalRow(t,
 		"1001", "1001", "N/A", "alice", "train", "COMPLETED", "gpu",
@@ -286,6 +257,20 @@ func TestClientCancelJob(t *testing.T) {
 	c := NewClient(r, WithUsername("alice"))
 
 	if err := c.CancelJob(context.Background(), "12345"); err != nil {
+		t.Fatal(err)
+	}
+	call := lastCall(r)
+	if call.Name != "scancel" || !argsContain(call, "12345") {
+		t.Errorf("scancel command mismatch: %v %v", call.Name, call.Args)
+	}
+}
+
+func TestClientCancelJobNormalizesPendingArray(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{"scancel": ""}}
+	c := NewClient(r, WithUsername("alice"))
+
+	// A pending array leader must cancel via its base id, not be rejected.
+	if err := c.CancelJob(context.Background(), "12345_[0-99]"); err != nil {
 		t.Fatal(err)
 	}
 	call := lastCall(r)

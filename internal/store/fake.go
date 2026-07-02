@@ -8,13 +8,11 @@ import (
 
 // FakeClient is a test double for SlurmClient. Each method returns its canned
 // value and, if the matching error field is set, that error instead. It records
-// the username passed to UserJobs and the job ID passed to JobDetail/CancelJob so
-// tests can assert call arguments. A zero FakeClient returns empty data and nil
+// the job ID passed to JobDetail/CancelJob so tests can assert call arguments. A zero FakeClient returns empty data and nil
 // errors for every method.
 type FakeClient struct {
 	RunningJobsData     []slurm.RunningJob
 	AllUsersJobsData    []slurm.AllUsersJob
-	UserJobsData        []slurm.UserJob
 	HistoryJobsData     []slurm.HistoryJob
 	HistoryStatsData    slurm.HistoryStats
 	NodesData           []slurm.Node
@@ -29,7 +27,6 @@ type FakeClient struct {
 	AvailableErr       error
 	RunningJobsErr     error
 	AllUsersJobsErr    error
-	UserJobsErr        error
 	JobHistoryErr      error
 	ClusterNodesErr    error
 	FairShareErr       error
@@ -39,8 +36,6 @@ type FakeClient struct {
 	CancelJobErr       error
 	CompletedJobErr    error
 
-	// LastUserJobsUser is the username passed to the most recent UserJobs call.
-	LastUserJobsUser string
 	// LastJobDetailID is the job ID passed to the most recent JobDetail call.
 	LastJobDetailID string
 	// LastNodeDetailName is the node name passed to the most recent NodeDetail call.
@@ -67,12 +62,6 @@ func (f *FakeClient) RunningJobs(_ context.Context) ([]slurm.RunningJob, error) 
 // AllUsersJobs implements SlurmClient.
 func (f *FakeClient) AllUsersJobs(_ context.Context) ([]slurm.AllUsersJob, error) {
 	return f.AllUsersJobsData, f.AllUsersJobsErr
-}
-
-// UserJobs implements SlurmClient.
-func (f *FakeClient) UserJobs(_ context.Context, username string) ([]slurm.UserJob, error) {
-	f.LastUserJobsUser = username
-	return f.UserJobsData, f.UserJobsErr
 }
 
 // JobHistory implements SlurmClient.

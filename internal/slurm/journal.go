@@ -114,30 +114,34 @@ func (j *jobJournal) load() map[string]journalRecord {
 	return recs
 }
 
-// write rewrites the journal atomically (temp file then rename) so a concurrent
-// reader never sees a partial file.
+// write rewrites the journal atomically. The temp file name is unique per
+// writer so concurrent stoei instances never publish each other's partial file.
 func (j *jobJournal) write(recs map[string]journalRecord) error {
 	if err := os.MkdirAll(filepath.Dir(j.path), 0o755); err != nil {
 		return err
 	}
-	tmp := j.path + ".tmp"
-	f, err := os.Create(tmp)
+	f, err := os.CreateTemp(filepath.Dir(j.path), "jobs-*.tmp")
 	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	fail := func(err error) error {
+		_ = f.Close()
+		_ = os.Remove(tmp)
 		return err
 	}
 	w := bufio.NewWriter(f)
 	enc := json.NewEncoder(w)
 	for _, r := range recs {
 		if err := enc.Encode(r); err != nil {
-			_ = f.Close()
-			return err
+			return fail(err)
 		}
 	}
 	if err := w.Flush(); err != nil {
-		_ = f.Close()
-		return err
+		return fail(err)
 	}
 	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
 		return err
 	}
 	return os.Rename(tmp, j.path)

@@ -64,9 +64,13 @@ func (s *Store) MergedJobs() []MergedJob {
 	merged := make([]MergedJob, 0, len(s.RunningJobs)+len(s.HistoryJobs))
 	runningIDs := make(map[string]struct{}, len(s.RunningJobs))
 
-	// Running/pending jobs first.
+	// Running/pending jobs first. A pending array leader is "123_[0-99]" in
+	// squeue but "123" in the journal; register both so the dedup matches.
 	for _, job := range s.RunningJobs {
 		runningIDs[job.ID] = struct{}{}
+		if base := slurm.NormalizeArrayJobID(job.ID); base != job.ID {
+			runningIDs[base] = struct{}{}
+		}
 		merged = append(merged, MergedJob{
 			ID:         job.ID,
 			Name:       job.Name,
@@ -123,23 +127,22 @@ func (s *Store) MergedJobs() []MergedJob {
 	return merged
 }
 
-// mergedStatusRank groups the default view: pending, running, other active,
-// finished. Terminal states rank as finished even while still in squeue (a
-// finished job lingers there for MinJobAge), so failed jobs never float above
-// pending or running rows.
+// mergedStatusRank groups the default view by state alone — pending, running,
+// other active, finished — so failed/terminal rows sort last no matter their
+// source: lingering in squeue (MinJobAge), journal-only before the first squeue
+// result, or relabeled UNKNOWN history.
 func mergedStatusRank(j MergedJob) int {
-	if !j.Active || slurm.IsTerminalState(j.State) {
-		return 3
-	}
 	s := strings.ToUpper(strings.TrimSpace(j.State))
 	if i := strings.IndexByte(s, ' '); i >= 0 {
 		s = s[:i]
 	}
-	switch s {
-	case "PENDING", "PD":
+	switch {
+	case s == "PENDING" || s == "PD":
 		return 0
-	case "RUNNING", "R":
+	case s == "RUNNING" || s == "R":
 		return 1
+	case slurm.IsTerminalState(s) || s == endedHistoryState || !j.Active:
+		return 3
 	default:
 		return 2
 	}

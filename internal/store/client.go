@@ -23,8 +23,6 @@ type SlurmClient interface {
 	RunningJobs(ctx context.Context) ([]slurm.RunningJob, error)
 	// AllUsersJobs returns every RUNNING and PENDING job across all users.
 	AllUsersJobs(ctx context.Context) ([]slurm.AllUsersJob, error)
-	// UserJobs returns the RUNNING and PENDING jobs for a single user.
-	UserJobs(ctx context.Context, username string) ([]slurm.UserJob, error)
 	// JobHistory returns the current user's job history for the last days days
 	// plus aggregate requeue statistics.
 	JobHistory(ctx context.Context, days int) ([]slurm.HistoryJob, slurm.HistoryStats, error)

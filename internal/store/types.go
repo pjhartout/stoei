@@ -12,9 +12,7 @@ type (
 	RunningJob = slurm.RunningJob
 	// AllUsersJob is one running/pending job across all users.
 	AllUsersJob = slurm.AllUsersJob
-	// UserJob is one running/pending job for a single user.
-	UserJob = slurm.UserJob
-	// HistoryJob is one job from the sacct history query.
+	// HistoryJob is one job from the journal-backed history.
 	HistoryJob = slurm.HistoryJob
 	// HistoryStats are the aggregate requeue counters from a history query.
 	HistoryStats = slurm.HistoryStats

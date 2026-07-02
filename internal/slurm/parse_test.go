@@ -205,19 +205,6 @@ func TestParseAllUsersJobsEdgeCases(t *testing.T) {
 	}
 }
 
-func TestParseUserJobs(t *testing.T) {
-	jobs := ParseUserJobs(readFixture(t, "squeue_user.txt"))
-	if len(jobs) != 4 {
-		t.Fatalf("got %d jobs, want 4", len(jobs))
-	}
-	if jobs[0].ID != "12345" || jobs[0].Partition != "gpu" || jobs[0].State != "RUNNING" {
-		t.Errorf("job[0] = %+v", jobs[0])
-	}
-	if jobs[2].State != "PENDING" || jobs[2].NodeList != "(Priority)" {
-		t.Errorf("job[2] = %+v", jobs[2])
-	}
-}
-
 func TestParseFairShare(t *testing.T) {
 	entries := ParseFairShare(readFixture(t, "sshare.txt"))
 	if len(entries) != 13 {

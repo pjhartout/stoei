@@ -55,8 +55,8 @@ func (l *Logs) Update(msg tea.Msg) (*Logs, tea.Cmd) {
 	return l, cmd
 }
 
-// Refresh rebuilds the viewport content from the ring's most-recent lines and
-// pins the view to the bottom so the latest line stays visible.
+// Refresh rebuilds the viewport content from the ring's most-recent lines,
+// following the tail only when already at the bottom so scrollback survives.
 func (l *Logs) Refresh() {
 	entries := l.ring.Last(components.DefaultMaxLogLines)
 	if len(entries) == 0 {
@@ -69,8 +69,11 @@ func (l *Logs) Refresh() {
 		level := l.levelStyle(e.Level).Render(padLevel(e.Level))
 		lines[i] = ts + " " + level + " " + e.Message
 	}
+	atBottom := l.vp.AtBottom()
 	l.vp.SetContent(strings.Join(lines, "\n"))
-	l.vp.GotoBottom()
+	if atBottom {
+		l.vp.GotoBottom()
+	}
 }
 
 // levelStyle returns the style for a log level: INFO/SUCCESS green, WARNING

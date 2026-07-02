@@ -101,6 +101,9 @@ type App struct {
 	// spinnerActive is true while the loading-spinner animation tick is in flight,
 	// so it is started at most once and stopped when nothing is loading.
 	spinnerActive bool
+	// slowTicks counts slow-tier ticks so heavier sections can run at a longer
+	// cadence (nodes every 2nd tick, fair-share/priority every 3rd).
+	slowTicks uint64
 
 	// unavailable holds the Slurm-availability error; non-nil renders the
 	// full-screen unavailable screen.
@@ -396,7 +399,7 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case runningJobsMsg:
 		a.runningInFlight = false
 		vanished := a.store.SetRunningJobs(msg.jobs, msg.gen, msg.err)
-		a.observe(store.SectionRunningJobs, msg.err)
+		a.observeGen(store.SectionRunningJobs, msg.gen, msg.err)
 		a.jobs.Refresh()
 		a.detailCache.SyncStates(a.store.MergedJobs()) // evict cached details on state change
 		a.frame.dirty = true
@@ -404,7 +407,7 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 	case historyMsg:
 		a.store.SetHistory(msg.jobs, msg.stats, msg.gen, msg.err)
-		a.observe(store.SectionHistory, msg.err)
+		a.observeGen(store.SectionHistory, msg.gen, msg.err)
 		a.jobs.Refresh() // Completed/failed history jobs merge into the Jobs table.
 		a.detailCache.SyncStates(a.store.MergedJobs())
 		a.frame.dirty = true
@@ -421,7 +424,7 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 	case nodesMsg:
 		a.store.SetNodes(msg.nodes, msg.gen, msg.err)
-		a.observe(store.SectionNodes, msg.err)
+		a.observeGen(store.SectionNodes, msg.gen, msg.err)
 		a.nodes.Refresh()
 		a.refreshSidebar() // ClusterStats derives from nodes.
 		a.frame.dirty = true
@@ -429,7 +432,7 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 	case allUsersJobsMsg:
 		a.store.SetAllUsersJobs(msg.jobs, msg.gen, msg.err)
-		a.observe(store.SectionAllUsersJobs, msg.err)
+		a.observeGen(store.SectionAllUsersJobs, msg.gen, msg.err)
 		a.jobs.Refresh()   // My-Usage banner derives from all-users jobs.
 		a.users.Refresh()  // Running/Pending panes derive from all-users jobs.
 		a.refreshSidebar() // Pending resources derive from all-users jobs.
@@ -438,14 +441,14 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 	case fairShareMsg:
 		a.store.SetFairShare(msg.entries, msg.gen, msg.err)
-		a.observe(store.SectionFairShare, msg.err)
+		a.observeGen(store.SectionFairShare, msg.gen, msg.err)
 		a.priority.Refresh()
 		a.frame.dirty = true
 		return a, nil, true
 
 	case pendingPrioMsg:
 		a.store.SetPendingPrio(msg.entries, msg.gen, msg.err)
-		a.observe(store.SectionPendingPrio, msg.err)
+		a.observeGen(store.SectionPendingPrio, msg.gen, msg.err)
 		a.priority.Refresh()
 		a.frame.dirty = true
 		return a, nil, true
@@ -717,13 +720,30 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
+// Slow-tier cadence multipliers: with the default 40s slow interval, nodes
+// refresh every 80s and fair-share/priority every 120s, trimming controller load.
+const (
+	nodesTickFactor = 2
+	prioTickFactor  = 3
+)
+
 // handleSlowTick dispatches the visible heavy fetches and always re-arms exactly
-// the slow tier (I2). Each fetch self-skips while its section is already loading,
-// so a tick never stacks a duplicate. Controller load is bounded by tab visibility
-// (dispatchHeavyVisible) — what is actually on screen — not by terminal focus.
+// the slow tier (I2). Each fetch self-skips while its section is already loading.
+// Controller load is bounded by tab visibility and per-section cadence factors —
+// never by terminal focus. Manual refresh and tab entry still fetch immediately.
 func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
-	cmds := []tea.Cmd{slowTick(a.intervals.Slow)}
-	cmds = append(cmds, a.dispatchHeavyVisible(), a.ensureSpinner())
+	a.slowTicks++
+	cmds := []tea.Cmd{slowTick(a.intervals.Slow), a.dispatchSection(store.SectionAllUsersJobs)}
+	if a.slowTicks%nodesTickFactor == 0 {
+		cmds = append(cmds, a.dispatchSection(store.SectionNodes))
+	}
+	if a.active == tabJobs {
+		cmds = append(cmds, a.dispatchHistoryIfIdle())
+	}
+	if a.tabNeedsPriorityData(a.active) && a.slowTicks%prioTickFactor == 0 {
+		cmds = append(cmds, a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio))
+	}
+	cmds = append(cmds, a.ensureSpinner())
 	return a, tea.Batch(cmds...)
 }
 
@@ -844,6 +864,15 @@ func (a *App) observe(section store.Section, err error) {
 		level = toastErrorLevel
 	}
 	a.pushToastLevel(t.Message, level)
+}
+
+// observeGen is observe for generation-tagged results: a superseded result is
+// dropped so out-of-order arrivals cannot flap the failed/recovered edge.
+func (a *App) observeGen(section store.Section, gen uint64, err error) {
+	if gen < a.store.Gen(section) {
+		return
+	}
+	a.observe(section, err)
 }
 
 // pushToast appends a neutral (info) toast, keeping at most maxToasts most-recent

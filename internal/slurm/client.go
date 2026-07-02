@@ -11,10 +11,10 @@ import (
 	"time"
 )
 
-// journalFetchThrottle bounds how often the per-user journal query is run. Job
-// history derives from the journal; within this window the existing journal is
-// reused so the controller is queried at most once per refresh wave.
-const journalFetchThrottle = 3 * time.Second
+// journalFetchThrottle bounds how often the per-user journal query is run;
+// within this window the existing journal is reused, so refresh waves and rapid
+// tab switching cost the controller at most one query.
+const journalFetchThrottle = 20 * time.Second
 
 // safeUsername and safeJobID validate CLI inputs before they reach a command, so
 // only an alphanumeric-plus-separators username and a numeric job ID (with an
@@ -25,9 +25,9 @@ var (
 )
 
 // Client builds Slurm commands and parses their output. It wraps a Runner (the
-// only seam to the OS). Job history comes from the controller ("scontrol show
-// jobs") accumulated into a persistent journal, never from slurmdbd/sacct. A
-// zero Client is not usable; construct one with NewClient.
+// only seam to the OS). Job history comes from per-user controller snapshots
+// accumulated into a persistent journal, never from slurmdbd/sacct. A zero
+// Client is not usable; construct one with NewClient.
 type Client struct {
 	runner Runner
 	// username is the resolved current user, used by the per-user getters.
@@ -187,27 +187,6 @@ func (c *Client) AllUsersJobs(ctx context.Context) ([]AllUsersJob, error) {
 		return nil, err
 	}
 	return ParseAllUsersJobs(string(out)), nil
-}
-
-// UserJobs returns the RUNNING and PENDING jobs for username via the fixed-width
-// "squeue -O" command without the UserName column, using the format
-// "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,
-// NodeList:80,tres:80".
-func (c *Client) UserJobs(ctx context.Context, username string) ([]UserJob, error) {
-	username = strings.TrimSpace(username)
-	if err := validateUsername(username); err != nil {
-		return nil, err
-	}
-	out, err := c.runner.Run(ctx, "squeue",
-		"-u", username,
-		"-O", "JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,tres:80",
-		"-t", "RUNNING,PENDING",
-		"--noheader",
-	)
-	if err != nil {
-		return nil, err
-	}
-	return ParseUserJobs(string(out)), nil
 }
 
 // JobHistory returns the current user's job history and requeue statistics from
@@ -372,9 +351,10 @@ func (c *Client) NodeDetail(ctx context.Context, nodeName string) (JobDetail, er
 	return JobDetail{Fields: fields, Source: "scontrol"}, nil
 }
 
-// CancelJob cancels a job via "scancel". The job ID is validated first. A nil
-// error means scancel reported success.
+// CancelJob cancels a job via "scancel". A pending array leader ("123_[0-99]")
+// is normalized to its base id, which cancels the whole array.
 func (c *Client) CancelJob(ctx context.Context, jobID string) error {
+	jobID = NormalizeArrayJobID(jobID)
 	if err := validateJobID(jobID); err != nil {
 		return err
 	}

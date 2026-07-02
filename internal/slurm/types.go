@@ -26,20 +26,6 @@ type AllUsersJob struct {
 	TRES      string
 }
 
-// UserJob is one RUNNING or PENDING job for a single user, as returned by the
-// fixed-width "squeue -O" command without the UserName column and parsed by
-// ParseUserJobs.
-type UserJob struct {
-	ID        string
-	Name      string
-	Partition string
-	State     string
-	Time      string
-	NumNodes  string
-	NodeList  string
-	TRES      string
-}
-
 // RunningJob is one row of the pipe-delimited "squeue -o" output used for the
 // current user's running/pending jobs. Fields follow the format string
 // "%i|%j|%T|%M|%D|%R|%V|%S" (id, name, state, time, nodes, nodelist, submit,

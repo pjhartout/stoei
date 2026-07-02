@@ -182,11 +182,6 @@ func ParseRunningJobs(raw string) []RunningJob {
 // TimeUsed:12,NumNodes:6,NodeList:80) with TRES taking the remainder.
 var allUsersColEnds = []int{30, 80, 95, 110, 120, 132, 138, 218}
 
-// userColEnds are the cumulative column end offsets for the single-user
-// "squeue -O" layout (JobID:30,Name:50,Partition:15,StateCompact:10,TimeUsed:12,
-// NumNodes:6,NodeList:80) with TRES taking the remainder.
-var userColEnds = []int{30, 80, 95, 105, 117, 123, 203}
-
 // sliceFixedWidth cuts a line into the fields delimited by ends (cumulative end
 // offsets), trimming each, and returns the trailing remainder after the last
 // offset as the final field. A field whose start lies beyond the line length is
@@ -232,30 +227,6 @@ func ParseAllUsersJobs(raw string) []AllUsersJob {
 		jobs = append(jobs, AllUsersJob{
 			ID: f[0], Name: f[1], User: f[2], Partition: f[3],
 			State: f[4], Time: f[5], NumNodes: f[6], NodeList: f[7], TRES: f[8],
-		})
-	}
-	return jobs
-}
-
-// ParseUserJobs parses fixed-width single-user "squeue -O" output into UserJob
-// records, applying the same blank/short/empty-JobID filtering as
-// ParseAllUsersJobs.
-func ParseUserJobs(raw string) []UserJob {
-	var jobs []UserJob
-	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
-		if strings.TrimSpace(line) == "" {
-			continue
-		}
-		if len(line) < userColEnds[0] {
-			continue
-		}
-		f := sliceFixedWidth(line, userColEnds)
-		if f[0] == "" {
-			continue
-		}
-		jobs = append(jobs, UserJob{
-			ID: f[0], Name: f[1], Partition: f[2], State: f[3],
-			Time: f[4], NumNodes: f[5], NodeList: f[6], TRES: f[7],
 		})
 	}
 	return jobs

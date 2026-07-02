@@ -136,6 +136,46 @@ func TestMergedJobsTerminalSqueueRowsSortAsFinished(t *testing.T) {
 	}
 }
 
+// TestMergedJobsRanksByStateBeforeSqueueLoads: with no squeue snapshot yet,
+// journal-only pending rows must still sort above failed ones.
+func TestMergedJobsRanksByStateBeforeSqueueLoads(t *testing.T) {
+	s := New()
+	s.HistoryJobs = []slurm.HistoryJob{
+		// The failed job started after the pending one was submitted, so a pure
+		// newest-first order would wrongly put it on top.
+		{ID: "2", State: "FAILED", Start: "2026-06-30T09:00:00"},
+		{ID: "3", State: "PENDING", Submit: "2026-06-30T08:00:00"},
+		{ID: "1", State: "RUNNING", Start: "2026-06-30T07:00:00"},
+	}
+
+	var ids []string
+	for _, j := range s.MergedJobs() {
+		ids = append(ids, j.ID)
+	}
+	want := []string{"3", "1", "2"}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ids = %v, want %v", ids, want)
+		}
+	}
+}
+
+// TestMergedJobsDedupsPendingArrayLeader: squeue keys a pending array leader as
+// "123_[0-99]" while the journal keys it "123"; the pair must merge to one row.
+func TestMergedJobsDedupsPendingArrayLeader(t *testing.T) {
+	s := New()
+	g := s.NextGen(SectionRunningJobs)
+	s.SetRunningJobs([]slurm.RunningJob{
+		{ID: "123_[0-99]", State: "PENDING", SubmitTime: "2026-06-30T08:00:00"},
+	}, g, nil)
+	s.HistoryJobs = []slurm.HistoryJob{{ID: "123", State: "PENDING"}}
+
+	got := s.MergedJobs()
+	if len(got) != 1 || got[0].ID != "123_[0-99]" || !got[0].Active {
+		t.Fatalf("merged = %+v, want single live pending array row", got)
+	}
+}
+
 // TestMergedJobsEmpty covers the degenerate inputs so a callsite can rely on a
 // non-nil empty slice.
 func TestMergedJobsEmpty(t *testing.T) {
