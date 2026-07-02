@@ -42,9 +42,9 @@ type UserJob struct {
 
 // RunningJob is one row of the pipe-delimited "squeue -o" output used for the
 // current user's running/pending jobs. Fields follow the format string
-// "%.30i|%.50j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S" (id, name, state, time, nodes,
-// nodelist, submit, start). Raw holds every pipe-separated field so consumers
-// can read columns the struct does not name explicitly.
+// "%i|%j|%T|%M|%D|%R|%V|%S" (id, name, state, time, nodes, nodelist, submit,
+// start). Raw holds every pipe-separated field so consumers can read columns
+// the struct does not name explicitly.
 type RunningJob struct {
 	ID         string
 	Name       string

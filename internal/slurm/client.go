@@ -148,14 +148,17 @@ func (c *Client) journalJobs(ctx context.Context) ([]ControllerJob, error) {
 
 // RunningJobs returns the current user's running and pending jobs via the
 // pipe-delimited "squeue -o" command with the format string
-// "%.30i|%.50j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S".
+// "%i|%j|%T|%M|%D|%R|%V|%S". The fields are deliberately unpadded: squeue
+// truncates a field to its width (a %.8T state renders "COMPLETED" as
+// "COMPLETE"), which broke terminal-state detection for jobs lingering in the
+// queue after finishing; pipe-delimited parsing needs no widths at all.
 func (c *Client) RunningJobs(ctx context.Context) ([]RunningJob, error) {
 	if err := validateUsername(c.username); err != nil {
 		return nil, err
 	}
 	out, err := c.runner.Run(ctx, "squeue",
 		"-u", c.username,
-		"-o", "%.30i|%.50j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S",
+		"-o", "%i|%j|%T|%M|%D|%R|%V|%S",
 	)
 	if err != nil {
 		return nil, err

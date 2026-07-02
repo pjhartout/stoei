@@ -125,10 +125,12 @@ func (s *Store) MergedJobs() []MergedJob {
 
 // mergedStatusRank orders the merged list into status groups for the default
 // view: pending first, then running, then any other still-active state, then
-// finished/history rows. Active jobs are classified by their squeue state; history
-// rows (Active == false) always sort last.
+// finished rows. A job in a terminal state ranks as finished even when it is
+// still in squeue's output (a finished job lingers there for MinJobAge), so a
+// freshly failed job drops below pending and running instead of floating above
+// the history block. History rows (Active == false) always sort last.
 func mergedStatusRank(j MergedJob) int {
-	if !j.Active {
+	if !j.Active || slurm.IsTerminalState(j.State) {
 		return 3
 	}
 	s := strings.ToUpper(strings.TrimSpace(j.State))

@@ -59,11 +59,12 @@ func TestClientRunningJobsCommand(t *testing.T) {
 		t.Errorf("got %d jobs, want 3", len(jobs))
 	}
 	call := lastCall(r)
-	// Exact flags and format string must match get_running_jobs in commands.py.
 	if !argsContain(call, "-u") || !argsContain(call, "alice") {
 		t.Errorf("squeue args missing -u alice: %v", call.Args)
 	}
-	if !argsContain(call, "%.30i|%.50j|%.8T|%.10M|%.4D|%.12R|%.19V|%.19S") {
+	// Unpadded fields: squeue truncates a field to its width, so any width here
+	// would corrupt long states/names/nodelists.
+	if !argsContain(call, "%i|%j|%T|%M|%D|%R|%V|%S") {
 		t.Errorf("squeue format string mismatch: %v", call.Args)
 	}
 }

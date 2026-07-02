@@ -99,6 +99,45 @@ func TestMergedJobsDefaultOrder(t *testing.T) {
 	}
 }
 
+// TestMergedJobsTerminalSqueueRowsSortAsFinished covers finished jobs that still
+// linger in squeue's output (a terminal job stays visible for MinJobAge): they
+// must rank with the finished group, below every pending and running job, not
+// float above the history block as "other active" rows.
+func TestMergedJobsTerminalSqueueRowsSortAsFinished(t *testing.T) {
+	s := New()
+	g := s.NextGen(SectionRunningJobs)
+	s.SetRunningJobs([]slurm.RunningJob{
+		// Freshly failed/completed jobs, still reported by squeue, with starts newer
+		// than every live job.
+		{ID: "90", State: "FAILED", StartTime: "2026-06-30T12:00:00"},
+		{ID: "91", State: "COMPLETED", StartTime: "2026-06-30T12:30:00"},
+		{ID: "10", State: "RUNNING", StartTime: "2026-06-30T09:00:00"},
+		{ID: "12", State: "PENDING", StartTime: "N/A", SubmitTime: "2026-06-30T08:00:00"},
+		// COMPLETING is not terminal: it stays in the "other active" group.
+		{ID: "50", State: "COMPLETING", StartTime: "2026-06-30T07:00:00"},
+	}, g, nil)
+	s.HistoryJobs = []slurm.HistoryJob{
+		{ID: "1", State: "FAILED", Start: "2026-06-30T06:00:00"},
+	}
+
+	var ids []string
+	for _, j := range s.MergedJobs() {
+		ids = append(ids, j.ID)
+	}
+
+	// Pending, running, other-active (COMPLETING), then the finished group —
+	// squeue-lingering terminal rows and history together, newest start first.
+	want := []string{"12", "10", "50", "91", "90", "1"}
+	if len(ids) != len(want) {
+		t.Fatalf("ids = %v, want %v", ids, want)
+	}
+	for i := range want {
+		if ids[i] != want[i] {
+			t.Fatalf("ids = %v, want %v", ids, want)
+		}
+	}
+}
+
 // TestMergedJobsEmpty covers the degenerate inputs so a callsite can rely on a
 // non-nil empty slice.
 func TestMergedJobsEmpty(t *testing.T) {
