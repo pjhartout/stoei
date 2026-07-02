@@ -1,0 +1,32 @@
+#!/usr/bin/env bash
+# Cut a release: verify a clean, gated main, then tag and push so the Release
+# workflow (GoReleaser) builds and publishes the binaries.
+#
+#   scripts/release 0.7.11   # or v0.7.11
+set -euo pipefail
+
+VERSION="${1:?usage: scripts/release <version> (e.g. 0.7.11)}"
+VERSION="v${VERSION#v}"
+
+cd "$(git rev-parse --show-toplevel)"
+
+[[ -z "$(git status --porcelain)" ]] || { echo "error: working tree not clean" >&2; exit 1; }
+branch="$(git rev-parse --abbrev-ref HEAD)"
+[[ "$branch" == "main" ]] || { echo "error: on '$branch'; release from main" >&2; exit 1; }
+git fetch origin main
+[[ "$(git rev-parse HEAD)" == "$(git rev-parse origin/main)" ]] ||
+	{ echo "error: HEAD is not in sync with origin/main" >&2; exit 1; }
+if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
+	echo "error: tag $VERSION already exists" >&2
+	exit 1
+fi
+
+command -v golangci-lint >/dev/null || PATH="$(go env GOPATH)/bin:$PATH"
+[[ -z "$(gofmt -l .)" ]] || { echo "error: gofmt needed on:" && gofmt -l .; exit 1; } >&2
+go vet ./...
+golangci-lint run
+go test ./... -race
+
+git tag -a "$VERSION" -m "$VERSION"
+git push origin "$VERSION"
+echo "Pushed $VERSION — the Release workflow is publishing it (gh run watch to follow)."

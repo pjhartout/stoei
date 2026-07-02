@@ -81,4 +81,5 @@ go test ./... -race
 
 ## Releases
 
-Push a `v*` tag; GoReleaser builds and publishes the binaries.
+Run `scripts/release <version>` — it verifies a clean, gated `main`, then tags
+and pushes so GoReleaser builds and publishes the binaries.
