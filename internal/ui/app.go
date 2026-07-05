@@ -225,6 +225,7 @@ func (a App) Init() tea.Cmd {
 		heavy,
 		fastTick(a.intervals.Fast),
 		slowTick(a.intervals.Slow),
+		toastTick(toastTickInterval),
 		spinnerTick(spinnerTickInterval),
 	)
 }
@@ -376,6 +377,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case slowTickMsg:
 		return a.handleSlowTick()
+
+	case toastTickMsg:
+		return a.handleToastTick()
 
 	case spinnerTickMsg:
 		return a.handleSpinnerTick()
@@ -710,8 +714,6 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	if !a.runningInFlight {
 		cmds = append(cmds, a.dispatchRunning())
 	}
-	// Auto-expire transient toasts each cycle so they don't linger indefinitely.
-	a.expireToasts()
 	// The log ring is appended to outside the Update loop (a logging sink), so the
 	// Logs tab is re-rendered on the fast tick to surface new lines.
 	a.logsTab.Refresh()
@@ -720,8 +722,8 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
-// Slow-tier cadence multipliers: with the default 40s slow interval, nodes
-// refresh every 80s and fair-share/priority every 120s, trimming controller load.
+// Slow-tier cadence multipliers: with the default 4min slow interval, nodes
+// refresh every 8min and fair-share/priority every 12min, trimming controller load.
 const (
 	nodesTickFactor = 2
 	prioTickFactor  = 3
@@ -745,6 +747,15 @@ func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
 	}
 	cmds = append(cmds, a.ensureSpinner())
 	return a, tea.Batch(cmds...)
+}
+
+// handleToastTick ages the visible toasts and always re-arms exactly its own
+// tier (I2), re-rendering only when a toast actually expired.
+func (a App) handleToastTick() (tea.Model, tea.Cmd) {
+	if a.expireToasts() {
+		a.frame.dirty = true
+	}
+	return a, toastTick(toastTickInterval)
 }
 
 // ensureSpinner starts the loading-spinner animation tick if it is not already
@@ -892,7 +903,7 @@ func (a *App) pushToastLevel(msg string, level toastLevel) {
 }
 
 // expireToasts decrements each toast's remaining ticks and drops expired ones. It
-// runs on every fast tick so toasts auto-dismiss after toastTTL cycles. It
+// runs on every toast tick so toasts auto-dismiss after toastTTL cycles. It
 // returns whether anything was dropped so the caller can mark the frame dirty.
 func (a *App) expireToasts() bool {
 	if len(a.toasts) == 0 {

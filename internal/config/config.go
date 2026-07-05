@@ -18,8 +18,8 @@ const (
 	MaxRefreshInterval = 300.0
 	// DefaultRefreshInterval is the default fast-tier refresh in seconds. It is
 	// deliberately conservative to keep load off the Slurm controller; the slow
-	// tier follows at 4x (40s).
-	DefaultRefreshInterval = 10.0
+	// tier follows at 4x (4min).
+	DefaultRefreshInterval = 60.0
 
 	// MinJobHistoryDays and MaxJobHistoryDays bound the history window in days.
 	MinJobHistoryDays = 1

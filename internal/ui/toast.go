@@ -22,9 +22,9 @@ const (
 	toastSuccess
 )
 
-// toastTTL is how many fast ticks a toast remains visible before it auto-expires.
-// At the default 10s fast interval this keeps a transient notice on screen ~20s —
-// long enough to read, short enough not to linger after the action it reported.
+// toastTTL is how many toast ticks a toast remains visible before it auto-expires.
+// At the 10s toast cadence this keeps a transient notice on screen ~20s — long
+// enough to read, short enough not to linger after the action it reported.
 const toastTTL = 2
 
 // toastItem is one transient on-screen toast: its text, severity level, and the

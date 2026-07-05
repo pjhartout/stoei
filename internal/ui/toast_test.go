@@ -36,7 +36,7 @@ func TestRecoveredToastIsSuccessStyled(t *testing.T) {
 	}
 }
 
-// TestToastsExpire asserts toasts auto-dismiss after toastTTL fast ticks.
+// TestToastsExpire asserts toasts auto-dismiss after toastTTL toast ticks.
 func TestToastsExpire(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{UsernameStr: "alice"})
 	a.pushToast("hello")
