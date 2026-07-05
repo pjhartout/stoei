@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os/exec"
 	"testing"
+	"time"
 )
 
 func TestFakeRunnerReturnsCannedOutput(t *testing.T) {
@@ -82,6 +83,26 @@ func TestExecRunnerNonZeroExitWrapsExitError(t *testing.T) {
 	}
 	if ce.Stderr != "boom" {
 		t.Errorf("CommandError.Stderr = %q, want %q", ce.Stderr, "boom")
+	}
+}
+
+// TestExecRunnerReturnsAfterContextCancelDespiteHeldPipe is the wedged-refresh
+// case: the fetch timeout kills a hung scheduler command, but a process still
+// holding the stdout pipe (a descendant, or the command itself stuck in D-state)
+// would keep Run blocked past the cancel — the fetch message then never arrives
+// and the section's dispatch guard never releases, freezing every later refresh.
+// Run must return within the WaitDelay grace instead of blocking until the pipe
+// closes on its own (here, a backgrounded sleep holding it for 20s).
+func TestExecRunnerReturnsAfterContextCancelDespiteHeldPipe(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, err := ExecRunner{}.Run(ctx, "sh", "-c", `sleep 20 & exec sleep 20`)
+	if err == nil {
+		t.Fatal("expected an error from the cancelled command, got nil")
+	}
+	if elapsed := time.Since(start); elapsed > execWaitDelay+5*time.Second {
+		t.Fatalf("Run blocked %v past context cancel; want return within the WaitDelay grace", elapsed)
 	}
 }
 

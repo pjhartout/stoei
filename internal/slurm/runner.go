@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Runner abstracts the execution of an external command. It is the single seam
@@ -69,6 +70,14 @@ func hasHardFailureSignal(stderr string) bool {
 // orphaned squeue).
 type ExecRunner struct{}
 
+// execWaitDelay bounds how long Run may keep waiting after its context is
+// cancelled. Killing the process is not enough: Wait blocks until the stdout
+// pipe closes, which never happens when the command is stuck in uninterruptible
+// sleep (a GPFS/controller hang) or left a descendant holding the pipe. Without
+// this bound one hung squeue permanently wedges its section's dispatch guard,
+// freezing that section for the rest of the session.
+const execWaitDelay = 2 * time.Second
+
 // Run executes the command and returns its stdout. It captures stderr separately
 // and uses exec.CommandContext so the process is killed when ctx is cancelled.
 // It returns a *CommandError when the command exits non-zero, or when it exits 0
@@ -76,6 +85,7 @@ type ExecRunner struct{}
 // stderr — that case otherwise looks like an empty-but-successful result.
 func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.WaitDelay = execWaitDelay
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()
