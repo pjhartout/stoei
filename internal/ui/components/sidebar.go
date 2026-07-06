@@ -172,10 +172,11 @@ func (s *Sidebar) memorySection() []string {
 	}
 }
 
-// gpuSection renders the GPUs block: schedulable capacity broken down by GPU type
-// (or a single total when types are unknown), followed by any draining-node
-// capacity on its own lines. The generic "gpu" bucket is relabeled "generic" and
-// MIG profiles are shortened (see store.ShortGPULabel).
+// gpuSection renders the GPUs block: one "free/total free (pct)" line per GPU
+// type, matching the other sections. The denominator includes unavailable cards
+// (on draining or offline nodes), called out in a subtle "· N unavail" suffix so
+// drained hardware reads as load instead of a silently shrinking fleet. MIG
+// slice types are indented under their parent model with a "mig" label.
 func (s *Sidebar) gpuSection() []string {
 	st := s.stats
 	var rows []string
@@ -185,27 +186,25 @@ func (s *Sidebar) gpuSection() []string {
 		for t := range st.GPUsByType {
 			types = append(types, t)
 		}
+		// Sorting the raw type keys places MIG slice types (e.g.
+		// "H100_PCIE_1G.10GB") right after their parent model ("H100").
 		sort.Strings(types)
 		for _, t := range types {
 			ta := st.GPUsByType[t]
-			rows = append(rows, fmt.Sprintf("%s %d/%d (%s)",
-				s.gpuLabel(t), ta.Allocated, ta.Total, s.colorPct(st.GPUTypeFreePct(t))))
+			line := fmt.Sprintf("%s %d/%d free (%s)",
+				s.gpuLabel(t), ta.Total-ta.Allocated, ta.Total+ta.Unavail, s.colorPct(st.GPUTypeFreePct(t)))
+			if ta.Unavail > 0 {
+				line += s.styles.Subtle.Render(fmt.Sprintf(" · %d unavail", ta.Unavail))
+			}
+			rows = append(rows, line)
 		}
-	} else if st.TotalGPUs > 0 {
-		rows = append(rows, fmt.Sprintf("%d/%d free (%s)",
-			st.TotalGPUs-st.AllocatedGPUs, st.TotalGPUs, s.colorPct(st.FreeGPUsPct())))
-	}
-
-	if len(st.DrainingGPUsByType) > 0 {
-		types := make([]string, 0, len(st.DrainingGPUsByType))
-		for t := range st.DrainingGPUsByType {
-			types = append(types, t)
+	} else if st.TotalGPUs+st.UnavailGPUs > 0 {
+		line := fmt.Sprintf("%d/%d free (%s)",
+			st.TotalGPUs-st.AllocatedGPUs, st.TotalGPUs+st.UnavailGPUs, s.colorPct(st.FreeGPUsPct()))
+		if st.UnavailGPUs > 0 {
+			line += s.styles.Subtle.Render(fmt.Sprintf(" · %d unavail", st.UnavailGPUs))
 		}
-		sort.Strings(types)
-		for _, t := range types {
-			rows = append(rows, s.styles.Subtle.Render(
-				fmt.Sprintf("%s %d (drain)", s.gpuLabel(t), st.DrainingGPUsByType[t])))
-		}
+		rows = append(rows, line)
 	}
 
 	if len(rows) == 0 {
@@ -215,12 +214,19 @@ func (s *Sidebar) gpuSection() []string {
 }
 
 // gpuLabel renders a GPU type for the sidebar: the generic "gpu" bucket becomes
-// "generic" and MIG profiles are shortened (e.g. "1g.10gb").
+// "generic" and a MIG slice type becomes an indented "mig <profile>" line under
+// its parent model (e.g. " mig 1g.10gb").
+// ponytail: the parent model is dropped from the mig label; with MIG'd cards of
+// two different models the profiles would read alike — reinstate the model prefix
+// if that cluster shape ever appears.
 func (s *Sidebar) gpuLabel(typ string) string {
 	if strings.EqualFold(typ, "gpu") {
 		return "generic"
 	}
-	return store.ShortGPULabel(typ)
+	if store.IsMIGType(typ) {
+		return " mig " + store.ShortGPULabel(typ)
+	}
+	return typ
 }
 
 // pendingSection renders the pending-queue block as one compact line per

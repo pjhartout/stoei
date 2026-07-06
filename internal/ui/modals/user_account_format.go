@@ -37,7 +37,7 @@ func summaryLine(label, value string, styles theme.Styles) string {
 // from the all-users list filtered to this user.
 func formatUserInfo(username string, st *store.Store, styles theme.Styles) string {
 	jobs := userJobs(st, username)
-	userStats := findUserStats(store.AggregateUserStats(jobs), username)
+	userStats := findUserStats(store.AggregateUserStats(jobs, store.NodeGPUModels(st.Nodes)), username)
 	pending := findPendingStats(st.PendingUserStats(), username)
 	fair := findFairShare(st.FairShare, username)
 	prios := userPriorities(st.PendingPrio, username)

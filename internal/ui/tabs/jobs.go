@@ -5,7 +5,9 @@
 package tabs
 
 import (
+	"fmt"
 	"regexp"
+	"strconv"
 	"strings"
 
 	"charm.land/bubbles/v2/key"
@@ -27,6 +29,9 @@ type JobsKeyMap struct {
 	Sort key.Binding
 	// ClearFilter closes the filter input and clears the query.
 	ClearFilter key.Binding
+	// ScrollLeft/ScrollRight pan the table horizontally when it overflows the pane.
+	ScrollLeft  key.Binding
+	ScrollRight key.Binding
 }
 
 // EmacsMode is the emacs keybinding preset name, matching keys.Emacs. It is
@@ -49,12 +54,16 @@ func jobsKeysForMode(mode string) JobsKeyMap {
 			Filter:      key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("C-s", "filter")),
 			Sort:        key.NewBinding(key.WithKeys("ctrl+o"), key.WithHelp("C-o", "sort")),
 			ClearFilter: key.NewBinding(key.WithKeys("ctrl+g", "esc"), key.WithHelp("C-g", "clear filter")),
+			ScrollLeft:  key.NewBinding(key.WithKeys("left"), key.WithHelp("←", "scroll left")),
+			ScrollRight: key.NewBinding(key.WithKeys("right"), key.WithHelp("→", "scroll right")),
 		}
 	}
 	return JobsKeyMap{
 		Filter:      key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "filter")),
 		Sort:        key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "sort")),
 		ClearFilter: key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "clear filter")),
+		ScrollLeft:  key.NewBinding(key.WithKeys("left", "h"), key.WithHelp("←/h", "scroll left")),
+		ScrollRight: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "scroll right")),
 	}
 }
 
@@ -89,6 +98,10 @@ type Jobs struct {
 
 	width  int
 	height int
+
+	// xOffset is the horizontal scroll position, engaged only when the fitted
+	// columns overflow the pane.
+	xOffset int
 }
 
 // NewJobs returns a Jobs tab bound to s for the given username, styled with
@@ -145,33 +158,16 @@ func defaultColumnWidth(key string) int {
 	}
 }
 
-// fitColumns sizes each column to the longest of its title and its cell values —
-// a tight fit to the actual content, independent of the table/terminal width — so
-// long job IDs and names render in full instead of being truncated with "…". It
-// runs on every refresh but only re-applies the columns when a width actually
-// changes, so the table is redrawn exactly when the longest value in a column
-// grows or shrinks.
-func (j *Jobs) fitColumns(rows [][]string) {
-	cur := j.table.Columns()
-	cols := make([]table.Column, len(jobColumns))
-	changed := len(cur) != len(jobColumns)
-	for i, c := range jobColumns {
-		w := lipgloss.Width(c.title)
-		for _, row := range rows {
-			if i < len(row) {
-				if cw := lipgloss.Width(row[i]); cw > w {
-					w = cw
-				}
-			}
-		}
-		cols[i] = table.Column{Title: c.title, Width: w}
-		if !changed && cur[i].Width != w {
-			changed = true
-		}
-	}
-	if changed {
-		j.table.SetColumns(cols)
-	}
+// syncWidth sizes the inner table to the full fitted-content width so the
+// bubbles viewport never truncates rows itself; View windows the result back to
+// the pane. The horizontal offset is re-clamped so a shrink never leaves the
+// view scrolled past the content.
+func (j *Jobs) syncWidth() {
+	content := tableContentWidth(j.table.Columns())
+	w := max(j.width, content)
+	j.table.SetWidth(w)
+	j.table.SetStyles(tableStylesWidth(j.styles, w))
+	j.xOffset = clampHScroll(j.xOffset, content, j.width)
 }
 
 // tableStyles maps the app theme onto the bubbles table styles. Cells and the
@@ -205,7 +201,6 @@ func (j *Jobs) SetKeyMode(mode string) { j.keys = jobsKeysForMode(mode) }
 // SetStyles re-themes the tab after a background/theme change.
 func (j *Jobs) SetStyles(styles theme.Styles) {
 	j.styles = styles
-	j.table.SetStyles(tableStylesWidth(styles, j.width))
 	j.Refresh()
 }
 
@@ -223,9 +218,8 @@ func (j *Jobs) SetSize(width, height int) {
 	if tableHeight < 1 {
 		tableHeight = 1
 	}
-	j.table.SetWidth(width)
 	j.table.SetHeight(tableHeight)
-	j.table.SetStyles(tableStylesWidth(j.styles, width))
+	j.syncWidth()
 }
 
 const (
@@ -254,6 +248,12 @@ func (j *Jobs) Update(msg tea.Msg) (*Jobs, tea.Cmd) {
 		case key.Matches(msg, j.keys.Sort):
 			j.sortState = j.sortState.cycle(jobColumns)
 			j.Refresh()
+			return j, nil
+		case key.Matches(msg, j.keys.ScrollLeft):
+			j.xOffset = clampHScroll(j.xOffset-hscrollStep, tableContentWidth(j.table.Columns()), j.width)
+			return j, nil
+		case key.Matches(msg, j.keys.ScrollRight):
+			j.xOffset = clampHScroll(j.xOffset+hscrollStep, tableContentWidth(j.table.Columns()), j.width)
 			return j, nil
 		}
 	}
@@ -306,7 +306,8 @@ func (j *Jobs) Refresh() {
 	}
 	sorted := j.sortState.sortRows(filtered)
 
-	j.fitColumns(sorted)
+	fitTableColumns(&j.table, jobColumns, sorted, nil)
+	j.syncWidth()
 
 	rows := make([]table.Row, len(sorted))
 	for i, row := range sorted {
@@ -450,15 +451,71 @@ func (j *Jobs) View() string {
 	); ok {
 		parts = append(parts, line)
 	}
-	parts = append(parts, j.table.View())
+	parts = append(parts, hscrollWindow(j.table.View(), j.xOffset, tableContentWidth(j.table.Columns()), j.width))
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
 
-// banner renders the "My Usage" summary line for the current user from the
-// store's running-user statistics.
+// banner renders the compact usage strip for the current user: a username chip
+// followed by labeled CPU / memory / GPU / node / task segments, with the GPU
+// segment breaking usage down by hardware model and noting how many job rows
+// requested generic (typeless) GPUs.
 func (j *Jobs) banner() string {
-	return store.MyUsageSummary(j.store.RunningUserStats(), j.username)
+	chip := j.styles.Chip.Render(j.username)
+	mine, ok := store.FindUserStats(j.store.RunningUserStats(), j.username)
+	if !ok {
+		return chip + " " + j.styles.Subtle.Render("no running jobs")
+	}
+
+	// Labels are plain text rather than pictographs: they render in every
+	// terminal font.
+	seg := func(label, val string) string {
+		return j.styles.Subtle.Render(label+" ") + j.styles.Text.Render(val)
+	}
+	parts := []string{
+		chip,
+		seg("cpu", strconv.Itoa(mine.TotalCPUs)),
+		seg("mem", compactGB(mine.TotalMemoryGB)),
+	}
+	if mine.TotalGPUs > 0 {
+		// The breakdown lists hardware models only; unresolved generic requests
+		// are conveyed by the "Nj generic gpu" note, not a pseudo-type.
+		hw := compactGPUTypes(mine.GPUTypes)
+		if hw == "" {
+			hw = strconv.Itoa(mine.TotalGPUs)
+		}
+		parts = append(parts, seg("gpu", hw))
+	}
+	parts = append(parts,
+		seg("node", strconv.Itoa(mine.TotalNodes)),
+		seg("task", fmt.Sprintf("%d (%dA·%dJ)", mine.JobCount, mine.ArrayCount, mine.PlainJobCount)),
+	)
+	if mine.GenericGPUJobs > 0 {
+		parts = append(parts, j.styles.Subtle.Render(
+			fmt.Sprintf("%dj generic gpu", mine.GenericGPUJobs)))
+	}
+	return strings.Join(parts, "  ")
+}
+
+// compactGB renders a GB amount tersely: "90G", "1.5T".
+func compactGB(gb float64) string {
+	if gb >= 1024 {
+		return fmt.Sprintf("%.1fT", gb/1024)
+	}
+	return fmt.Sprintf("%.0fG", gb)
+}
+
+// compactGPUTypes tightens a FormatGPUTypes string ("2x H100, 1x GPU") into the
+// banner's per-model breakdown ("2×H100"), dropping the generic pseudo-type.
+func compactGPUTypes(types string) string {
+	var parts []string
+	for _, p := range strings.Split(types, ", ") {
+		if p == "" || strings.EqualFold(strings.TrimLeft(p, "0123456789x "), "gpu") {
+			continue
+		}
+		parts = append(parts, strings.Replace(p, "x ", "×", 1))
+	}
+	return strings.Join(parts, " ")
 }
 
 // CapturesInput reports whether the tab is currently capturing raw text input
@@ -475,7 +532,7 @@ func (j *Jobs) ShortHelp() []key.Binding {
 // FullHelp returns the expanded help bindings.
 func (j *Jobs) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{j.table.KeyMap.LineUp, j.table.KeyMap.LineDown},
+		{j.table.KeyMap.LineUp, j.table.KeyMap.LineDown, j.keys.ScrollLeft, j.keys.ScrollRight},
 		{j.keys.Filter, j.keys.Sort, j.keys.ClearFilter},
 	}
 }

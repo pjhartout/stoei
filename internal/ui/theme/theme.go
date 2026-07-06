@@ -78,24 +78,59 @@ type Styles struct {
 	Warning lipgloss.Style
 	// Muted styles cancelled/inactive text.
 	Muted lipgloss.Style
-	// Selection highlights the focused table row as a filled bar: the theme's
-	// border tone as background with bright text, so the cursor is clearly
-	// visible on every palette (a foreground-only tint is nearly invisible on
-	// low-contrast themes like nord).
+	// Selection highlights the focused table row as a filled bar: the accent
+	// blended toward the border tone as background with bright bold text, so the
+	// cursor reads as an accent-tinted bar on every palette without drowning the
+	// state-colored cells it may contain.
 	Selection lipgloss.Style
+	// Chip is a small accent-filled badge with auto-contrast text (usernames,
+	// the status-bar brand).
+	Chip lipgloss.Style
+	// ChipAlt is Chip in the secondary accent, used for the refresh-age badge.
+	ChipAlt lipgloss.Style
+	// ChipErr is Chip in the error color, used when a refresh is failing.
+	ChipErr lipgloss.Style
+	// Bar paints the full-width status bar background.
+	Bar lipgloss.Style
+	// BarKey styles key hints on the status bar.
+	BarKey lipgloss.Style
+	// BarDesc styles key-hint descriptions on the status bar.
+	BarDesc lipgloss.Style
 
 	// Accent and AccentAlt are the resolved gradient stop colors for the current
-	// background, kept so the UI can render an accent gradient (GradientText)
+	// background, kept so the UI can render an accent gradient (BrandChip)
 	// without re-resolving the palette per frame.
 	Accent    color.Color
 	AccentAlt color.Color
 }
 
-// TitleGradient renders s with the resolved accent→accentAlt per-rune gradient,
-// bold, matching the Title style's weight. It is the convenience entry point the
-// chrome uses for the "stoei" title.
-func (s Styles) TitleGradient(text string) string {
-	return GradientText(text, s.Accent, s.AccentAlt, true)
+// BrandChip renders text as a filled chip with a per-rune accent→accentAlt
+// background gradient and auto-contrast foreground — the Crush logo treatment.
+// A single space of padding is folded into the gradient on each side.
+func (s Styles) BrandChip(text string) string {
+	runes := []rune(" " + text + " ")
+	colors := lipgloss.Blend1D(len(runes), s.Accent, s.AccentAlt)
+	var b strings.Builder
+	for i, r := range runes {
+		b.WriteString(lipgloss.NewStyle().
+			Background(colors[i]).
+			Foreground(ContrastFg(colors[i])).
+			Bold(true).
+			Render(string(r)))
+	}
+	return b.String()
+}
+
+// ContrastFg returns near-black or near-white, whichever reads better on bg,
+// for text sitting on accent-filled chips and pills.
+func ContrastFg(bg color.Color) color.Color {
+	r, g, b, _ := bg.RGBA()
+	// Rec. 601 luma over 16-bit channels.
+	luma := (299*float64(r) + 587*float64(g) + 114*float64(b)) / 1000 / 65535
+	if luma > 0.55 {
+		return lipgloss.Color("#1A1A1A")
+	}
+	return lipgloss.Color("#F5F5F5")
 }
 
 // DefaultThemeName is the palette used when no theme is configured or a
@@ -224,6 +259,10 @@ func BuildStyles(t Theme, dark bool) Styles {
 	// halfway toward Text so it is a readable dim tone on every theme.
 	mutedFg := lipgloss.Blend1D(3, text, muted)[1]
 
+	// selectionBg is the accent pulled toward the border tone: a filled bar that
+	// reads as accent without overpowering state-colored cell text on top of it.
+	selectionBg := lipgloss.Blend1D(3, accent, border)[1]
+
 	return Styles{
 		Title: lipgloss.NewStyle().
 			Bold(true).
@@ -231,7 +270,8 @@ func BuildStyles(t Theme, dark bool) Styles {
 			Padding(0, 1),
 		TabActive: lipgloss.NewStyle().
 			Bold(true).
-			Foreground(accentAlt).
+			Background(accent).
+			Foreground(ContrastFg(accent)).
 			Padding(0, 1),
 		TabInactive: lipgloss.NewStyle().
 			Foreground(subtle).
@@ -256,8 +296,33 @@ func BuildStyles(t Theme, dark bool) Styles {
 			Foreground(mutedFg),
 		Selection: lipgloss.NewStyle().
 			Foreground(text).
-			Background(border).
+			Background(selectionBg).
 			Bold(true),
+		Chip: lipgloss.NewStyle().
+			Background(accent).
+			Foreground(ContrastFg(accent)).
+			Bold(true).
+			Padding(0, 1),
+		ChipAlt: lipgloss.NewStyle().
+			Background(accentAlt).
+			Foreground(ContrastFg(accentAlt)).
+			Bold(true).
+			Padding(0, 1),
+		ChipErr: lipgloss.NewStyle().
+			Background(errc).
+			Foreground(ContrastFg(errc)).
+			Bold(true).
+			Padding(0, 1),
+		Bar: lipgloss.NewStyle().
+			Background(border).
+			Foreground(subtle),
+		BarKey: lipgloss.NewStyle().
+			Background(border).
+			Foreground(accentAlt).
+			Bold(true),
+		BarDesc: lipgloss.NewStyle().
+			Background(border).
+			Foreground(subtle),
 		Accent:    accent,
 		AccentAlt: accentAlt,
 	}
@@ -316,38 +381,4 @@ func (s Styles) StateRoleStyle(role string) lipgloss.Style {
 	default:
 		return s.Text
 	}
-}
-
-// AccentGradient returns steps colors blended from Accent to AccentAlt for the
-// given mode, suitable for a per-rune gradient on the title or tab bar. It is a
-// thin wrapper over lipgloss.Blend1D, the v2 gradient primitive.
-func AccentGradient(t Theme, dark bool, steps int) []color.Color {
-	return lipgloss.Blend1D(steps, t.Accent.Resolve(dark), t.AccentAlt.Resolve(dark))
-}
-
-// GradientText renders s with a per-rune accent→accentAlt gradient (the
-// charm.land "rainbow title" look), preserving the runes verbatim. The gradient
-// is computed once over the rune count via lipgloss.Blend1D. When s has fewer
-// than two runes the accent color is applied flat. The text is bold to match the
-// Title style. Whitespace runes are emitted uncolored so spaces don't carry
-// stray styling.
-func GradientText(s string, accent, accentAlt color.Color, bold bool) string {
-	runes := []rune(s)
-	if len(runes) == 0 {
-		return ""
-	}
-	base := lipgloss.NewStyle().Bold(bold)
-	if len(runes) == 1 {
-		return base.Foreground(accent).Render(string(runes))
-	}
-	colors := lipgloss.Blend1D(len(runes), accent, accentAlt)
-	var b strings.Builder
-	for i, r := range runes {
-		if r == ' ' {
-			b.WriteRune(r)
-			continue
-		}
-		b.WriteString(base.Foreground(colors[i]).Render(string(r)))
-	}
-	return b.String()
 }

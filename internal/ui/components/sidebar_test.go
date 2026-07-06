@@ -32,7 +32,8 @@ func TestSidebarRendersFreeAndGPUByType(t *testing.T) {
 
 	// GPU type keys are upper-cased so the TRES and Gres-fallback paths share one
 	// bucket, so the sidebar shows "H200" regardless of the TRES string's case.
-	for _, want := range []string{"Cluster Load", "Nodes:", "CPUs:", "Memory:", "GPUs:", "H200", "2/8"} {
+	// GPU lines read free/total like every other section (6 of 8 H200 free).
+	for _, want := range []string{"Cluster Load", "Nodes:", "CPUs:", "Memory:", "GPUs:", "H200", "6/8 free"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("sidebar missing %q; view:\n%s", want, view)
 		}
@@ -62,8 +63,10 @@ func TestSidebarPendingQueueCompact(t *testing.T) {
 }
 
 func TestSidebarRendersDrainingMIG(t *testing.T) {
-	// A drained MIG node (like hpcl9101) shows its profiles on a separate draining
-	// line with shortened labels, kept out of the schedulable totals.
+	// A MIG node (like hpcl9101) renders its slice types as indented "mig" lines
+	// under the parent model; a full-H100 node provides the parent line. The
+	// drained node's cards land in the denominator with an "unavail" suffix
+	// instead of a separate drain line.
 	nodes := []store.Node{
 		{
 			Name:    "hpcl9101",
@@ -73,16 +76,32 @@ func TestSidebarRendersDrainingMIG(t *testing.T) {
 			Gres:    "gpu:h100_pcie_2g.20gb:6,gpu:h100_pcie_1g.10gb:16",
 			Fields:  map[string]string{"NodeName": "hpcl9101"},
 		},
+		{
+			Name:      "hpcl9102",
+			State:     "MIXED",
+			CPUTot:    "152",
+			CfgTRES:   "cpu=152,mem=1000000M,gres/gpu=4,gres/gpu:h100=4",
+			AllocTRES: "cpu=16,gres/gpu=3,gres/gpu:h100=3",
+			Gres:      "gpu:h100:4",
+			Fields:    map[string]string{"NodeName": "hpcl9102"},
+		},
 	}
 	stats := store.DeriveClusterStats(nodes, nil)
 	s := NewSidebar(styles())
 	s.SetStats(stats, true)
 	view := s.View()
 
-	for _, want := range []string{"GPUs:", "1g.10gb", "2g.20gb", "(drain)"} {
+	for _, want := range []string{
+		"GPUs:", "H100 1/4 free",
+		"mig 1g.10gb 0/16 free", "mig 2g.20gb 0/6 free",
+		"16 unavail", "6 unavail",
+	} {
 		if !strings.Contains(view, want) {
 			t.Errorf("sidebar missing %q; view:\n%s", want, view)
 		}
+	}
+	if strings.Contains(view, "(drain)") {
+		t.Errorf("separate drain line should be gone; view:\n%s", view)
 	}
 }
 

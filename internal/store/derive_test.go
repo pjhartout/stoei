@@ -127,24 +127,30 @@ func TestDeriveClusterStatsParsesAllocTRESEndToEnd(t *testing.T) {
 }
 
 func TestDeriveClusterStatsDrainingGPUs(t *testing.T) {
-	// A draining GPU node's capacity is reported separately (DrainingGPUsByType) and
-	// kept out of the schedulable totals; MIG profiles are bucketed by type. Mirrors
-	// the real IDLE+DRAIN MIG node hpcl9101.
+	// A draining GPU node's capacity is recorded as unavailable — kept out of the
+	// schedulable totals but part of the per-type denominators; MIG profiles are
+	// bucketed by type. Mirrors the real IDLE+DRAIN MIG node hpcl9101.
 	nodes := []slurm.Node{
 		{State: "IDLE+DRAIN", CPUTot: "152",
 			CfgTRES: "cpu=152,mem=1000000M,gres/gpu=22,gres/gpu:h100_pcie_1g.10gb=16,gres/gpu:h100_pcie_2g.20gb=6",
 			Gres:    "gpu:h100_pcie_2g.20gb:6,gpu:h100_pcie_1g.10gb:16"},
 	}
 	s := DeriveClusterStats(nodes, nil)
-	if s.TotalGPUs != 0 || s.AllocatedGPUs != 0 || len(s.GPUsByType) != 0 {
-		t.Errorf("draining node leaked into schedulable totals: total %d alloc %d byType %v",
-			s.TotalGPUs, s.AllocatedGPUs, s.GPUsByType)
+	if s.TotalGPUs != 0 || s.AllocatedGPUs != 0 {
+		t.Errorf("draining node leaked into schedulable totals: total %d alloc %d",
+			s.TotalGPUs, s.AllocatedGPUs)
 	}
 	if s.DrainingNodes != 1 {
 		t.Errorf("DrainingNodes = %d; want 1", s.DrainingNodes)
 	}
-	if s.DrainingGPUsByType["H100_PCIE_1G.10GB"] != 16 || s.DrainingGPUsByType["H100_PCIE_2G.20GB"] != 6 {
-		t.Errorf("DrainingGPUsByType = %v; want H100_PCIE_1G.10GB:16 H100_PCIE_2G.20GB:6", s.DrainingGPUsByType)
+	if got := s.GPUsByType["H100_PCIE_1G.10GB"]; got != (GPUTotalAlloc{Unavail: 16}) {
+		t.Errorf("1g.10gb = %+v; want {Unavail:16}", got)
+	}
+	if got := s.GPUsByType["H100_PCIE_2G.20GB"]; got != (GPUTotalAlloc{Unavail: 6}) {
+		t.Errorf("2g.20gb = %+v; want {Unavail:6}", got)
+	}
+	if s.UnavailGPUs != 22 {
+		t.Errorf("UnavailGPUs = %d; want 22", s.UnavailGPUs)
 	}
 }
 
@@ -173,8 +179,22 @@ func TestDeriveClusterStatsExcludesOfflineNodes(t *testing.T) {
 		t.Errorf("totals = cpu %d mem %v gpu %d; want 10 2.0 4 (online node only)",
 			s.TotalCPUs, s.TotalMemoryGB, s.TotalGPUs)
 	}
-	if len(s.DrainingGPUsByType) != 0 {
-		t.Errorf("offline-node GPUs leaked into DrainingGPUsByType: %v", s.DrainingGPUsByType)
+	// Offline-node GPUs stay out of the schedulable totals but are recorded as
+	// unavailable so the per-type denominators reflect the hardware fleet.
+	if got := s.GPUsByType["A100"]; got != (GPUTotalAlloc{Unavail: 8}) {
+		t.Errorf("A100 = %+v; want {Unavail:8}", got)
+	}
+	if got := s.GPUsByType["H100"]; got != (GPUTotalAlloc{Unavail: 2}) {
+		t.Errorf("H100 = %+v; want {Unavail:2}", got)
+	}
+	if s.UnavailGPUs != 10 {
+		t.Errorf("UnavailGPUs = %d; want 10", s.UnavailGPUs)
+	}
+	if got := s.GPUTypeFreePct("H200"); got != 100.0 {
+		t.Errorf("H200 free pct = %v; want 100 (4/4 free, none unavailable)", got)
+	}
+	if got := s.GPUTypeFreePct("A100"); got != 0.0 {
+		t.Errorf("A100 free pct = %v; want 0 (all 8 unavailable)", got)
 	}
 }
 
@@ -185,7 +205,7 @@ func TestAggregateUserStats(t *testing.T) {
 		{ID: "102_5", User: "alice", Partition: "gpu", State: "RUNNING", NumNodes: "1", NodeList: "node02", TRES: "cpu=4"},
 		{ID: "200", User: "bob", Partition: "cpu", State: "RUNNING", NumNodes: "2", NodeList: "node[03-04]", TRES: "cpu=16"},
 	}
-	got := AggregateUserStats(jobs)
+	got := AggregateUserStats(jobs, nil)
 	byUser := map[string]UserStats{}
 	for _, u := range got {
 		byUser[u.Username] = u
@@ -205,28 +225,44 @@ func TestAggregateUserStats(t *testing.T) {
 	}
 }
 
-func TestMyUsageSummary(t *testing.T) {
-	users := []UserStats{
-		{Username: "alice", JobCount: 3, TotalCPUs: 16, TotalMemoryGB: 16.0, TotalGPUs: 2, TotalNodes: 2, GPUTypes: "2x H200", ArrayCount: 2, PlainJobCount: 1},
+func TestAggregateUserStatsResolvesGenericGPUs(t *testing.T) {
+	nodes := []slurm.Node{
+		{Name: "gpu01", Gres: "gpu:h100:4"},
+		{Name: "gpu02", Gres: "gpu:h100:4"},
+		{Name: "gpu03", Gres: "gpu:l40s:4"},
 	}
-	got := MyUsageSummary(users, "alice")
-	want := "My Usage: 16 CPUs | 16.0 GB RAM | 2 GPUs (2x H200) | 2 Nodes | 3 tasks (2 arrays, 1 job)"
-	if got != want {
-		t.Errorf("MyUsageSummary =\n %q\nwant\n %q", got, want)
-	}
+	models := NodeGPUModels(nodes)
 
-	if got := MyUsageSummary(users, "nobody"); got != "My Usage: No running jobs" {
-		t.Errorf("missing user = %q; want %q", got, "My Usage: No running jobs")
+	jobs := []slurm.AllUsersJob{
+		// Generic request on single-model nodes: attributed to H100.
+		{ID: "1", User: "a", State: "RUNNING", NumNodes: "2", NodeList: "gpu[01-02]", TRES: "cpu=8,gres/gpu=8"},
+		// Generic request across mixed models: stays in the generic bucket.
+		{ID: "2", User: "a", State: "RUNNING", NumNodes: "2", NodeList: "gpu[02-03]", TRES: "cpu=8,gres/gpu=2"},
+		// Typed request listing the generic duplicate: not a generic request.
+		{ID: "3", User: "a", State: "RUNNING", NumNodes: "1", NodeList: "gpu03", TRES: "cpu=4,gres/gpu=1,gres/gpu:l40s=1"},
+	}
+	got := AggregateUserStats(jobs, models)
+	if len(got) != 1 {
+		t.Fatalf("users = %d; want 1", len(got))
+	}
+	a := got[0]
+	if a.GenericGPUJobs != 2 {
+		t.Errorf("GenericGPUJobs = %d; want 2", a.GenericGPUJobs)
+	}
+	if a.TotalGPUs != 11 {
+		t.Errorf("TotalGPUs = %d; want 11", a.TotalGPUs)
+	}
+	if a.GPUTypes != "8x H100, 1x L40S, 2x gpu" && a.GPUTypes != "2x GPU, 8x H100, 1x L40S" {
+		t.Errorf("GPUTypes = %q; want H100 resolved, L40S typed, 2 generic", a.GPUTypes)
 	}
 }
 
-func TestMyUsageSummaryNoGPUSingularForms(t *testing.T) {
-	users := []UserStats{
-		{Username: "u", JobCount: 1, TotalCPUs: 1, TotalMemoryGB: 0.5, TotalGPUs: 0, TotalNodes: 1, ArrayCount: 1, PlainJobCount: 1},
+func TestFindUserStats(t *testing.T) {
+	users := []UserStats{{Username: "alice", TotalCPUs: 16}}
+	if got, ok := FindUserStats(users, "alice"); !ok || got.TotalCPUs != 16 {
+		t.Errorf("FindUserStats(alice) = %+v ok=%v", got, ok)
 	}
-	got := MyUsageSummary(users, "u")
-	want := "My Usage: 1 CPUs | 0.5 GB RAM | 1 Nodes | 1 task (1 array, 1 job)"
-	if got != want {
-		t.Errorf("singular forms = %q; want %q", got, want)
+	if _, ok := FindUserStats(users, "nobody"); ok {
+		t.Errorf("FindUserStats(nobody) should be ok=false")
 	}
 }

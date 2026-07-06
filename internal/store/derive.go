@@ -17,11 +17,13 @@ type PendingPartitionStats struct {
 	GPUsByType map[string]int
 }
 
-// GPUTotalAlloc is the (total, allocated) GPU count pair stored per GPU type in
-// ClusterStats.
+// GPUTotalAlloc is the per-type GPU accounting stored in ClusterStats. Total and
+// Allocated cover schedulable (online, non-draining) nodes; Unavail counts cards
+// on draining or offline nodes — part of the hardware denominator but never free.
 type GPUTotalAlloc struct {
 	Total     int
 	Allocated int
+	Unavail   int
 }
 
 // ClusterStats is the derived cluster-wide resource summary. The percentage
@@ -36,12 +38,12 @@ type ClusterStats struct {
 	AllocatedMemoryGB float64
 	TotalGPUs         int
 	AllocatedGPUs     int
-	GPUsByType        map[string]GPUTotalAlloc
-	// DrainingGPUsByType holds the GPU capacity, by type, on draining nodes. It is
-	// kept apart from GPUsByType because draining capacity is not schedulable, so
-	// it is shown on its own line rather than folded into the free totals.
-	DrainingGPUsByType map[string]int
-	DrainingNodes      int
+	// UnavailGPUs counts GPUs on draining or offline nodes across all types. They
+	// are excluded from TotalGPUs (not schedulable) but included in display
+	// denominators so the hardware fleet size stays visible.
+	UnavailGPUs   int
+	GPUsByType    map[string]GPUTotalAlloc
+	DrainingNodes int
 	// OfflineNodes counts nodes that are unavailable for scheduling — down,
 	// unreachable, in maintenance, or powered off. Their capacity is excluded from
 	// every total so the denominators (free/total ratios) reflect online nodes only.
@@ -79,28 +81,32 @@ func (s ClusterStats) FreeMemoryPct() float64 {
 	return (s.TotalMemoryGB - s.AllocatedMemoryGB) / s.TotalMemoryGB * 100.0
 }
 
-// FreeGPUsPct returns the percentage of free GPUs.
+// FreeGPUsPct returns the percentage of free GPUs. The denominator includes
+// unavailable (draining/offline) cards, so drained hardware reads as load, not as
+// a shrinking fleet.
 func (s ClusterStats) FreeGPUsPct() float64 {
-	if s.TotalGPUs == 0 {
+	denom := s.TotalGPUs + s.UnavailGPUs
+	if denom == 0 {
 		return 0
 	}
-	return float64(s.TotalGPUs-s.AllocatedGPUs) / float64(s.TotalGPUs) * 100.0
+	return float64(s.TotalGPUs-s.AllocatedGPUs) / float64(denom) * 100.0
 }
 
-// GPUTypeFreePct returns the percentage of free GPUs for a specific type.
+// GPUTypeFreePct returns the percentage of free GPUs for a specific type, over
+// the full hardware denominator (schedulable plus unavailable cards).
 func (s ClusterStats) GPUTypeFreePct(gpuType string) float64 {
 	ta, ok := s.GPUsByType[gpuType]
-	if !ok || ta.Total == 0 {
+	denom := ta.Total + ta.Unavail
+	if !ok || denom == 0 {
 		return 0
 	}
-	return float64(ta.Total-ta.Allocated) / float64(ta.Total) * 100.0
+	return float64(ta.Total-ta.Allocated) / float64(denom) * 100.0
 }
 
 // newClusterStats returns a ClusterStats with all maps initialised.
 func newClusterStats() ClusterStats {
 	return ClusterStats{
 		GPUsByType:         map[string]GPUTotalAlloc{},
-		DrainingGPUsByType: map[string]int{},
 		PendingGPUsByType:  map[string]int{},
 		PendingByPartition: map[string]PendingPartitionStats{},
 	}
@@ -121,8 +127,10 @@ func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob) Cl
 		state := strings.ToUpper(node.State)
 		if nodeOffline(state) {
 			// Offline nodes offer no schedulable capacity, so they are excluded from
-			// every total — the denominators count online nodes only.
+			// every total — but their GPUs are recorded as unavailable so the card
+			// denominators keep reflecting the hardware fleet.
 			stats.OfflineNodes++
+			addUnavailGPUs(node, nodeGPUModel(node), &stats)
 			continue
 		}
 		isDraining := parseNodeState(state, &stats)
@@ -132,7 +140,7 @@ func DeriveClusterStats(nodes []slurm.Node, allUsersJobs []slurm.AllUsersJob) Cl
 		model := nodeGPUModel(node)
 
 		if isDraining {
-			addDrainingGPUs(node, model, &stats)
+			addUnavailGPUs(node, model, &stats)
 			continue
 		}
 
@@ -290,17 +298,21 @@ func parseGPUsFromGres(node slurm.Node, model, state string, stats *ClusterStats
 	}
 }
 
-// addDrainingGPUs records a draining node's configured GPUs by type. Draining
-// capacity is tracked apart from the schedulable totals (it cannot accept new
-// jobs) and surfaced on its own overview line. GPU types come from CfgTRES,
-// falling back to the Gres field.
-func addDrainingGPUs(node slurm.Node, model string, stats *ClusterStats) {
+// addUnavailGPUs records a draining or offline node's configured GPUs by type as
+// unavailable: part of the hardware denominator but never free. All of the
+// node's cards count as unavailable, including any still running jobs on a
+// draining node — either way they cannot accept new work. GPU types come from
+// CfgTRES, falling back to the Gres field.
+func addUnavailGPUs(node slurm.Node, model string, stats *ClusterStats) {
 	counts := slurm.AggregateGPUCounts(relabelGeneric(slurm.ParseGPUEntries(node.CfgTRES), model), true)
 	if len(counts) == 0 {
 		counts = slurm.AggregateGPUCounts(relabelGeneric(slurm.ParseGPUFromGres(node.Gres), model), true)
 	}
 	for typ, count := range counts {
-		stats.DrainingGPUsByType[typ] += count
+		ta := stats.GPUsByType[typ]
+		ta.Unavail += count
+		stats.GPUsByType[typ] = ta
+		stats.UnavailGPUs += count
 	}
 }
 
@@ -377,24 +389,48 @@ type UserStats struct {
 	NodeNames     string
 	ArrayCount    int
 	PlainJobCount int
+	// GenericGPUJobs counts job rows whose GPU request named no model
+	// (bare "gres/gpu=N"). Their counts are attributed to the hardware they
+	// landed on when the job's nodes carry a single GPU model.
+	GenericGPUJobs int
+}
+
+// NodeGPUModels maps node name → its single GPU model (upper-cased), used to
+// attribute generic GPU requests to the hardware they landed on. Nodes without
+// GPUs or with more than one model (e.g. mixed MIG profiles) are omitted.
+func NodeGPUModels(nodes []slurm.Node) map[string]string {
+	m := make(map[string]string, len(nodes))
+	for _, n := range nodes {
+		name := strings.TrimSpace(n.Name)
+		if name == "" {
+			continue
+		}
+		if model := nodeGPUModel(n); model != "" {
+			m[name] = model
+		}
+	}
+	return m
 }
 
 // userAccumulator collects per-user running-job data before conversion.
 type userAccumulator struct {
-	jobCount      int
-	totalCPUs     int
-	totalMemoryGB float64
-	totalGPUs     int
-	gpuTypes      map[string]int
-	nodeNames     map[string]struct{}
-	arrayBaseIDs  map[string]struct{}
-	plainJobCount int
+	jobCount       int
+	totalCPUs      int
+	totalMemoryGB  float64
+	totalGPUs      int
+	gpuTypes       map[string]int
+	nodeNames      map[string]struct{}
+	arrayBaseIDs   map[string]struct{}
+	plainJobCount  int
+	genericGPUJobs int
 }
 
 // AggregateUserStats aggregates all-users job rows into per-user statistics,
 // folding each job's CPU/memory/GPU/node usage into its owner's totals and
-// classifying it as an array task or a plain job.
-func AggregateUserStats(jobs []slurm.AllUsersJob) []UserStats {
+// classifying it as an array task or a plain job. gpuModelByNode (see
+// NodeGPUModels) attributes typeless GPU requests to the hardware they run on;
+// nil disables the resolution and such requests stay in the generic bucket.
+func AggregateUserStats(jobs []slurm.AllUsersJob, gpuModelByNode map[string]string) []UserStats {
 	byUser := map[string]*userAccumulator{}
 
 	for _, job := range jobs {
@@ -411,29 +447,30 @@ func AggregateUserStats(jobs []slurm.AllUsersJob) []UserStats {
 			}
 			byUser[username] = acc
 		}
-		processJobForUser(acc, job)
+		processJobForUser(acc, job, gpuModelByNode)
 	}
 
 	out := make([]UserStats, 0, len(byUser))
 	for username, acc := range byUser {
 		out = append(out, UserStats{
-			Username:      username,
-			JobCount:      acc.jobCount,
-			TotalCPUs:     acc.totalCPUs,
-			TotalMemoryGB: acc.totalMemoryGB,
-			TotalGPUs:     acc.totalGPUs,
-			TotalNodes:    len(acc.nodeNames),
-			GPUTypes:      slurm.FormatGPUTypes(acc.gpuTypes),
-			NodeNames:     joinSorted(acc.nodeNames),
-			ArrayCount:    len(acc.arrayBaseIDs),
-			PlainJobCount: acc.plainJobCount,
+			Username:       username,
+			JobCount:       acc.jobCount,
+			TotalCPUs:      acc.totalCPUs,
+			TotalMemoryGB:  acc.totalMemoryGB,
+			TotalGPUs:      acc.totalGPUs,
+			TotalNodes:     len(acc.nodeNames),
+			GPUTypes:       slurm.FormatGPUTypes(acc.gpuTypes),
+			NodeNames:      joinSorted(acc.nodeNames),
+			ArrayCount:     len(acc.arrayBaseIDs),
+			PlainJobCount:  acc.plainJobCount,
+			GenericGPUJobs: acc.genericGPUJobs,
 		})
 	}
 	return out
 }
 
 // processJobForUser folds a single job row into a user's accumulator.
-func processJobForUser(acc *userAccumulator, job slurm.AllUsersJob) {
+func processJobForUser(acc *userAccumulator, job slurm.AllUsersJob, gpuModelByNode map[string]string) {
 	acc.jobCount++
 
 	jobID := strings.TrimSpace(job.ID)
@@ -448,7 +485,8 @@ func processJobForUser(acc *userAccumulator, job slurm.AllUsersJob) {
 
 	nodeCount := parseNodeCount(strings.TrimSpace(job.NumNodes))
 
-	for _, name := range slurm.ExpandNodeList(strings.TrimSpace(job.NodeList)) {
+	jobNodes := slurm.ExpandNodeList(strings.TrimSpace(job.NodeList))
+	for _, name := range jobNodes {
 		acc.nodeNames[name] = struct{}{}
 	}
 
@@ -460,11 +498,37 @@ func processJobForUser(acc *userAccumulator, job slurm.AllUsersJob) {
 	}
 	acc.totalMemoryGB += res.MemoryGB
 
+	// A job's TRES commonly lists the same GPUs both generically ("gres/gpu=3")
+	// and by model; AggregateGPUCounts drops the generic duplicate. A job is only
+	// a *generic request* when no typed entry exists at all — then its count is
+	// attributed to the single GPU model of the nodes it runs on, or kept in the
+	// generic bucket when that is unknown or mixed.
 	gpuCounts := slurm.AggregateGPUCounts(res.GPUs, true)
+	if generic, ok := gpuCounts["GPU"]; ok {
+		acc.genericGPUJobs++
+		if model := singleNodeModel(jobNodes, gpuModelByNode); model != "" {
+			delete(gpuCounts, "GPU")
+			gpuCounts[model] += generic
+		}
+	}
 	for gpuType, count := range gpuCounts {
 		acc.gpuTypes[gpuType] += count
+		acc.totalGPUs += count
 	}
-	acc.totalGPUs += slurm.CalculateTotalGPUs(res.GPUs, true)
+}
+
+// singleNodeModel returns the GPU model shared by every node in nodes, or ""
+// when nodes is empty, any node is unknown, or the models differ.
+func singleNodeModel(nodes []string, gpuModelByNode map[string]string) string {
+	model := ""
+	for _, name := range nodes {
+		m := gpuModelByNode[name]
+		if m == "" || (model != "" && m != model) {
+			return ""
+		}
+		model = m
+	}
+	return model
 }
 
 // parseNodeCount parses a node count that may be a single number ("4") or a
@@ -498,46 +562,13 @@ func joinSorted(set map[string]struct{}) string {
 	return strings.Join(keys, ",")
 }
 
-// MyUsageSummary renders the Jobs-tab "My Usage" banner for the given username
-// from the running-job user statistics. When the user has no running jobs it
-// returns the "No running jobs" message.
-func MyUsageSummary(users []UserStats, username string) string {
-	var mine *UserStats
-	for i := range users {
-		if users[i].Username == username {
-			mine = &users[i]
-			break
+// FindUserStats returns the stats entry for username, or ok=false when the user
+// has no running jobs. The Jobs tab banner renders from it.
+func FindUserStats(users []UserStats, username string) (UserStats, bool) {
+	for _, u := range users {
+		if u.Username == username {
+			return u, true
 		}
 	}
-	if mine == nil {
-		return "My Usage: No running jobs"
-	}
-
-	parts := []string{
-		strconv.Itoa(mine.TotalCPUs) + " CPUs",
-		strconv.FormatFloat(mine.TotalMemoryGB, 'f', 1, 64) + " GB RAM",
-	}
-	if mine.TotalGPUs > 0 {
-		gpuLabel := strconv.Itoa(mine.TotalGPUs) + " GPUs"
-		if mine.GPUTypes != "" {
-			gpuLabel += " (" + mine.GPUTypes + ")"
-		}
-		parts = append(parts, gpuLabel)
-	}
-	parts = append(parts, strconv.Itoa(mine.TotalNodes)+" Nodes")
-
-	x, y, z := mine.JobCount, mine.ArrayCount, mine.PlainJobCount
-	parts = append(parts, strconv.Itoa(x)+" "+plural(x, "task", "tasks")+
-		" ("+strconv.Itoa(y)+" "+plural(y, "array", "arrays")+
-		", "+strconv.Itoa(z)+" "+plural(z, "job", "jobs")+")")
-
-	return "My Usage: " + strings.Join(parts, " | ")
-}
-
-// plural returns the singular form when n == 1, otherwise the plural form.
-func plural(n int, singular, pluralForm string) string {
-	if n == 1 {
-		return singular
-	}
-	return pluralForm
+	return UserStats{}, false
 }

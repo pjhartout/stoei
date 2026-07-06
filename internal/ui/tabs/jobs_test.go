@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/theme"
@@ -163,17 +164,29 @@ func TestFilterNarrowsRows(t *testing.T) {
 	}
 }
 
-// TestBannerUsesUsername asserts the My-Usage banner reflects the configured
-// username's running jobs derived from the all-users data.
+// TestBannerUsesUsername asserts the usage banner reflects the configured
+// username's running jobs derived from the all-users data: a username chip plus
+// compact text-labeled segments.
 func TestBannerUsesUsername(t *testing.T) {
 	st := store.New()
 	st.SetAllUsersJobs([]store.AllUsersJob{
-		{ID: "1001", User: "alice", State: "RUNNING", NumNodes: "1", NodeList: "n01", TRES: "cpu=4,mem=8G"},
+		{ID: "1001", User: "alice", State: "RUNNING", NumNodes: "1", NodeList: "n01", TRES: "cpu=4,mem=8G,gres/gpu=1"},
 	}, st.NextGen(store.SectionAllUsersJobs), nil)
 	j := NewJobs(st, "alice", theme.BuildStyles(theme.Charm(), true))
 
-	if got := j.banner(); !strings.Contains(got, "My Usage") {
-		t.Errorf("banner = %q; want a My Usage summary", got)
+	// The banner styles each segment separately; strip the ANSI escapes so the
+	// assertions read the visible text.
+	got := ansi.Strip(j.banner())
+	for _, want := range []string{"alice", "cpu 4", "mem 8G", "gpu 1", "1 (0A·1J)", "1j generic gpu"} {
+		if !strings.Contains(got, want) {
+			t.Errorf("banner missing %q; banner = %q", want, got)
+		}
+	}
+
+	// A user with no running jobs gets the chip plus a quiet placeholder.
+	empty := NewJobs(st, "nobody", theme.BuildStyles(theme.Charm(), true))
+	if got := empty.banner(); !strings.Contains(got, "no running jobs") {
+		t.Errorf("empty banner = %q; want 'no running jobs'", got)
 	}
 }
 

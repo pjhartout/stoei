@@ -463,7 +463,7 @@ func TestTeatestTabNavigation(t *testing.T) {
 		{'3', "User Overview"}, // Users tab sub-tab header
 		{'4', "Priority"},      // Priority tab header
 		{'5', "log"},           // Logs tab placeholder ("No log entries yet.")
-		{'1', "My Usage"},      // back to Jobs
+		{'1', "0A·1J"},         // back to Jobs (usage banner segments)
 	}
 	for _, s := range steps {
 		tm.Send(tea.KeyPressMsg{Code: s.key, Text: string(s.key)})
@@ -498,7 +498,7 @@ func TestTeatestJobsFlow(t *testing.T) {
 	teatest.WaitFor(t, tm.Output(), func(out []byte) bool {
 		return bytes.Contains(out, []byte("train")) &&
 			bytes.Contains(out, []byte("eval")) &&
-			bytes.Contains(out, []byte("My Usage"))
+			bytes.Contains(out, []byte("alice"))
 	}, teatest.WithDuration(3*time.Second), teatest.WithCheckInterval(10*time.Millisecond))
 
 	// Drive the filter through a full open → type → close cycle, then quit. The

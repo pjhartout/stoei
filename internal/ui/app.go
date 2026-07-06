@@ -13,7 +13,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/help"
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -57,7 +56,6 @@ type App struct {
 	cfg config.Config
 
 	keys      keys.KeyMap
-	help      help.Model
 	theme     theme.Theme
 	styles    theme.Styles
 	intervals Intervals
@@ -159,7 +157,6 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 		cfg:        cfg,
 		configPath: configPath,
 		keys:       keys.BuildKeyMap(cfg.KeybindMode),
-		help:       help.New(),
 		theme:      t,
 		styles:     styles,
 		intervals:  intervalsFromConfig(cfg),
@@ -1105,9 +1102,9 @@ func (a App) tabBar() string {
 			cells = append(cells, a.styles.TabInactive.Render(label))
 		}
 	}
-	// The title carries a per-rune accent gradient for the charm.land look; pad it
-	// to match the Title style's horizontal padding without coloring the spaces.
-	title := " " + a.styles.TitleGradient("stoei") + " "
+	// The brand is a filled chip with a per-rune gradient background (the Crush
+	// logo treatment); a plain space separates it from the tab pills.
+	title := a.styles.BrandChip("stoei") + " "
 	return lipgloss.JoinHorizontal(lipgloss.Top, append([]string{title}, cells...)...)
 }
 
@@ -1138,10 +1135,62 @@ func (a App) activeView() string {
 	}
 }
 
-// footer renders the help bar reflecting the active tab's bindings plus the
-// globals.
+// footer renders the Crush-style status bar: a brand chip on the left, the
+// active tab's key hints painted on a full-width filled bar, and a right-aligned
+// refresh-age chip.
 func (a App) footer() string {
-	return a.help.View(a)
+	w := a.widthOrDefault()
+	brand := a.styles.Chip.Render("stoei")
+	refresh := a.refreshChip()
+
+	var hints strings.Builder
+	for _, b := range a.ShortHelp() {
+		if !b.Enabled() {
+			continue
+		}
+		hints.WriteString(a.styles.BarKey.Render(" " + b.Help().Key))
+		hints.WriteString(a.styles.BarDesc.Render(" " + b.Help().Desc + " "))
+	}
+
+	midW := w - lipgloss.Width(brand) - lipgloss.Width(refresh)
+	if midW < 0 {
+		midW = 0
+	}
+	// Width pads the hint run to fill the bar in the bar background; Inline +
+	// MaxWidth truncate it on narrow terminals instead of wrapping.
+	mid := a.styles.Bar.Width(midW).MaxWidth(midW).Inline(true).Render(hints.String())
+	return brand + mid + refresh
+}
+
+// refreshChip renders the age of the last running-jobs fetch as a filled badge,
+// in the error color while the fetch is failing. The age is computed at render
+// time: every tick or keypress re-renders it, so no dedicated timer runs (between
+// events it can read a little stale, which is harmless).
+func (a App) refreshChip() string {
+	meta := a.store.RunningJobsMeta
+	style := a.styles.ChipAlt
+	if meta.State == store.StateError {
+		style = a.styles.ChipErr
+	}
+	if meta.LastUpdated.IsZero() {
+		return style.Render("sync -")
+	}
+	return style.Render("sync " + shortAge(time.Since(meta.LastUpdated)))
+}
+
+// shortAge renders a duration as a compact single-unit age ("12s", "3m", "2h").
+func shortAge(d time.Duration) string {
+	if d < 0 {
+		d = 0
+	}
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	default:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	}
 }
 
 // toastView renders the current toasts as boxed, accent/error/success-bordered

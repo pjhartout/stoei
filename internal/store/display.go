@@ -13,6 +13,12 @@ func ShortGPULabel(typ string) string {
 	return slurm.ShortGPULabel(typ)
 }
 
+// IsMIGType reports whether a GPU type names a MIG slice. It wraps
+// slurm.IsMIGType so the UI layer can reach it without importing slurm directly.
+func IsMIGType(typ string) bool {
+	return slurm.IsMIGType(typ)
+}
+
 // Fair-share color thresholds shared by the Priority tab and the user/account
 // detail modals so the two views never drift.
 const (

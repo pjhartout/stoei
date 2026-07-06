@@ -43,6 +43,10 @@ type filterTable struct {
 
 	width  int
 	height int
+
+	// xOffset is the horizontal scroll position, engaged only when the fitted
+	// columns overflow the pane.
+	xOffset int
 }
 
 // newFilterTable builds a filterTable for the given columns and decorator. The
@@ -102,8 +106,18 @@ func (ft *filterTable) SetKeyMode(mode string) { ft.keys = jobsKeysForMode(mode)
 // SetStyles re-themes the table and rebuilds the display rows.
 func (ft *filterTable) SetStyles(styles theme.Styles) {
 	ft.styles = styles
-	ft.table.SetStyles(tableStylesWidth(styles, ft.width))
 	ft.rebuild()
+}
+
+// syncWidth sizes the inner table to the full fitted-content width so the
+// bubbles viewport never truncates rows itself; View windows the result back to
+// the pane.
+func (ft *filterTable) syncWidth() {
+	content := tableContentWidth(ft.table.Columns())
+	w := max(ft.width, content)
+	ft.table.SetWidth(w)
+	ft.table.SetStyles(tableStylesWidth(ft.styles, w))
+	ft.xOffset = clampHScroll(ft.xOffset, content, ft.width)
 }
 
 // SetSize resizes the inner table, reserving a row for the filter input when it
@@ -120,9 +134,8 @@ func (ft *filterTable) SetSize(width, height int) {
 	if h < 1 {
 		h = 1
 	}
-	ft.table.SetWidth(width)
 	ft.table.SetHeight(h)
-	ft.table.SetStyles(tableStylesWidth(ft.styles, width))
+	ft.syncWidth()
 }
 
 // SetRows replaces the plain row set and rebuilds the table, preserving the
@@ -144,6 +157,9 @@ func (ft *filterTable) rebuild() {
 		}
 	}
 	sorted := ft.sortState.sortRows(filtered)
+
+	fitTableColumns(&ft.table, ft.columns, sorted, filterTableColumnWidth)
+	ft.syncWidth()
 
 	display := make([]table.Row, len(sorted))
 	for i, row := range sorted {
@@ -197,6 +213,12 @@ func (ft *filterTable) Update(msg tea.Msg) tea.Cmd {
 			ft.sortState = ft.sortState.cycle(ft.columns)
 			ft.rebuild()
 			return nil
+		case key.Matches(km, ft.keys.ScrollLeft):
+			ft.xOffset = clampHScroll(ft.xOffset-hscrollStep, tableContentWidth(ft.table.Columns()), ft.width)
+			return nil
+		case key.Matches(km, ft.keys.ScrollRight):
+			ft.xOffset = clampHScroll(ft.xOffset+hscrollStep, tableContentWidth(ft.table.Columns()), ft.width)
+			return nil
 		}
 	}
 
@@ -235,12 +257,13 @@ func (ft *filterTable) CapturesInput() bool { return ft.filtering }
 
 // View renders the optional filter input above the table.
 func (ft *filterTable) View() string {
+	tbl := hscrollWindow(ft.table.View(), ft.xOffset, tableContentWidth(ft.table.Columns()), ft.width)
 	if !ft.filtering {
-		return ft.table.View()
+		return tbl
 	}
 	return lipgloss.JoinVertical(lipgloss.Left,
 		ft.styles.Text.Render(ft.filter.View()),
-		ft.table.View(),
+		tbl,
 	)
 }
 
@@ -252,7 +275,7 @@ func (ft *filterTable) ShortHelp() []key.Binding {
 // FullHelp returns the table navigation plus filter/sort bindings.
 func (ft *filterTable) FullHelp() [][]key.Binding {
 	return [][]key.Binding{
-		{ft.table.KeyMap.LineUp, ft.table.KeyMap.LineDown},
+		{ft.table.KeyMap.LineUp, ft.table.KeyMap.LineDown, ft.keys.ScrollLeft, ft.keys.ScrollRight},
 		{ft.keys.Filter, ft.keys.Sort, ft.keys.ClearFilter},
 	}
 }

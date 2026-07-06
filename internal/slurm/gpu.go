@@ -116,6 +116,10 @@ func FormatGPUTypes(counts map[string]int) string {
 // type string like "h100_pcie_1g.10gb".
 var migProfile = regexp.MustCompile(`(?i)\d+g\.\d+gb`)
 
+// IsMIGType reports whether a GPU type string names a MIG slice (it embeds an
+// NVIDIA MIG profile such as "1g.10gb").
+func IsMIGType(typ string) bool { return migProfile.MatchString(typ) }
+
 // ShortGPULabel renders a GPU type for display. A MIG type is shortened to its
 // bare profile ("H100_PCIE_1G.10GB" -> "1g.10gb"); any other type is returned
 // unchanged.

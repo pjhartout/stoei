@@ -416,7 +416,8 @@ func (s *Store) recomputeClusterStats() {
 }
 
 // RunningUserStats returns the per-user running-job summary derived from the
-// all-users jobs, excluding pending jobs.
+// all-users jobs, excluding pending jobs. Typeless GPU requests are attributed
+// to the hardware of the nodes they run on.
 func (s *Store) RunningUserStats() []UserStats {
-	return AggregateUserStats(RunningUserJobs(s.AllUsersJobs))
+	return AggregateUserStats(RunningUserJobs(s.AllUsersJobs), NodeGPUModels(s.Nodes))
 }

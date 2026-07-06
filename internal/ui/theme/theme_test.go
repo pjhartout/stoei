@@ -37,10 +37,14 @@ func TestBuildStylesRendersDistinctModes(t *testing.T) {
 	}
 }
 
-func TestAccentGradientReturnsRequestedSteps(t *testing.T) {
-	g := AccentGradient(Charm(), true, 5)
-	if len(g) != 5 {
-		t.Fatalf("gradient steps = %d, want 5", len(g))
+// TestContrastFgPicksReadableText asserts light fills get dark text and dark
+// fills get light text.
+func TestContrastFgPicksReadableText(t *testing.T) {
+	if got := ContrastFg(lipgloss.Color("#ffffff")); got != lipgloss.Color("#1A1A1A") {
+		t.Errorf("ContrastFg(white) = %v; want dark text", got)
+	}
+	if got := ContrastFg(lipgloss.Color("#101010")); got != lipgloss.Color("#F5F5F5") {
+		t.Errorf("ContrastFg(near-black) = %v; want light text", got)
 	}
 }
 
@@ -79,26 +83,16 @@ func TestNamesCoverRegistry(t *testing.T) {
 	}
 }
 
-// TestGradientTextPreservesRunes asserts the per-rune accent gradient keeps every
-// input rune (ANSI styling aside) and renders distinct colors across runes.
-func TestGradientTextPreservesRunes(t *testing.T) {
+// TestBrandChipPreservesRunes asserts the gradient-background chip keeps the
+// visible text intact (with its padding spaces) and actually styles it.
+func TestBrandChipPreservesRunes(t *testing.T) {
 	st := BuildStyles(Charm(), true)
-	out := st.TitleGradient("stoei")
-	// Strip ANSI escapes and confirm the visible text is intact.
-	plain := stripANSI(out)
-	if plain != "stoei" {
-		t.Errorf("gradient visible text = %q; want %q", plain, "stoei")
+	out := st.BrandChip("stoei")
+	if plain := stripANSI(out); plain != " stoei " {
+		t.Errorf("chip visible text = %q; want %q", plain, " stoei ")
 	}
-	// A multi-rune gradient must emit more than one distinct SGR foreground.
 	if !strings.Contains(out, "\x1b[") {
-		t.Error("gradient produced no ANSI styling")
-	}
-	// Empty and single-rune inputs must not panic and must round-trip.
-	if got := GradientText("", st.Accent, st.AccentAlt, true); got != "" {
-		t.Errorf("empty gradient = %q; want empty", got)
-	}
-	if got := stripANSI(GradientText("x", st.Accent, st.AccentAlt, true)); got != "x" {
-		t.Errorf("single-rune gradient text = %q; want x", got)
+		t.Error("chip produced no ANSI styling")
 	}
 }
 
