@@ -1075,7 +1075,7 @@ func (a *App) fanoutSize() {
 
 // chromeReservedRows is the vertical space the tab bar, the rule beneath it, and
 // the footer occupy.
-const chromeReservedRows = 5
+const chromeReservedRows = 3
 
 // rebuildStyles rebuilds the styles for the current background and re-themes
 // every tab, the sidebar, and modals.
@@ -1222,6 +1222,19 @@ func (a App) renderBody() string {
 
 	if components.ShouldShow(w) {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, a.sidebar.View())
+	}
+
+	// Pad or clip the body to its allotted rows so the footer always sits on
+	// the last terminal row: a short tab must not let the footer ride up, and
+	// an overflowing sidebar must not push it off-screen.
+	_, h := a.size()
+	if innerH := h - chromeReservedRows; innerH > 0 {
+		switch short := innerH - (strings.Count(body, "\n") + 1); {
+		case short > 0:
+			body += strings.Repeat("\n", short)
+		case short < 0:
+			body = lipgloss.NewStyle().MaxHeight(innerH).Render(body)
+		}
 	}
 	return body
 }
