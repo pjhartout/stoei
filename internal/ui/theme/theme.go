@@ -108,13 +108,33 @@ type Styles struct {
 // background gradient and auto-contrast foreground — the Crush logo treatment.
 // A single space of padding is folded into the gradient on each side.
 func (s Styles) BrandChip(text string) string {
+	return s.ShimmerChip(text, 0)
+}
+
+// shimmerSubsteps is how many gradient steps lie between adjacent runes in the
+// shimmer palette: each animation frame advances the gradient a quarter of a
+// rune, so a high frame rate reads as a smooth slide rather than a fast one.
+const shimmerSubsteps = 4
+
+// ShimmerChip is BrandChip with the gradient shifted by phase: advancing phase
+// one step per animation frame slides the gradient across the chip (the Crush
+// shimmer). The palette is the gradient mirrored back on itself, so the slide
+// loops seamlessly; phase 0 renders exactly as BrandChip.
+func (s Styles) ShimmerChip(text string, phase int) string {
 	runes := []rune(" " + text + " ")
-	colors := lipgloss.Blend1D(len(runes), s.Accent, s.AccentAlt)
+	n := len(runes) * shimmerSubsteps
+	grad := lipgloss.Blend1D(n, s.Accent, s.AccentAlt)
+	palette := make([]color.Color, 0, 2*n-2)
+	palette = append(palette, grad...)
+	for i := n - 2; i > 0; i-- {
+		palette = append(palette, grad[i])
+	}
 	var b strings.Builder
 	for i, r := range runes {
+		c := palette[(i*shimmerSubsteps+phase)%len(palette)]
 		b.WriteString(lipgloss.NewStyle().
-			Background(colors[i]).
-			Foreground(ContrastFg(colors[i])).
+			Background(c).
+			Foreground(ContrastFg(c)).
 			Bold(true).
 			Render(string(r)))
 	}

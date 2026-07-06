@@ -58,7 +58,7 @@ func TestRenderToastsLevels(t *testing.T) {
 	out := renderToasts([]toastItem{
 		{text: "failed thing", level: toastErrorLevel, ticks: 1},
 		{text: "recovered thing", level: toastSuccess, ticks: 1},
-	}, 80, styles)
+	}, 80, styles, 0)
 	if !strings.Contains(out, "failed thing") || !strings.Contains(out, "recovered thing") {
 		t.Errorf("toast render missing text:\n%s", out)
 	}
@@ -66,8 +66,44 @@ func TestRenderToastsLevels(t *testing.T) {
 	if !strings.Contains(out, "╭") {
 		t.Errorf("toast render not boxed:\n%s", out)
 	}
-	if renderToasts(nil, 80, styles) != "" {
+	if renderToasts(nil, 80, styles, 0) != "" {
 		t.Error("empty toast stack should render empty")
+	}
+}
+
+// TestRefreshToastAnimatesAndClearsOnCompletion asserts the manual-refresh
+// progress toast shows an animated spinner (frame follows the anim phase) and is
+// dropped the moment the running-jobs result lands, instead of waiting out the
+// toast TTL.
+func TestRefreshToastAnimatesAndClearsOnCompletion(t *testing.T) {
+	styles := theme.BuildStyles(theme.Charm(), true)
+	tagged := []toastItem{{text: "Refreshing", level: toastInfo, ticks: toastTTL, tag: refreshToastTag}}
+	if renderToasts(tagged, 80, styles, 0) == renderToasts(tagged, 80, styles, toastSpinnerDivisor) {
+		t.Error("progress toast spinner did not advance with the anim phase")
+	}
+
+	a := New(store.New(), &store.FakeClient{UsernameStr: "alice"})
+	a.pushToastTagged("Refreshing", toastInfo, refreshToastTag)
+	// A repeated refresh replaces the progress toast instead of stacking it.
+	a.pushToastTagged("Refreshing", toastInfo, refreshToastTag)
+	if len(a.toasts) != 1 {
+		t.Fatalf("progress toasts stacked: %d; want 1", len(a.toasts))
+	}
+	m, _ := a.Update(runningJobsMsg{gen: a.store.Gen(store.SectionRunningJobs)})
+	a = m.(App)
+	if len(a.toasts) != 0 {
+		t.Errorf("progress toast survived completion: %+v", a.toasts)
+	}
+}
+
+// TestRenderToastsFadeOnFinalTick asserts a toast on its last tick renders in
+// the muted tone (fading out) instead of its level color.
+func TestRenderToastsFadeOnFinalTick(t *testing.T) {
+	styles := theme.BuildStyles(theme.Charm(), true)
+	fresh := renderToasts([]toastItem{{text: "note", level: toastErrorLevel, ticks: toastTTL}}, 80, styles, 0)
+	fading := renderToasts([]toastItem{{text: "note", level: toastErrorLevel, ticks: 1}}, 80, styles, 0)
+	if fresh == fading {
+		t.Error("final-tick toast should render dimmed, not identical to a fresh one")
 	}
 }
 
@@ -77,7 +113,7 @@ func TestRenderToastsCapsWidth(t *testing.T) {
 	styles := theme.BuildStyles(theme.Charm(), true)
 	long := "Job history unavailable: slurmdbd connection refused"
 	for _, w := range []int{40, 30, 20} {
-		out := renderToasts([]toastItem{{text: long, level: toastErrorLevel, ticks: 1}}, w, styles)
+		out := renderToasts([]toastItem{{text: long, level: toastErrorLevel, ticks: 1}}, w, styles, 0)
 		if got := lipgloss.Width(out); got > w {
 			t.Errorf("toast box width %d exceeds terminal width %d:\n%s", got, w, out)
 		}

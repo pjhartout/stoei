@@ -96,6 +96,23 @@ func TestBrandChipPreservesRunes(t *testing.T) {
 	}
 }
 
+// TestShimmerChipShiftsWithPhase asserts phase 0 matches BrandChip, advancing
+// the phase changes the coloring (the shimmer moves), the palette wraps without
+// panicking at large phases, and the visible text never changes.
+func TestShimmerChipShiftsWithPhase(t *testing.T) {
+	st := BuildStyles(Charm(), true)
+	if st.ShimmerChip("stoei", 0) != st.BrandChip("stoei") {
+		t.Error("phase 0 must render exactly as BrandChip")
+	}
+	p0, p1 := st.ShimmerChip("stoei", 0), st.ShimmerChip("stoei", 1)
+	if p0 == p1 {
+		t.Error("advancing the phase did not move the gradient")
+	}
+	if got := stripANSI(st.ShimmerChip("stoei", 1_000_003)); got != " stoei " {
+		t.Errorf("large phase corrupted the text: %q", got)
+	}
+}
+
 // stripANSI removes CSI escape sequences for plain-text assertions.
 func stripANSI(s string) string {
 	var b strings.Builder

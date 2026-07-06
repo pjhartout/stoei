@@ -25,7 +25,7 @@ func TestActiveTabClippedToWidth(t *testing.T) {
 	for _, w := range []int{120, 100, 90} {
 		a.width, a.height = w, 26
 		a.fanoutSize()
-		a.frame.dirty = true
+		a.frame.invalidate()
 		for _, ln := range strings.Split(a.View().Content, "\n") {
 			if got := lipgloss.Width(ln); got > w {
 				t.Errorf("term width %d: rendered line is %d wide (overflow):\n%q", w, got, ln)
@@ -47,7 +47,7 @@ func TestToastDoesNotOverflowHeight(t *testing.T) {
 	for _, sz := range [][2]int{{80, 24}, {40, 18}, {120, 30}, {60, 16}} {
 		a.width, a.height = sz[0], sz[1]
 		a.fanoutSize()
-		a.frame.dirty = true
+		a.frame.invalidate()
 		out := a.View().Content
 		if lines := strings.Count(out, "\n") + 1; lines > sz[1] {
 			t.Errorf("term %dx%d: %d rendered lines exceed terminal height", sz[0], sz[1], lines)

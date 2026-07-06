@@ -99,6 +99,16 @@ type App struct {
 	// spinnerActive is true while the loading-spinner animation tick is in flight,
 	// so it is started at most once and stopped when nothing is loading.
 	spinnerActive bool
+	// focused mirrors the terminal's focus reports; animPhase advances the chrome
+	// shimmer and animActive guards the anim tier against double-arming. The
+	// shimmer runs only while focused — a backgrounded pane renders no animation
+	// frames — but data refresh is never focus-gated.
+	focused    bool
+	animPhase  int
+	animActive bool
+	// lastInput is when the user last pressed a key (or refocused the pane); the
+	// anim tier throttles to an idle crawl when it grows stale (animIdleAfter).
+	lastInput time.Time
 	// slowTicks counts slow-tier ticks so heavier sections can run at a longer
 	// cadence (nodes every 2nd tick, fair-share/priority every 3rd).
 	slowTicks uint64
@@ -123,9 +133,22 @@ type App struct {
 // frameCache memoizes the rendered base frame behind a dirty flag (I10). View
 // rebuilds only when dirty is set; Update sets dirty whenever model state that
 // affects the frame changes, so an unchanged fast tick reuses the cached string.
+// The body (tab tables + sidebar) is cached separately from the chrome: an
+// animation frame only re-renders the chrome around the cached body, keeping the
+// ~30 fps shimmer cheap (the body render dominates the frame cost).
 type frameCache struct {
 	dirty bool
 	base  string
+
+	bodyDirty bool
+	body      string
+}
+
+// invalidate marks both the composed frame and the body stale. Every state
+// change uses this except the anim tick, which only recomposes the chrome.
+func (f *frameCache) invalidate() {
+	f.dirty = true
+	f.bodyDirty = true
 }
 
 // New constructs the root model wired to s and client using the default
@@ -164,8 +187,13 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 		logRing:    ring,
 		dark:       true,
 		frame:      &frameCache{dirty: true},
-		// spinnerActive starts true because Init batches the first spinner tick.
+		// spinnerActive and animActive start true because Init batches the first
+		// spinner and anim ticks; focused starts true because a terminal that
+		// never reports focus should still animate.
 		spinnerActive: true,
+		focused:       true,
+		animActive:    true,
+		lastInput:     time.Now(),
 		jobs:          tabs.NewJobs(s, username, styles),
 		nodes:         tabs.NewNodes(s, styles),
 		users:         tabs.NewUsers(s, styles),
@@ -224,6 +252,7 @@ func (a App) Init() tea.Cmd {
 		slowTick(a.intervals.Slow),
 		toastTick(toastTickInterval),
 		spinnerTick(spinnerTickInterval),
+		animTick(animTickInterval),
 	)
 }
 
@@ -349,24 +378,25 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.width = msg.Width
 		a.height = msg.Height
 		a.fanoutSize()
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, nil
 
 	case tea.BackgroundColorMsg:
 		if dark := msg.IsDark(); dark != a.dark {
 			a.dark = dark
 			a.rebuildStyles()
-			a.frame.dirty = true
+			a.frame.invalidate()
 		}
 		return a, nil
 
 	case tea.KeyPressMsg:
+		a.lastInput = time.Now()
 		return a.handleKey(msg)
 
 	case availabilityMsg:
 		a.availChecked = true
 		a.unavailable = msg.err
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, nil
 
 	case fastTickMsg:
@@ -380,6 +410,26 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case spinnerTickMsg:
 		return a.handleSpinnerTick()
+
+	case animTickMsg:
+		return a.handleAnimTick(msg)
+
+	case tea.FocusMsg:
+		a.focused = true
+		a.lastInput = time.Now()
+		a.frame.invalidate()
+		if !a.animActive {
+			a.animActive = true
+			return a, animTick(animTickInterval)
+		}
+		return a, nil
+
+	case tea.BlurMsg:
+		// Freeze the shimmer only; data refresh is never focus-gated. The anim
+		// tier notices the flag on its next firing and stops re-arming.
+		a.focused = false
+		a.frame.invalidate()
+		return a, nil
 	}
 
 	if m, cmd, ok := a.handleDataMsg(msg); ok {
@@ -399,11 +449,13 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case runningJobsMsg:
 		a.runningInFlight = false
+		// The manual-refresh progress toast is done the moment the result lands.
+		a.dropToasts(refreshToastTag)
 		vanished := a.store.SetRunningJobs(msg.jobs, msg.gen, msg.err)
 		a.observeGen(store.SectionRunningJobs, msg.gen, msg.err)
 		a.jobs.Refresh()
 		a.detailCache.SyncStates(a.store.MergedJobs()) // evict cached details on state change
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, a.fetchCompletions(vanished), true
 
 	case historyMsg:
@@ -411,7 +463,7 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.observeGen(store.SectionHistory, msg.gen, msg.err)
 		a.jobs.Refresh() // Completed/failed history jobs merge into the Jobs table.
 		a.detailCache.SyncStates(a.store.MergedJobs())
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, nil, true
 
 	case completedJobMsg:
@@ -419,7 +471,7 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 			a.store.AddCompletedJob(msg.job)
 			a.jobs.Refresh() // The finished job joins the history rows in the Jobs table.
 			a.detailCache.SyncStates(a.store.MergedJobs())
-			a.frame.dirty = true
+			a.frame.invalidate()
 		}
 		return a, nil, true
 
@@ -428,7 +480,7 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.observeGen(store.SectionNodes, msg.gen, msg.err)
 		a.nodes.Refresh()
 		a.refreshSidebar() // ClusterStats derives from nodes.
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, nil, true
 
 	case allUsersJobsMsg:
@@ -437,21 +489,21 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.jobs.Refresh()   // My-Usage banner derives from all-users jobs.
 		a.users.Refresh()  // Running/Pending panes derive from all-users jobs.
 		a.refreshSidebar() // Pending resources derive from all-users jobs.
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, nil, true
 
 	case fairShareMsg:
 		a.store.SetFairShare(msg.entries, msg.gen, msg.err)
 		a.observeGen(store.SectionFairShare, msg.gen, msg.err)
 		a.priority.Refresh()
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, nil, true
 
 	case pendingPrioMsg:
 		a.store.SetPendingPrio(msg.entries, msg.gen, msg.err)
 		a.observeGen(store.SectionPendingPrio, msg.gen, msg.err)
 		a.priority.Refresh()
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, nil, true
 	}
 	return a, nil, false
@@ -522,7 +574,7 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	case key.Matches(msg, a.keys.Settings):
 		return a, a.pushModal(modals.NewSettings(a.styles, a.cfg))
 	case key.Matches(msg, a.keys.Refresh):
-		a.pushToast("Refreshing…")
+		a.pushToastTagged("Refreshing", toastInfo, refreshToastTag)
 		return a, a.manualRefresh()
 	case msg.String() == "L":
 		return a, a.openClusterLoad()
@@ -666,7 +718,7 @@ func (a *App) setActive(idx tabIndex) tea.Cmd {
 	}
 	prev := a.active
 	a.active = idx
-	a.frame.dirty = true
+	a.frame.invalidate()
 	var cmds []tea.Cmd
 	if idx == tabJobs {
 		// History went unpolled while away; reconcile completed jobs on arrival.
@@ -692,7 +744,7 @@ func (a *App) setActive(idx tabIndex) tea.Cmd {
 // 'r' key pushes a toast), since re-fetching alone is not visible while data is on
 // screen.
 func (a *App) manualRefresh() tea.Cmd {
-	a.frame.dirty = true
+	a.frame.invalidate()
 	cmds := []tea.Cmd{a.dispatchHistory()}
 	if !a.runningInFlight {
 		cmds = append(cmds, a.dispatchRunning())
@@ -714,7 +766,7 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	// The log ring is appended to outside the Update loop (a logging sink), so the
 	// Logs tab is re-rendered on the fast tick to surface new lines.
 	a.logsTab.Refresh()
-	a.frame.dirty = true
+	a.frame.invalidate()
 	cmds = append(cmds, a.ensureSpinner())
 	return a, tea.Batch(cmds...)
 }
@@ -750,7 +802,7 @@ func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
 // tier (I2), re-rendering only when a toast actually expired.
 func (a App) handleToastTick() (tea.Model, tea.Cmd) {
 	if a.expireToasts() {
-		a.frame.dirty = true
+		a.frame.invalidate()
 	}
 	return a, toastTick(toastTickInterval)
 }
@@ -774,8 +826,26 @@ func (a App) handleSpinnerTick() (tea.Model, tea.Cmd) {
 		a.spinnerActive = false
 		return a, nil
 	}
-	a.frame.dirty = true
+	a.frame.invalidate()
 	return a, spinnerTick(spinnerTickInterval)
+}
+
+// handleAnimTick advances the chrome shimmer one frame and re-arms only while
+// the terminal is focused: on blur the tier stops (animActive drops) and the
+// next FocusMsg restarts it, so a backgrounded pane renders zero animation
+// frames while data refresh continues untouched. While focused, the re-arm
+// interval throttles to an idle crawl once user input goes stale (animInterval),
+// and snaps back to full rate on the next keypress.
+func (a App) handleAnimTick(msg animTickMsg) (tea.Model, tea.Cmd) {
+	if !a.focused {
+		a.animActive = false
+		return a, nil
+	}
+	a.animPhase++
+	// Chrome-only: the cached body is reused, so a shimmer frame costs only the
+	// chrome recompose rather than a full table/sidebar re-render.
+	a.frame.dirty = true
+	return a, animTick(animInterval(msg.at.Sub(a.lastInput)))
 }
 
 // routeToActive forwards a message to the top modal (if any) or the active tab,
@@ -788,7 +858,7 @@ func (a App) routeToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if done {
 			a.popModal()
 		}
-		a.frame.dirty = true
+		a.frame.invalidate()
 		return a, cmd
 	}
 
@@ -805,7 +875,7 @@ func (a App) routeToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tabLogs:
 		a.logsTab, cmd = a.logsTab.Update(msg)
 	}
-	a.frame.dirty = true
+	a.frame.invalidate()
 	return a, cmd
 }
 
@@ -855,7 +925,7 @@ func (a *App) refreshSidebar() {
 	// The sidebar auto-fits its content, so its width can grow when new stats
 	// arrive; re-lay-out the tabs to the new split and force a re-render.
 	a.fanoutSize()
-	a.frame.dirty = true
+	a.frame.invalidate()
 }
 
 // observe feeds a fetch outcome to the health notifier and appends/clears a toast
@@ -892,11 +962,37 @@ func (a *App) pushToast(msg string) {
 // pushToastLevel appends a toast at the given severity level with a fresh TTL,
 // keeping at most maxToasts most-recent items.
 func (a *App) pushToastLevel(msg string, level toastLevel) {
-	a.toasts = append(a.toasts, toastItem{text: msg, level: level, ticks: toastTTL})
+	a.pushToastTagged(msg, level, "")
+}
+
+// pushToastTagged appends a toast carrying a tag so a completion event can drop
+// it early (see dropToasts). An existing toast with the same non-empty tag is
+// replaced rather than stacked, so repeated refreshes never pile up notices.
+func (a *App) pushToastTagged(msg string, level toastLevel, tag string) {
+	if tag != "" {
+		a.dropToasts(tag)
+	}
+	a.toasts = append(a.toasts, toastItem{text: msg, level: level, ticks: toastTTL, tag: tag})
 	if len(a.toasts) > maxToasts {
 		a.toasts = a.toasts[len(a.toasts)-maxToasts:]
 	}
-	a.frame.dirty = true
+	a.frame.invalidate()
+}
+
+// dropToasts removes every toast with the given tag, marking the frame dirty
+// when one was showing. A progress toast disappears the moment its completion
+// event arrives instead of waiting out the TTL.
+func (a *App) dropToasts(tag string) {
+	kept := a.toasts[:0]
+	for _, t := range a.toasts {
+		if t.tag != tag {
+			kept = append(kept, t)
+		}
+	}
+	if len(kept) != len(a.toasts) {
+		a.frame.invalidate()
+	}
+	a.toasts = kept
 }
 
 // expireToasts decrements each toast's remaining ticks and drops expired ones. It
@@ -993,7 +1089,7 @@ func (a *App) applyConfig(cfg config.Config) tea.Cmd {
 		}
 	}
 
-	a.frame.dirty = true
+	a.frame.invalidate()
 	// Re-fetch so the new history window is reflected immediately.
 	return a.manualRefresh()
 }
@@ -1005,7 +1101,7 @@ func (a *App) pushModal(m modals.Modal) tea.Cmd {
 	w, h := a.size()
 	m.SetSize(w, h)
 	a.modals = append(a.modals, m)
-	a.frame.dirty = true
+	a.frame.invalidate()
 	return m.Init()
 }
 
@@ -1013,7 +1109,7 @@ func (a *App) pushModal(m modals.Modal) tea.Cmd {
 func (a *App) popModal() {
 	if n := len(a.modals); n > 0 {
 		a.modals = a.modals[:n-1]
-		a.frame.dirty = true
+		a.frame.invalidate()
 	}
 }
 
@@ -1029,6 +1125,7 @@ func (a App) View() tea.View {
 	if a.availChecked && a.unavailable != nil {
 		v := tea.NewView(a.unavailableView())
 		v.AltScreen = true
+		v.ReportFocus = true
 		return v
 	}
 
@@ -1046,14 +1143,44 @@ func (a App) View() tea.View {
 
 	v := tea.NewView(content)
 	v.AltScreen = true
+	v.ReportFocus = true
 	return v
 }
 
 // baseView renders the non-modal chrome plus the active tab, composing the
 // cluster sidebar beside the tab body on wide terminals (I7 narrow auto-hide).
 func (a App) baseView() string {
-	tabBar := a.tabBar()
-	w, h := a.size()
+	body := a.frame.body
+	if a.frame.bodyDirty || body == "" {
+		body = a.renderBody()
+		a.frame.body = body
+		a.frame.bodyDirty = false
+	}
+
+	_, h := a.size()
+	sections := []string{a.tabBar(), a.tabBarRule(), body, a.footer()}
+	if toasts := a.toastView(); toasts != "" {
+		// Trim the body to the space left after the toast so the toast box fits
+		// within the terminal height instead of spilling off the bottom. 3 = the
+		// tab bar, the rule, and the footer rows; the (possibly wrapped, possibly
+		// stacked) toast takes the rest.
+		bodyRows := max(h-3-lipgloss.Height(toasts), 1)
+		sections[2] = lipgloss.NewStyle().MaxHeight(bodyRows).Render(body)
+		sections = append(sections, toasts)
+	}
+
+	// A plain join instead of lipgloss.JoinVertical: the body lines are already
+	// padded to their pane widths, and JoinVertical would re-measure every line
+	// of the frame (ANSI grapheme iteration) on each ~30 fps animation frame
+	// just to add trailing pad spaces the alt-screen renderer doesn't need.
+	return strings.Join(sections, "\n")
+}
+
+// renderBody renders the frame body — the active tab beside the sidebar — the
+// expensive part of a frame, cached in frameCache.body so chrome-only animation
+// frames skip it.
+func (a App) renderBody() string {
+	w, _ := a.size()
 	body := a.activeView()
 
 	// Constrain the active tab to its allotted width so a wide table is clipped at
@@ -1069,20 +1196,7 @@ func (a App) baseView() string {
 	if components.ShouldShow(w) {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, body, a.sidebar.View())
 	}
-	footer := a.footer()
-
-	sections := []string{tabBar, a.tabBarRule(), body, footer}
-	if toasts := a.toastView(); toasts != "" {
-		// Trim the body to the space left after the toast so the toast box fits
-		// within the terminal height instead of spilling off the bottom. 3 = the
-		// tab bar, the rule, and the footer rows; the (possibly wrapped, possibly
-		// stacked) toast takes the rest.
-		bodyRows := max(h-3-lipgloss.Height(toasts), 1)
-		sections[2] = lipgloss.NewStyle().MaxHeight(bodyRows).Render(body)
-		sections = append(sections, toasts)
-	}
-
-	return lipgloss.JoinVertical(lipgloss.Left, sections...)
+	return body
 }
 
 // widthOrDefault returns the cached terminal width, falling back to the default.
@@ -1103,8 +1217,9 @@ func (a App) tabBar() string {
 		}
 	}
 	// The brand is a filled chip with a per-rune gradient background (the Crush
-	// logo treatment); a plain space separates it from the tab pills.
-	title := a.styles.BrandChip("stoei") + " "
+	// logo treatment) that shimmers while the terminal is focused; a plain space
+	// separates it from the tab pills.
+	title := a.styles.ShimmerChip("stoei", a.animPhase) + " "
 	return lipgloss.JoinHorizontal(lipgloss.Top, append([]string{title}, cells...)...)
 }
 
@@ -1140,7 +1255,7 @@ func (a App) activeView() string {
 // refresh-age chip.
 func (a App) footer() string {
 	w := a.widthOrDefault()
-	brand := a.styles.Chip.Render("stoei")
+	brand := a.styles.ShimmerChip("stoei", a.animPhase)
 	refresh := a.refreshChip()
 
 	var hints strings.Builder
@@ -1168,14 +1283,18 @@ func (a App) footer() string {
 // events it can read a little stale, which is harmless).
 func (a App) refreshChip() string {
 	meta := a.store.RunningJobsMeta
-	style := a.styles.ChipAlt
+	label := "sync -"
+	if !meta.LastUpdated.IsZero() {
+		label = "sync " + shortAge(time.Since(meta.LastUpdated))
+	}
 	if meta.State == store.StateError {
-		style = a.styles.ChipErr
+		return a.styles.ChipErr.Render(label)
 	}
-	if meta.LastUpdated.IsZero() {
-		return style.Render("sync -")
+	// While a fetch is in flight the chip shimmers as a live activity cue.
+	if a.runningInFlight {
+		return a.styles.ShimmerChip(label, a.animPhase)
 	}
-	return style.Render("sync " + shortAge(time.Since(meta.LastUpdated)))
+	return a.styles.ChipAlt.Render(label)
 }
 
 // shortAge renders a duration as a compact single-unit age ("12s", "3m", "2h").
@@ -1197,7 +1316,7 @@ func shortAge(d time.Duration) string {
 // transient notices (charm-style), with recovered toasts shown in success green
 // and failures in error red.
 func (a App) toastView() string {
-	return renderToasts(a.toasts, a.widthOrDefault(), a.styles)
+	return renderToasts(a.toasts, a.widthOrDefault(), a.styles, a.animPhase)
 }
 
 // unavailableView renders the full-screen Slurm-unavailable screen.

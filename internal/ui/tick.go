@@ -67,6 +67,39 @@ func spinnerTick(d time.Duration) tea.Cmd {
 	return tea.Tick(d, func(t time.Time) tea.Msg { return spinnerTickMsg{at: t} })
 }
 
+// animTickInterval is the frame cadence of the chrome shimmer (~30 fps; the
+// shimmer moves in sub-rune gradient steps so the extra frames buy smoothness,
+// not speed). It is a conditional tier: it re-arms only while the terminal
+// reports focus, so a stoei sitting in a background tmux pane or window renders
+// zero animation frames. Only cosmetics are focus-gated — data refresh never is.
+const animTickInterval = 33 * time.Millisecond
+
+// animIdleAfter is how long without user input the shimmer runs at full rate; a
+// focused-but-untouched stoei (a dashboard left on a login node) then drops to
+// animIdleInterval (~4 fps crawl) and snaps back on the next keypress or focus.
+const (
+	animIdleAfter    = 2 * time.Minute
+	animIdleInterval = 250 * time.Millisecond
+)
+
+// animInterval picks the shimmer frame interval from the time since the last
+// user input: full rate while the user is interacting, the idle crawl after.
+func animInterval(sinceInput time.Duration) time.Duration {
+	if sinceInput > animIdleAfter {
+		return animIdleInterval
+	}
+	return animTickInterval
+}
+
+// animTickMsg advances the chrome shimmer animation.
+type animTickMsg struct{ at time.Time }
+
+// animTick returns a Cmd that fires a single animTickMsg after d. It is armed at
+// startup and on FocusMsg, and re-armed only from its own handler while focused.
+func animTick(d time.Duration) tea.Cmd {
+	return tea.Tick(d, func(t time.Time) tea.Msg { return animTickMsg{at: t} })
+}
+
 // fastTick returns a Cmd that fires a single fastTickMsg after d. Each tier
 // re-arms only from its own handler (I2): the root model, on receiving a
 // fastTickMsg, dispatches the fast fetches and calls fastTick again. It is never

@@ -400,7 +400,7 @@ func TestSidebarShownWhenWideHiddenWhenNarrow(t *testing.T) {
 	narrow := wide
 	narrow.width, narrow.height = 80, 30
 	narrow.fanoutSize()
-	narrow.frame.dirty = true
+	narrow.frame.invalidate()
 	if bytes.Contains([]byte(narrow.View().Content), []byte("Cluster Load")) {
 		t.Errorf("narrow terminal should auto-hide the cluster sidebar")
 	}
