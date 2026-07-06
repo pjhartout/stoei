@@ -158,7 +158,7 @@ func (ft *filterTable) rebuild() {
 	}
 	sorted := ft.sortState.sortRows(filtered)
 
-	fitTableColumns(&ft.table, ft.columns, sorted, filterTableColumnWidth)
+	fitTableColumns(&ft.table, sortedColumns(ft.columns, ft.sortState), sorted, filterTableColumnWidth)
 	ft.syncWidth()
 
 	display := make([]table.Row, len(sorted))

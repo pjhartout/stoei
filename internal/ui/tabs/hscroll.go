@@ -43,6 +43,23 @@ func hscrollWindow(view string, offset, contentWidth, paneWidth int) string {
 	return strings.Join(lines, "\n")
 }
 
+// sortedColumns returns specs with the active sort column's title carrying a
+// direction arrow ("↑"/"↓"), so the header shows which column orders the table.
+// With no active sort the specs pass through unchanged.
+func sortedColumns(specs []column, ss sortState) []column {
+	if ss.columnIdx < 0 || ss.columnIdx >= len(specs) || ss.direction == sortNone {
+		return specs
+	}
+	out := make([]column, len(specs))
+	copy(out, specs)
+	arrow := " ↑"
+	if ss.direction == sortDesc {
+		arrow = " ↓"
+	}
+	out[ss.columnIdx].title += arrow
+	return out
+}
+
 // fitTableColumns sizes each column to the longest of its minimum width, its
 // title, and its cell values, re-applying the columns only when a width actually
 // changes. Columns wider than the pane are fine — the view is windowed by
@@ -66,7 +83,9 @@ func fitTableColumns(t *table.Model, specs []column, rows [][]string, minWidth f
 			}
 		}
 		cols[i] = table.Column{Title: c.title, Width: w}
-		if !changed && cur[i].Width != w {
+		// Titles change at equal width when the sort arrow moves column or flips
+		// direction, so both must participate in the change detection.
+		if !changed && (cur[i].Width != w || cur[i].Title != c.title) {
 			changed = true
 		}
 	}

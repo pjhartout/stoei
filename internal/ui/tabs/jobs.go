@@ -306,7 +306,7 @@ func (j *Jobs) Refresh() {
 	}
 	sorted := j.sortState.sortRows(filtered)
 
-	fitTableColumns(&j.table, jobColumns, sorted, nil)
+	fitTableColumns(&j.table, sortedColumns(jobColumns, j.sortState), sorted, nil)
 	j.syncWidth()
 
 	rows := make([]table.Row, len(sorted))
