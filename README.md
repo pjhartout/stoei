@@ -32,6 +32,19 @@ sudo install stoei /usr/local/bin/
 
 Binaries are published for Linux, macOS, and Windows (amd64 and arm64).
 
+### Updating
+
+A stoei installed from a release updates itself:
+
+```bash
+stoei update
+```
+
+It downloads the latest release for your platform, verifies the checksum, and
+atomically replaces the binary in place. The TUI also checks for a newer
+release once a day (silently, cached) and shows a hint in the status bar when
+one exists. Dev builds (`stoei --version` reporting `dev`) never phone home.
+
 ### go install
 
 With a Go 1.25+ toolchain:

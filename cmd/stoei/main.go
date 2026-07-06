@@ -12,6 +12,7 @@ import (
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui"
 	"github.com/pjhartout/stoei/internal/ui/components"
+	"github.com/pjhartout/stoei/internal/update"
 )
 
 // version is the build version, set at release time via
@@ -33,6 +34,13 @@ func main() {
 				}
 			}
 			fmt.Println("stoei: cleared the job journal")
+			return
+		case "update":
+			// Self-update: replace this binary with the latest GitHub release.
+			if err := update.Run(os.Stdout, version); err != nil {
+				fmt.Fprintln(os.Stderr, "stoei: update failed:", err)
+				os.Exit(1)
+			}
 			return
 		}
 	}
@@ -62,7 +70,7 @@ func main() {
 	client := slurm.NewClient(slurm.ExecRunner{}, slurm.WithJournal(slurm.JournalPath()))
 
 	ring := components.NewLogRing(components.DefaultMaxLogLines)
-	p := tea.NewProgram(ui.NewWithConfig(st, client, ring, cfg, cfgPath))
+	p := tea.NewProgram(ui.NewWithConfig(st, client, ring, cfg, cfgPath).WithVersion(version))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "stoei:", err)
 		os.Exit(1)

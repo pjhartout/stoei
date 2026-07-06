@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -81,6 +82,33 @@ func TestAnimIntervalThrottlesWhenInputIdle(t *testing.T) {
 	a = m.(App)
 	if cmd == nil || a.animPhase != 1 {
 		t.Error("idle anim tick must still advance and re-arm (at the crawl rate)")
+	}
+}
+
+// TestUpdateHintShownForNewerRelease asserts a release build shows the status
+// bar update hint when the startup check finds a newer tag, and that dev builds
+// and same-version results never do.
+func TestUpdateHintShownForNewerRelease(t *testing.T) {
+	a := newAnimApp().WithVersion("v0.10.0")
+	m, _ := a.Update(latestReleaseMsg{tag: "v0.11.0"})
+	a = m.(App)
+	if a.latestRelease != "v0.11.0" {
+		t.Fatalf("latestRelease = %q; want v0.11.0", a.latestRelease)
+	}
+	if f := a.footer(); !strings.Contains(f, "v0.11.0 available") || !strings.Contains(f, "stoei update") {
+		t.Errorf("footer missing update hint:\n%s", f)
+	}
+
+	same := newAnimApp().WithVersion("v0.11.0")
+	m, _ = same.Update(latestReleaseMsg{tag: "v0.11.0"})
+	if got := m.(App).latestRelease; got != "" {
+		t.Errorf("up-to-date build set a hint: %q", got)
+	}
+
+	dev := newAnimApp() // no version → dev build
+	m, _ = dev.Update(latestReleaseMsg{tag: "v99.0.0"})
+	if got := m.(App).latestRelease; got != "" {
+		t.Errorf("dev build set a hint: %q", got)
 	}
 }
 

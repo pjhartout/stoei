@@ -8,7 +8,26 @@ import (
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/pjhartout/stoei/internal/store"
+	"github.com/pjhartout/stoei/internal/update"
 )
+
+// latestReleaseMsg carries the result of the quiet startup update check; an
+// empty tag means the lookup failed and no hint is shown.
+type latestReleaseMsg struct{ tag string }
+
+// checkLatestRelease resolves the latest release tag through the daily on-disk
+// cache. It is best-effort: any failure yields an empty tag, never a toast.
+func checkLatestRelease() tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), fetchTimeout)
+		defer cancel()
+		tag, err := update.LatestCached(ctx)
+		if err != nil {
+			return latestReleaseMsg{}
+		}
+		return latestReleaseMsg{tag: tag}
+	}
+}
 
 // fetchTimeout bounds every Slurm command issued from a fetch Cmd. A superseded
 // fetch is additionally dropped by generation in the store (I4); this timeout

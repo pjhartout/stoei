@@ -24,6 +24,7 @@ import (
 	"github.com/pjhartout/stoei/internal/ui/modals"
 	"github.com/pjhartout/stoei/internal/ui/tabs"
 	"github.com/pjhartout/stoei/internal/ui/theme"
+	"github.com/pjhartout/stoei/internal/update"
 )
 
 // tabIndex identifies the active top-level tab.
@@ -109,6 +110,12 @@ type App struct {
 	// lastInput is when the user last pressed a key (or refocused the pane); the
 	// anim tier throttles to an idle crawl when it grows stale (animIdleAfter).
 	lastInput time.Time
+
+	// version is the running build version (WithVersion); latestRelease holds a
+	// strictly newer release tag when the quiet startup check found one, shown
+	// as an update hint in the status bar.
+	version       string
+	latestRelease string
 	// slowTicks counts slow-tier ticks so heavier sections can run at a longer
 	// cadence (nodes every 2nd tick, fair-share/priority every 3rd).
 	slowTicks uint64
@@ -208,6 +215,13 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 	return a
 }
 
+// WithVersion records the running build version. A release build (parseable
+// semver) triggers the quiet daily update check; local dev builds skip it.
+func (a App) WithVersion(v string) App {
+	a.version = v
+	return a
+}
+
 // applyKeyModeToTabs pushes the active keybinding preset's tab-local filter/sort
 // bindings into every tab so a non-default preset (for example emacs mode, which
 // rebinds filter to C-s and sort to C-o) takes effect on the tab tables.
@@ -244,7 +258,7 @@ func (a App) Init() tea.Cmd {
 	)
 	heavy := a.dispatchHeavyVisible()
 
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		tea.RequestBackgroundColor,
 		critical,
 		heavy,
@@ -253,7 +267,13 @@ func (a App) Init() tea.Cmd {
 		toastTick(toastTickInterval),
 		spinnerTick(spinnerTickInterval),
 		animTick(animTickInterval),
-	)
+	}
+	// Release builds quietly check for a newer release (behind a daily on-disk
+	// cache); dev builds never phone home.
+	if update.IsRelease(a.version) {
+		cmds = append(cmds, checkLatestRelease())
+	}
+	return tea.Batch(cmds...)
 }
 
 // dispatchRunning bumps the running-jobs generation, marks it loading, sets the
@@ -429,6 +449,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// tier notices the flag on its next firing and stops re-arming.
 		a.focused = false
 		a.frame.invalidate()
+		return a, nil
+
+	case latestReleaseMsg:
+		if update.IsNewer(a.version, msg.tag) {
+			a.latestRelease = msg.tag
+			a.frame.dirty = true // chrome-only: the hint lives in the status bar
+		}
 		return a, nil
 	}
 
@@ -1258,6 +1285,14 @@ func (a App) footer() string {
 	brand := a.styles.ShimmerChip("stoei", a.animPhase)
 	refresh := a.refreshChip()
 
+	// A newer release renders a quiet hint next to the sync chip; "stoei update"
+	// installs it.
+	notice := ""
+	if a.latestRelease != "" {
+		notice = a.styles.BarKey.Render(" "+a.latestRelease+" available ·") +
+			a.styles.BarDesc.Render(" stoei update ")
+	}
+
 	var hints strings.Builder
 	for _, b := range a.ShortHelp() {
 		if !b.Enabled() {
@@ -1267,14 +1302,14 @@ func (a App) footer() string {
 		hints.WriteString(a.styles.BarDesc.Render(" " + b.Help().Desc + " "))
 	}
 
-	midW := w - lipgloss.Width(brand) - lipgloss.Width(refresh)
+	midW := w - lipgloss.Width(brand) - lipgloss.Width(notice) - lipgloss.Width(refresh)
 	if midW < 0 {
 		midW = 0
 	}
 	// Width pads the hint run to fill the bar in the bar background; Inline +
 	// MaxWidth truncate it on narrow terminals instead of wrapping.
 	mid := a.styles.Bar.Width(midW).MaxWidth(midW).Inline(true).Render(hints.String())
-	return brand + mid + refresh
+	return brand + mid + notice + refresh
 }
 
 // refreshChip renders the age of the last running-jobs fetch as a filled badge,
