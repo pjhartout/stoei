@@ -63,6 +63,39 @@ func formatNodeDetail(detail store.JobDetail, styles theme.Styles) string {
 	return formatCategorized(detail.Fields, nodeCategories, nil, styles)
 }
 
+// maxNodeJobs caps how many rows the "Jobs on Node" section renders before
+// collapsing the remainder into an "... and N more" line.
+const maxNodeJobs = 30
+
+// formatNodeJobs renders the jobs currently occupying the node as a "Jobs on
+// Node" section, listing each job's user, id, name, CPU and GPU counts, and run
+// time. It returns "" when the store is nil or no jobs occupy the node.
+func formatNodeJobs(st *store.Store, node string, styles theme.Styles) string {
+	if st == nil {
+		return ""
+	}
+	jobs := store.JobsOnNode(st.AllUsersJobs, node)
+	if len(jobs) == 0 {
+		return ""
+	}
+
+	lines := []string{
+		styles.Title.Render(" Jobs on Node "),
+		"",
+		styles.Subtle.Render(fmt.Sprintf("  %-12s %-12s %-20s %-6s %-6s %-10s",
+			"User", "JobID", "Name", "CPUs", "GPUs", "Time")),
+	}
+	for i, j := range jobs {
+		if i >= maxNodeJobs {
+			lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  ... and %d more jobs", len(jobs)-maxNodeJobs)))
+			break
+		}
+		lines = append(lines, fmt.Sprintf("  %-12s %-12s %-20s %-6d %-6d %-10s",
+			trunc(j.User, 12), trunc(j.ID, 12), trunc(j.Name, 20), j.CPUs, j.GPUs, trunc(j.Time, 10)))
+	}
+	return strings.Join(lines, "\n")
+}
+
 // formatCategorized renders fields grouped by category, then any remaining
 // uncategorized fields under "Other" in sorted order. display optionally maps a
 // field key to a friendlier label.

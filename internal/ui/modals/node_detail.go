@@ -21,10 +21,12 @@ type nodeDetailLoadedMsg struct {
 
 // NodeDetail is the scrollable node-detail modal opened by Enter on a Nodes row.
 // It fetches client.NodeDetail in a Cmd (spinner while loading) and renders the
-// "scontrol show node" fields by category.
+// "scontrol show node" fields by category, followed by the jobs currently
+// running on the node (computed from already-fetched store data).
 type NodeDetail struct {
 	styles theme.Styles
 	client store.SlurmClient
+	store  *store.Store
 
 	node string
 
@@ -33,13 +35,15 @@ type NodeDetail struct {
 	loading bool
 }
 
-// NewNodeDetail builds a node-detail modal for nodeName.
-func NewNodeDetail(client store.SlurmClient, styles theme.Styles, nodeName string) *NodeDetail {
+// NewNodeDetail builds a node-detail modal for nodeName. The store supplies the
+// all-users jobs used for the "Jobs on Node" section.
+func NewNodeDetail(client store.SlurmClient, st *store.Store, styles theme.Styles, nodeName string) *NodeDetail {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 	n := &NodeDetail{
 		styles: styles,
 		client: client,
+		store:  st,
 		node:   nodeName,
 		box:    newScrollBox(styles),
 		spin:   sp,
@@ -80,7 +84,13 @@ func (n *NodeDetail) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 			n.box.SetContent(n.styles.Error.Render("Error: " + msg.err.Error()))
 			return n, nil, false
 		}
-		n.box.SetContent(formatNodeDetail(msg.detail, n.styles))
+		content := formatNodeDetail(msg.detail, n.styles)
+		if jobs := formatNodeJobs(n.store, n.node, n.styles); jobs != "" {
+			// Occupants first: opening a node's detail is usually to see who is on
+			// it, so it should not sit below all the scontrol fields.
+			content = jobs + "\n\n" + content
+		}
+		n.box.SetContent(content)
 		n.box.GotoTop()
 		return n, nil, false
 

@@ -1,6 +1,7 @@
 package store
 
 import (
+	"sort"
 	"strconv"
 	"strings"
 
@@ -142,4 +143,59 @@ func atoiDefault(s string) int {
 // NodeDisplays returns the per-node view-models derived from the current nodes.
 func (s *Store) NodeDisplays() []NodeDisplay {
 	return DeriveNodeDisplays(s.Nodes)
+}
+
+// NodeJob is one job occupying a node, with its user and parsed resource use, for
+// the "Jobs on Node" section of the node-detail modal.
+type NodeJob struct {
+	ID   string
+	Name string
+	User string
+	Time string
+	CPUs int
+	GPUs int
+}
+
+// JobsOnNode returns the jobs whose allocated NodeList includes node, sorted by
+// user then job id. CPUs and GPUs come from each job's TRES and are whole-job
+// totals, so a multi-node job's counts are its full allocation, not the share on
+// this node. ponytail: per-node split needs per-node TRES that squeue doesn't
+// give us; whole-job totals if a job spans nodes.
+func JobsOnNode(jobs []AllUsersJob, node string) []NodeJob {
+	node = strings.TrimSpace(node)
+	var out []NodeJob
+	for _, j := range jobs {
+		if !nodeListContains(j.NodeList, node) {
+			continue
+		}
+		res := slurm.ParseTRESResources(strings.TrimSpace(j.TRES))
+		out = append(out, NodeJob{
+			ID:   strings.TrimSpace(j.ID),
+			Name: strings.TrimSpace(j.Name),
+			User: strings.TrimSpace(j.User),
+			Time: strings.TrimSpace(j.Time),
+			CPUs: res.CPUs,
+			GPUs: slurm.CalculateTotalGPUs(res.GPUs, true),
+		})
+	}
+	sort.SliceStable(out, func(i, k int) bool {
+		if out[i].User != out[k].User {
+			return out[i].User < out[k].User
+		}
+		return out[i].ID < out[k].ID
+	})
+	return out
+}
+
+// nodeListContains reports whether node appears in the expanded nodelist.
+func nodeListContains(nodelist, node string) bool {
+	if node == "" {
+		return false
+	}
+	for _, name := range slurm.ExpandNodeList(strings.TrimSpace(nodelist)) {
+		if name == node {
+			return true
+		}
+	}
+	return false
 }

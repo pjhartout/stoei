@@ -665,7 +665,7 @@ func (a *App) openDetailForActive() tea.Cmd {
 			a.pushToast("No node selected")
 			return nil
 		}
-		return a.pushModal(modals.NewNodeDetail(a.client, a.styles, name))
+		return a.pushModal(modals.NewNodeDetail(a.client, a.store, a.styles, name))
 	case tabUsers:
 		user := a.users.SelectedKey()
 		if user == "" {

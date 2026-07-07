@@ -18,7 +18,13 @@ func TestNodeDetailFetchesAndRenders(t *testing.T) {
 			Fields: map[string]string{"NodeName": "node01", "State": "IDLE", "CPUTot": "64"},
 		},
 	}
-	n := NewNodeDetail(fc, testStyles(), "node01")
+	st := store.New()
+	st.SetAllUsersJobs([]store.AllUsersJob{
+		{ID: "42", Name: "train", User: "bob", State: "RUNNING", Time: "1:23:00", NodeList: "node01", TRES: "cpu=8,mem=16G,gres/gpu:a100=2"},
+		{ID: "43", Name: "idle", User: "carol", State: "RUNNING", Time: "0:05", NodeList: "node99", TRES: "cpu=1"},
+	}, st.NextGen(store.SectionAllUsersJobs), nil)
+
+	n := NewNodeDetail(fc, st, testStyles(), "node01")
 	n.SetSize(80, 24)
 
 	cmd := n.Init()
@@ -29,8 +35,15 @@ func TestNodeDetailFetchesAndRenders(t *testing.T) {
 	if fc.LastNodeDetailName != "node01" {
 		t.Errorf("NodeDetail called with %q; want node01", fc.LastNodeDetailName)
 	}
-	if !strings.Contains(n.View(), "node01") || !strings.Contains(n.View(), "IDLE") {
-		t.Errorf("node detail did not render fields, got:\n%s", n.View())
+	view := n.View()
+	if !strings.Contains(view, "node01") || !strings.Contains(view, "IDLE") {
+		t.Errorf("node detail did not render fields, got:\n%s", view)
+	}
+	if !strings.Contains(view, "Jobs on Node") || !strings.Contains(view, "bob") {
+		t.Errorf("node detail missing Jobs on Node section for the node's occupant, got:\n%s", view)
+	}
+	if strings.Contains(view, "carol") {
+		t.Errorf("node detail should exclude jobs on other nodes, got:\n%s", view)
 	}
 }
 

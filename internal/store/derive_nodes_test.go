@@ -91,3 +91,32 @@ func TestDeriveNodeDisplaysGPULessNodeHasNoTypes(t *testing.T) {
 		t.Errorf("GPU%% = %.1f; want 0", got)
 	}
 }
+
+func TestJobsOnNodeMatchesExpandedNodeListAndParsesResources(t *testing.T) {
+	jobs := []AllUsersJob{
+		{ID: "10", Name: "a", User: "carol", Time: "2:00", NodeList: "gpu[01-02]", TRES: "cpu=16,mem=32G,gres/gpu:a100=4"},
+		{ID: "9", Name: "b", User: "alice", Time: "1:00", NodeList: "gpu01", TRES: "cpu=8"},
+		{ID: "11", Name: "c", User: "dave", Time: "3:00", NodeList: "cpu07", TRES: "cpu=4"},
+	}
+	got := JobsOnNode(jobs, "gpu01")
+	if len(got) != 2 {
+		t.Fatalf("got %d jobs on gpu01; want 2 (%+v)", len(got), got)
+	}
+	// Sorted by user then id: alice(9) before carol(10).
+	if got[0].User != "alice" || got[1].User != "carol" {
+		t.Errorf("order = %q,%q; want alice,carol", got[0].User, got[1].User)
+	}
+	if got[1].CPUs != 16 || got[1].GPUs != 4 {
+		t.Errorf("carol resources = %d cpu / %d gpu; want 16/4", got[1].CPUs, got[1].GPUs)
+	}
+}
+
+func TestJobsOnNodeEmptyForUnoccupiedNode(t *testing.T) {
+	jobs := []AllUsersJob{{ID: "1", User: "x", NodeList: "gpu01", TRES: "cpu=1"}}
+	if got := JobsOnNode(jobs, "gpu99"); len(got) != 0 {
+		t.Errorf("got %d; want 0 for unoccupied node", len(got))
+	}
+	if got := JobsOnNode(jobs, ""); len(got) != 0 {
+		t.Errorf("empty node name should match nothing, got %d", len(got))
+	}
+}
