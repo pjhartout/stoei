@@ -137,13 +137,16 @@ func (n *Nodes) decorate(plain []string, styles theme.Styles) table.Row {
 }
 
 // colorPctCell colors a "NN.N%" cell using the node usage thresholds, leaving a
-// non-percent value (such as "N/A") unstyled.
+// non-percent value (such as "N/A") unstyled. The colored cell ends with a
+// foreground-only reset so a selected row's highlight bar survives across it
+// rather than being cleared mid-line by a full reset (which previously left the
+// columns after CPU% unhighlighted).
 func colorPctCell(cell string, styles theme.Styles) string {
 	pct, ok := parsePercent(cell)
 	if !ok {
 		return cell
 	}
-	return styles.PctStyle(pct, theme.PctHighThreshold, theme.PctMidThreshold, false).Render(cell)
+	return foregroundOnlyReset(styles.PctStyle(pct, theme.PctHighThreshold, theme.PctMidThreshold, false).Render(cell))
 }
 
 // CapturesInput reports whether the filter bar is open.

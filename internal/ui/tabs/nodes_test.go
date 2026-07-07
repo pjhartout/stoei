@@ -73,3 +73,38 @@ func TestNodesFilterByState(t *testing.T) {
 		t.Errorf("down node should be filtered out; view:\n%s", view)
 	}
 }
+
+// TestNodesSelectedRowHighlightNotBrokenByPercentCells asserts the selected node
+// row's colored percent cells end with a foreground-only reset (ESC[39m) so the
+// selection background bar is not cleared mid-line by a full reset — which would
+// leave the columns after CPU% unhighlighted.
+func TestNodesSelectedRowHighlightNotBrokenByPercentCells(t *testing.T) {
+	nodes := []store.Node{
+		{
+			Name: "gpu01", State: "MIXED", CPUTot: "64", CPUAlloc: "48",
+			RealMem: "262144", AllocMem: "131072",
+			CfgTRES: "cpu=64,mem=256G,gres/gpu:h200=8", AllocTRES: "cpu=48,gres/gpu:h200=6",
+			Fields: map[string]string{"Partitions": "gpu", "NodeName": "gpu01"},
+		},
+	}
+	n := seedNodes(t, nodes)
+
+	var row string
+	for _, ln := range strings.Split(n.View(), "\n") {
+		if strings.Contains(ln, "gpu01") {
+			row = ln
+		}
+	}
+	if row == "" {
+		t.Fatal("selected node row not found")
+	}
+	// Each colored percent cell must end with a foreground-only reset (ESC[39m),
+	// not a full reset (ESC[0m / ESC[m) that would clear the selection background
+	// for every column after it.
+	if !strings.Contains(row, "%\x1b[39m") {
+		t.Errorf("percent cell should end with a foreground-only reset (ESC[39m):\n%q", row)
+	}
+	if strings.Contains(row, "%\x1b[0m") || strings.Contains(row, "%\x1b[m") {
+		t.Errorf("percent cell ends with a full reset, breaking the highlight bar mid-line:\n%q", row)
+	}
+}
