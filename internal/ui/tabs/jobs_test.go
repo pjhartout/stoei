@@ -61,6 +61,22 @@ func TestColumnsFitLongValues(t *testing.T) {
 	}
 }
 
+// TestSelectedJobKeepsArrayBracket asserts that selecting a pending array job
+// returns its full bracketed id (e.g. "5214636_[0-5%6]") rather than a truncated
+// "5214636_", so the detail/cancel lookups receive a parseable id.
+func TestSelectedJobKeepsArrayBracket(t *testing.T) {
+	j, _ := seedJobs(t, []store.RunningJob{
+		{ID: "5214636_[0-5%6]", Name: "arr", State: "PENDING", Time: "0:00", Nodes: "1", NodeList: ""},
+	})
+	id, _, _, ok := j.SelectedJob()
+	if !ok {
+		t.Fatal("expected a selected job")
+	}
+	if id != "5214636_[0-5%6]" {
+		t.Errorf("array job id mangled: got %q, want %q", id, "5214636_[0-5%6]")
+	}
+}
+
 // TestSelectedRowHighlightSpansLine asserts the selected-row highlight bar spans
 // the whole line: it must fill the full table width, and the colored State cell
 // must use a foreground-only reset (ESC[39m) so the background is not cleared

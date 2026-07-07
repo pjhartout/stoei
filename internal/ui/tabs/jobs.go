@@ -6,7 +6,6 @@ package tabs
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 
@@ -66,10 +65,6 @@ func jobsKeysForMode(mode string) JobsKeyMap {
 		ScrollRight: key.NewBinding(key.WithKeys("right", "l"), key.WithHelp("→/l", "scroll right")),
 	}
 }
-
-// markupPattern strips any leftover bracket markup (e.g. "[red]…[/red]") from a
-// cell before it is used for filtering, sorting, or cursor restoration.
-var markupPattern = regexp.MustCompile(`\[.*?\]`)
 
 // Jobs is the live running-jobs tab. It renders a bubbles/v2 table from the
 // store's RunningJobs, colors the State column, keeps a My-Usage banner, and
@@ -388,7 +383,7 @@ func (j *Jobs) SelectedJobName() string {
 	if nameIdx < 0 || nameIdx >= len(row) {
 		return ""
 	}
-	return strings.TrimSpace(markupPattern.ReplaceAllString(row[nameIdx], ""))
+	return strings.TrimSpace(row[nameIdx])
 }
 
 // selectedJobID returns the job id (first cell, markup-stripped) of the
@@ -398,7 +393,7 @@ func (j *Jobs) selectedJobID() string {
 	if len(row) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(markupPattern.ReplaceAllString(row[0], ""))
+	return strings.TrimSpace(row[0])
 }
 
 // reselect restores the table cursor to the row whose stable first-column key

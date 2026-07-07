@@ -170,14 +170,14 @@ func (ft *filterTable) rebuild() {
 	reselect(&ft.table, sorted, selected)
 }
 
-// selectedKey returns the stable first-column key of the selected row, markup
-// stripped, or "" when the table is empty.
+// selectedKey returns the stable first-column key of the selected row, or "" when
+// the table is empty.
 func (ft *filterTable) selectedKey() string {
 	row := ft.table.SelectedRow()
 	if len(row) == 0 {
 		return ""
 	}
-	return strings.TrimSpace(markupPattern.ReplaceAllString(row[0], ""))
+	return strings.TrimSpace(row[0])
 }
 
 // SelectedKey returns the stable first-column key of the selected row (markup
@@ -185,15 +185,15 @@ func (ft *filterTable) selectedKey() string {
 // detail modal for the highlighted row.
 func (ft *filterTable) SelectedKey() string { return ft.selectedKey() }
 
-// SelectedCell returns the markup-stripped value of column col in the selected
-// row, or "" when the table is empty or col is out of range. The Priority tab
-// uses it because its detail target is not always the first column.
+// SelectedCell returns the value of column col in the selected row, or "" when the
+// table is empty or col is out of range. The Priority tab uses it because its
+// detail target is not always the first column.
 func (ft *filterTable) SelectedCell(col int) string {
 	row := ft.table.SelectedRow()
 	if col < 0 || col >= len(row) {
 		return ""
 	}
-	return strings.TrimSpace(markupPattern.ReplaceAllString(row[col], ""))
+	return strings.TrimSpace(row[col])
 }
 
 // Update handles table-local input: "/" opens the filter, "o" cycles the sort,
