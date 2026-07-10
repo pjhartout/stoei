@@ -10,6 +10,11 @@ and cancel jobs, and see cluster load — all without leaving the terminal.
 - Build and run with the Go toolchain (`go build ./...`, `go run ./cmd/stoei`).
 - Lint with `golangci-lint` (config in `.golangci.yml`); format with `gofmt`.
 - Ship as a single static binary via GoReleaser; `go install` also works.
+- **Stale-binary trap:** when a bug looks already-fixed in source, suspect the
+  installed binary is old before re-debugging. `stoei update` pulls the latest
+  *release*, which can lag unreleased local commits. Compare the binary mtime
+  against the fixing commit's date, then rebuild
+  (`go build -o ~/.local/bin/stoei ./cmd/stoei`).
 
 ## Architecture
 
