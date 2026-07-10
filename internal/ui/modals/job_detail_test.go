@@ -164,3 +164,35 @@ func TestJobDetailEscCloses(t *testing.T) {
 		t.Error("esc should close the job-detail modal")
 	}
 }
+
+// TestJobDetailMOpensModify asserts "m" emits an OpenModifyMsg carrying the
+// loaded scontrol fields, and is a no-op before the detail has loaded.
+func TestJobDetailMOpensModify(t *testing.T) {
+	fc := &store.FakeClient{
+		JobDetailData: store.JobDetail{
+			Source: "scontrol",
+			Fields: map[string]string{"JobId": "12345", "JobState": "RUNNING", "Partition": "p.hpcl91"},
+		},
+	}
+	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "12345", "RUNNING")
+	d.SetSize(80, 24)
+
+	_, cmd, _ := d.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	if cmd != nil {
+		t.Error("m before the detail loads must be a no-op")
+	}
+
+	fetch := d.Init()
+	d.Update(firstMsg(fetch))
+	_, cmd, done := d.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
+	if done {
+		t.Error("m must not close the detail modal")
+	}
+	msg, ok := firstMsg(cmd).(OpenModifyMsg)
+	if !ok {
+		t.Fatalf("m produced %T; want OpenModifyMsg", firstMsg(cmd))
+	}
+	if msg.JobID != "12345" || msg.Fields["Partition"] != "p.hpcl91" {
+		t.Errorf("OpenModifyMsg = %+v; want job 12345 with loaded fields", msg)
+	}
+}

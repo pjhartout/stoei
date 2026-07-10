@@ -19,6 +19,9 @@ type cachedDetail struct {
 	// err is a non-empty fetch error message, cached so a failed lookup is not
 	// re-attempted on every open within the same state.
 	err string
+	// fields is the parsed scontrol detail backing the render, kept so the
+	// modify modal can pre-fill current values on a cache hit.
+	fields map[string]string
 }
 
 // JobDetailCache memoizes rendered job details keyed by normalized job id and
@@ -65,6 +68,29 @@ func (c *JobDetailCache) Get(jobID, wantState string) (cachedDetail, bool) {
 // Put stores a rendered detail for jobID at the given live state.
 func (c *JobDetailCache) Put(jobID string, e cachedDetail) {
 	c.entries[normalizeID(jobID)] = e
+}
+
+// Evict removes the cached entries for jobID's whole job family — the exact
+// entry plus the array leader and sibling tasks sharing its base id. The root
+// calls it after a successful modification: the job's state usually does not
+// change, so SyncStates would keep serving the pre-modification render, and an
+// array-scoped update (e.g. ArrayTaskThrottle) targets the leader while the
+// modal was opened for one task.
+func (c *JobDetailCache) Evict(jobID string) {
+	base := baseJobID(normalizeID(jobID))
+	for id := range c.entries {
+		if baseJobID(id) == base {
+			delete(c.entries, id)
+		}
+	}
+}
+
+// baseJobID strips a "_<task>" suffix so array tasks share a family key.
+func baseJobID(jobID string) string {
+	if i := strings.IndexByte(jobID, '_'); i >= 0 {
+		return jobID[:i]
+	}
+	return jobID
 }
 
 // SyncStates evicts cached entries whose live state has changed since they were
