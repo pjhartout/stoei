@@ -38,6 +38,10 @@ type SlurmClient interface {
 	NodeDetail(ctx context.Context, nodeName string) (slurm.JobDetail, error)
 	// CancelJob cancels a job via scancel.
 	CancelJob(ctx context.Context, jobID string) error
+	// UpdateJob modifies one field of a job via "scontrol update".
+	UpdateJob(ctx context.Context, jobID, key, value string) error
+	// HoldJob holds (hold=true) or releases a job via "scontrol hold|release".
+	HoldJob(ctx context.Context, jobID string, hold bool) error
 	// CompletedJobRecord returns a history record for a just-finished job sourced
 	// from the controller (scontrol), not slurmdbd, so a job that finishes during a
 	// session can be merged into history without a sacct query. found is false when

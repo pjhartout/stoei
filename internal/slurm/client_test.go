@@ -298,3 +298,96 @@ func TestClientErrorsPropagate(t *testing.T) {
 		t.Errorf("err = %v, want runner error to propagate", err)
 	}
 }
+
+// TestClientUpdateJob verifies the exact scontrol update command line.
+func TestClientUpdateJob(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{"scontrol": ""}}
+	c := NewClient(r, WithUsername("alice"))
+
+	if err := c.UpdateJob(context.Background(), "12345", "ArrayTaskThrottle", "8"); err != nil {
+		t.Fatal(err)
+	}
+	call := lastCall(r)
+	want := []string{"update", "JobId=12345", "ArrayTaskThrottle=8"}
+	if call.Name != "scontrol" || len(call.Args) != len(want) {
+		t.Fatalf("scontrol update command mismatch: %v %v", call.Name, call.Args)
+	}
+	for i, a := range want {
+		if call.Args[i] != a {
+			t.Errorf("arg[%d] = %q; want %q", i, call.Args[i], a)
+		}
+	}
+}
+
+// TestClientUpdateJobNormalizesArrayLeader verifies a pending array leader id is
+// normalized to its base id before the update.
+func TestClientUpdateJobNormalizesArrayLeader(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{"scontrol": ""}}
+	c := NewClient(r, WithUsername("alice"))
+
+	if err := c.UpdateJob(context.Background(), "12345_[0-99]", "Partition", "p.hpcl91"); err != nil {
+		t.Fatal(err)
+	}
+	if !argsContain(lastCall(r), "JobId=12345") {
+		t.Errorf("array leader not normalized: %v", lastCall(r).Args)
+	}
+}
+
+// TestClientUpdateJobRejectsBadInput verifies no command runs for an invalid
+// key, an empty value, or a bad job id.
+func TestClientUpdateJobRejectsBadInput(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{"scontrol": ""}}
+	c := NewClient(r, WithUsername("alice"))
+
+	cases := []struct{ id, key, value string }{
+		{"12345", "Bad Key", "x"},
+		{"12345", "Key=Injected", "x"},
+		{"12345", "", "x"},
+		{"12345", "Partition", ""},
+		{"bad id", "Partition", "x"},
+		{"12345", "JobId", "99999"},
+		{"12345", "jobid", "99999"},
+	}
+	for _, tc := range cases {
+		if err := c.UpdateJob(context.Background(), tc.id, tc.key, tc.value); err == nil {
+			t.Errorf("UpdateJob(%q, %q, %q): expected error", tc.id, tc.key, tc.value)
+		}
+	}
+	if len(r.calls) != 0 {
+		t.Errorf("scontrol called despite invalid input: %v", r.calls)
+	}
+}
+
+// TestClientHoldJob verifies the hold and release verbs.
+func TestClientHoldJob(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{"scontrol": ""}}
+	c := NewClient(r, WithUsername("alice"))
+
+	if err := c.HoldJob(context.Background(), "12345", true); err != nil {
+		t.Fatal(err)
+	}
+	call := lastCall(r)
+	if call.Name != "scontrol" || call.Args[0] != "hold" || !argsContain(call, "12345") {
+		t.Errorf("hold command mismatch: %v %v", call.Name, call.Args)
+	}
+
+	if err := c.HoldJob(context.Background(), "12345_[0-99]", false); err != nil {
+		t.Fatal(err)
+	}
+	call = lastCall(r)
+	if call.Args[0] != "release" || !argsContain(call, "12345") {
+		t.Errorf("release command mismatch: %v", call.Args)
+	}
+}
+
+// TestClientHoldJobRejectsBadID verifies no command runs for an invalid job id.
+func TestClientHoldJobRejectsBadID(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{}}
+	c := NewClient(r, WithUsername("alice"))
+	if err := c.HoldJob(context.Background(), "bad id", true); err == nil {
+		t.Error("expected validation error")
+	}
+	if len(r.calls) != 0 {
+		t.Errorf("scontrol called despite invalid ID: %v", r.calls)
+	}
+}

@@ -59,3 +59,24 @@ func TestCacheNormalizesArrayTasks(t *testing.T) {
 		t.Error("array-range and base id should share a cache key")
 	}
 }
+
+// TestCacheEvictRemovesJobFamily asserts Evict drops the exact entry plus the
+// array leader and sibling tasks sharing the base id, and nothing else.
+func TestCacheEvictRemovesJobFamily(t *testing.T) {
+	c := NewJobDetailCache()
+	c.Put("12345", cachedDetail{state: "PENDING"})
+	c.Put("12345_3", cachedDetail{state: "RUNNING"})
+	c.Put("12345_7", cachedDetail{state: "RUNNING"})
+	c.Put("99999", cachedDetail{state: "RUNNING"})
+
+	c.Evict("12345_7")
+
+	for _, id := range []string{"12345", "12345_3", "12345_7"} {
+		if _, ok := c.entries[id]; ok {
+			t.Errorf("entry %s survived Evict of a family member", id)
+		}
+	}
+	if _, ok := c.entries["99999"]; !ok {
+		t.Error("unrelated job evicted")
+	}
+}

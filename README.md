@@ -14,6 +14,8 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 - Tabs for Jobs, Nodes, Users, Priority, and Logs
 - Cluster-load sidebar: free vs. allocated nodes/CPU/memory/GPU, and the pending queue
 - Quick filtering (`/`), sorting (`o`), and job cancellation (`c`)
+- Job modification from the detail view (`m`): array throttle, partition, time
+  limit, QOS, hold/release, or any raw `scontrol update` field
 - Configurable themes and vim/emacs keybindings
 
 ## Installation

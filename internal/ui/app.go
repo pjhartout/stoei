@@ -558,6 +558,30 @@ func (a App) handleModalMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.pushToast("Cancelled job " + msg.JobID)
 		return a, a.manualRefresh(), true // refresh so the job leaves the list
 
+	case modals.OpenModifyMsg:
+		if store.IsTerminalState(msg.Fields["JobState"]) {
+			a.pushToast("Cannot modify " + msg.JobID + ": job is not active (" + msg.Fields["JobState"] + ")")
+			return a, nil, true
+		}
+		return a, a.pushModal(modals.NewJobModify(a.client, a.styles, msg.JobID, msg.Fields)), true
+
+	case modals.ModifyRequestedMsg:
+		if msg.Err != nil {
+			a.pushToast("Modify failed for " + msg.JobID + ": " + msg.Err.Error())
+			return a, nil, true
+		}
+		a.pushToast("Updated job " + msg.JobID + " (" + msg.Desc + ")")
+		a.detailCache.Evict(msg.JobID)
+		cmds := []tea.Cmd{a.manualRefresh()}
+		// The detail modal underneath still shows the pre-modification render;
+		// re-Init it so the evicted cache forces a fresh fetch.
+		if n := len(a.modals); n > 0 {
+			if d, ok := a.modals[n-1].(*modals.JobDetail); ok {
+				cmds = append(cmds, d.Init())
+			}
+		}
+		return a, tea.Batch(cmds...), true
+
 	case modals.LogToastMsg:
 		a.pushToast(msg.Text)
 		return a, nil, true

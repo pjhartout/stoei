@@ -58,6 +58,9 @@ type JobDetail struct {
 	stdout string
 	stderr string
 	errMsg string
+	// fields is the parsed scontrol detail, kept so "m" can open the modify
+	// modal with current values pre-filled.
+	fields map[string]string
 }
 
 // NewJobDetail builds a job-detail modal for jobID at live state. The cache is
@@ -77,7 +80,7 @@ func NewJobDetail(client store.SlurmClient, cache *JobDetailCache, styles theme.
 		spin:   sp,
 	}
 	d.box.SetTitle("Job Details — " + jobID)
-	d.box.SetFooter("o stdout   e stderr   ↑/↓ scroll   Esc close")
+	d.box.SetFooter("o stdout   e stderr   m modify   ↑/↓ scroll   Esc close")
 	return d
 }
 
@@ -111,6 +114,7 @@ func (d *JobDetail) fetchCmd() tea.Cmd {
 func (d *JobDetail) applyEntry(e cachedDetail) {
 	d.loading = false
 	d.stdout, d.stderr, d.errMsg = e.stdout, e.stderr, e.err
+	d.fields = e.fields
 	if e.err != "" {
 		d.box.SetContent(d.styles.Error.Render("Error: " + e.err))
 		return
@@ -146,6 +150,8 @@ func (d *JobDetail) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 			return d, d.openLog(d.stdout, "stdout"), false
 		case "e":
 			return d, d.openLog(d.stderr, "stderr"), false
+		case "m":
+			return d, d.openModify(), false
 		}
 		cmd := d.box.ScrollUpdate(msg)
 		return d, cmd, false
@@ -166,6 +172,7 @@ func (d *JobDetail) applyLoaded(msg jobDetailLoadedMsg) {
 	}
 	content := formatJobDetail(msg.detail, d.styles)
 	d.stdout, d.stderr = stdoutStderrPaths(msg.detail.Fields)
+	d.fields = msg.detail.Fields
 	d.errMsg = ""
 	d.box.SetContent(content)
 	d.box.GotoTop()
@@ -175,7 +182,19 @@ func (d *JobDetail) applyLoaded(msg jobDetailLoadedMsg) {
 		stderr:  d.stderr,
 		source:  msg.detail.Source,
 		state:   d.state,
+		fields:  msg.detail.Fields,
 	})
+}
+
+// openModify emits an OpenModifyMsg carrying the loaded scontrol fields so the
+// root can push the modify modal with current values. Before the detail has
+// loaded (or after a failed fetch) there is nothing to modify, so it is a no-op.
+func (d *JobDetail) openModify() tea.Cmd {
+	if d.fields == nil {
+		return nil
+	}
+	jobID, fields := d.jobID, d.fields
+	return func() tea.Msg { return OpenModifyMsg{JobID: jobID, Fields: fields} }
 }
 
 // openLog emits an OpenLogMsg for path. When the path is empty it emits an
@@ -214,6 +233,7 @@ func (d *JobDetail) ShortHelp() []key.Binding {
 	return []key.Binding{
 		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "stdout")),
 		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "stderr")),
+		key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "modify")),
 		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
 	}
 }

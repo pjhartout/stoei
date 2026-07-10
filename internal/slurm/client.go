@@ -364,6 +364,56 @@ func (c *Client) CancelJob(ctx context.Context, jobID string) error {
 	return nil
 }
 
+// safeUpdateKey validates a "scontrol update" field name before it reaches a
+// command.
+var safeUpdateKey = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9]*$`)
+
+// UpdateJob modifies one field of a job via "scontrol update JobId=<id>
+// Key=Value". The key is validated here; the value is passed through as a single
+// argv element (no shell parsing) and scontrol itself validates it, so a refusal
+// (e.g. a non-admin raising TimeLimit) surfaces via the wrapped stderr.
+func (c *Client) UpdateJob(ctx context.Context, jobID, key, value string) error {
+	jobID = NormalizeArrayJobID(jobID)
+	if err := validateJobID(jobID); err != nil {
+		return err
+	}
+	key = strings.TrimSpace(key)
+	if !safeUpdateKey.MatchString(key) {
+		return fmt.Errorf("invalid scontrol field name: %q", key)
+	}
+	// A JobId field would silently retarget the update to a different job than
+	// the one the caller displays and reports on.
+	if strings.EqualFold(key, "jobid") {
+		return fmt.Errorf("field %q cannot be set via update", key)
+	}
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return errors.New("value cannot be empty")
+	}
+	if _, err := c.runner.Run(ctx, "scontrol", "update", "JobId="+jobID, key+"="+value); err != nil {
+		return fmt.Errorf("scontrol update error: %w", err)
+	}
+	return nil
+}
+
+// HoldJob holds (hold=true) or releases (hold=false) a job via "scontrol
+// hold|release". A pending array leader is normalized to its base id, which
+// holds or releases the whole array.
+func (c *Client) HoldJob(ctx context.Context, jobID string, hold bool) error {
+	jobID = NormalizeArrayJobID(jobID)
+	if err := validateJobID(jobID); err != nil {
+		return err
+	}
+	verb := "release"
+	if hold {
+		verb = "hold"
+	}
+	if _, err := c.runner.Run(ctx, "scontrol", verb, jobID); err != nil {
+		return fmt.Errorf("scontrol %s error: %w", verb, err)
+	}
+	return nil
+}
+
 // validateUsername enforces the safe-username pattern, rejecting empty or
 // unsafe-character usernames before they reach a command.
 func validateUsername(username string) error {

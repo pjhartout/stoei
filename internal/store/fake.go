@@ -34,6 +34,8 @@ type FakeClient struct {
 	JobDetailErr       error
 	NodeDetailErr      error
 	CancelJobErr       error
+	UpdateJobErr       error
+	HoldJobErr         error
 	CompletedJobErr    error
 
 	// LastJobDetailID is the job ID passed to the most recent JobDetail call.
@@ -42,6 +44,14 @@ type FakeClient struct {
 	LastNodeDetailName string
 	// LastCancelJobID is the job ID passed to the most recent CancelJob call.
 	LastCancelJobID string
+	// LastUpdateJobID, LastUpdateKey, and LastUpdateValue record the most recent
+	// UpdateJob call.
+	LastUpdateJobID string
+	LastUpdateKey   string
+	LastUpdateValue string
+	// LastHoldJobID and LastHold record the most recent HoldJob call.
+	LastHoldJobID string
+	LastHold      bool
 	// LastCompletedJobID is the job ID passed to the most recent CompletedJobRecord call.
 	LastCompletedJobID string
 	// LastHistoryDays is the day window passed to the most recent JobHistory call.
@@ -101,6 +111,18 @@ func (f *FakeClient) NodeDetail(_ context.Context, nodeName string) (slurm.JobDe
 func (f *FakeClient) CancelJob(_ context.Context, jobID string) error {
 	f.LastCancelJobID = jobID
 	return f.CancelJobErr
+}
+
+// UpdateJob implements SlurmClient.
+func (f *FakeClient) UpdateJob(_ context.Context, jobID, key, value string) error {
+	f.LastUpdateJobID, f.LastUpdateKey, f.LastUpdateValue = jobID, key, value
+	return f.UpdateJobErr
+}
+
+// HoldJob implements SlurmClient.
+func (f *FakeClient) HoldJob(_ context.Context, jobID string, hold bool) error {
+	f.LastHoldJobID, f.LastHold = jobID, hold
+	return f.HoldJobErr
 }
 
 // CompletedJobRecord implements SlurmClient.

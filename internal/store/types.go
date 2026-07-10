@@ -27,3 +27,7 @@ type (
 	// GPUEntry is a single GPU allocation parsed from a TRES or Gres string.
 	GPUEntry = slurm.GPUEntry
 )
+
+// IsTerminalState reports whether a JobState string denotes a finished job,
+// re-exported for the ui layer (same depguard reasoning as the type aliases).
+func IsTerminalState(state string) bool { return slurm.IsTerminalState(state) }
