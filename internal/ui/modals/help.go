@@ -27,12 +27,15 @@ type helpSection struct {
 // log viewer, general). It is dismissed with esc, q, or ?.
 type Help struct {
 	box scrollBox
+	// km is the KeyMap the modal was opened with, kept so a restyle re-renders
+	// the same active bindings rather than the defaults.
+	km keys.KeyMap
 }
 
 // NewHelp builds the help modal from the global KeyMap so the displayed keys
 // reflect the active bindings.
 func NewHelp(km keys.KeyMap, styles theme.Styles) *Help {
-	h := &Help{box: newScrollBox(styles)}
+	h := &Help{box: newScrollBox(styles), km: km}
 	h.box.SetTitle("Keyboard Shortcuts")
 	h.box.SetFooter("? / Esc to close   ↑/↓ scroll")
 	h.box.SetContent(renderHelpSections(helpSections(km), styles))
@@ -154,7 +157,7 @@ func (h *Help) SetSize(w, height int) { h.box.SetSize(w, height) }
 // SetStyles re-themes the help box and re-renders its content.
 func (h *Help) SetStyles(styles theme.Styles) {
 	h.box.SetStyles(styles)
-	h.box.SetContent(renderHelpSections(helpSections(keys.Default()), styles))
+	h.box.SetContent(renderHelpSections(helpSections(h.km), styles))
 }
 
 // ShortHelp returns the help modal's own dismissal binding.

@@ -39,6 +39,18 @@ func TestHelpRendersGroupedBindings(t *testing.T) {
 	}
 }
 
+// TestHelpKeepsActiveKeymapAcrossRestyle asserts a restyle (a theme change while
+// the modal is open) re-renders the bindings the modal was opened with instead
+// of reverting to the vim defaults.
+func TestHelpKeepsActiveKeymapAcrossRestyle(t *testing.T) {
+	h := NewHelp(keys.BuildKeyMap(keys.Emacs), testStyles())
+	h.SetSize(120, 80)
+	h.SetStyles(testStyles())
+	if !strings.Contains(h.View(), "ctrl+q") {
+		t.Error("restyle dropped the active keymap: emacs quit binding no longer shown")
+	}
+}
+
 // TestHelpClosesOnQuestionMark asserts ?, esc, and q all close the help modal.
 func TestHelpClosesOnQuestionMark(t *testing.T) {
 	for _, k := range []tea.KeyPressMsg{
