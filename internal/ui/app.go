@@ -616,7 +616,7 @@ func (a App) handleKey(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return a.routeToActive(msg)
 	}
 
-	// Sub-tab switch keys (Users r/p/e, Priority m/u/a/j) belong to the active tab
+	// Sub-tab switch keys (Users r/p, Priority m/u/a/j) belong to the active tab
 	// and take precedence over the global shortcuts that share a letter (e.g. the
 	// 'r' refresh): a tab-local binding overrides the global one.
 	if a.activeHandlesSubtabKey(msg.String()) {
@@ -955,11 +955,11 @@ func (a App) activeCapturesInput() bool {
 }
 
 // activeHandlesSubtabKey reports whether the active tab claims the given key as a
-// sub-tab switch (Users: r/p/e; Priority: m/u/a/j).
+// sub-tab switch (Users: r/p; Priority: m/u/a/j).
 func (a App) activeHandlesSubtabKey(k string) bool {
 	switch a.active {
 	case tabUsers:
-		return k == "r" || k == "p" || k == "e"
+		return k == "r" || k == "p"
 	case tabPriority:
 		return k == "m" || k == "u" || k == "a" || k == "j"
 	default:
