@@ -3,7 +3,6 @@ package modals
 import (
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -81,17 +80,6 @@ func (j *JobInput) SetSize(w, _ int) {
 
 // SetStyles re-themes the prompt.
 func (j *JobInput) SetStyles(styles theme.Styles) { j.styles = styles }
-
-// ShortHelp returns the prompt bindings.
-func (j *JobInput) ShortHelp() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "show")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
-	}
-}
-
-// FullHelp returns the expanded bindings.
-func (j *JobInput) FullHelp() [][]key.Binding { return [][]key.Binding{j.ShortHelp()} }
 
 // Compile-time assertion that JobInput satisfies Modal.
 var _ Modal = (*JobInput)(nil)

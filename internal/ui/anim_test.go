@@ -118,7 +118,7 @@ func TestBlurNeverGatesDataRefresh(t *testing.T) {
 	a := newAnimApp()
 	m, _ := a.Update(tea.BlurMsg{})
 	a = m.(App)
-	if _, cmd := a.Update(fastTickMsg{at: time.Now()}); cmd == nil {
+	if _, cmd := a.Update(fastTickMsg{}); cmd == nil {
 		t.Error("fast tick must keep dispatching while blurred")
 	}
 }

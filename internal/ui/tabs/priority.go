@@ -78,7 +78,8 @@ var jobPriorityColumns = []column{
 // shows a summary line for the current user and their pending jobs; Users and
 // Accounts show per-user / per-account sshare with dense ranks; Jobs shows
 // pending sprio factors. The current user's and account's rows are highlighted.
-// Account-detail modals are deferred to Phase 5.
+// Enter on a Users/Accounts row is handled by the root, which opens the
+// corresponding detail modal.
 type Priority struct {
 	store    *store.Store
 	styles   theme.Styles
@@ -631,11 +632,6 @@ func (p *Priority) subtabLabel(keyHint, label string, tab prioritySubtab) string
 // ShortHelp returns the active pane's bindings plus the sub-tab switch hints.
 func (p *Priority) ShortHelp() []key.Binding {
 	return append(p.activePane().ShortHelp(), prioritySubtabBindings()...)
-}
-
-// FullHelp returns the active pane's bindings plus the sub-tab switch group.
-func (p *Priority) FullHelp() [][]key.Binding {
-	return append(p.activePane().FullHelp(), prioritySubtabBindings())
 }
 
 // prioritySubtabBindings are the m/u/a/j sub-tab switch bindings shown in help.

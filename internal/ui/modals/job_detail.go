@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -227,19 +226,6 @@ func (d *JobDetail) SetStyles(styles theme.Styles) {
 	d.styles = styles
 	d.box.SetStyles(styles)
 }
-
-// ShortHelp returns the detail modal's bindings.
-func (d *JobDetail) ShortHelp() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("o"), key.WithHelp("o", "stdout")),
-		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "stderr")),
-		key.NewBinding(key.WithKeys("m"), key.WithHelp("m", "modify")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
-	}
-}
-
-// FullHelp returns the expanded bindings.
-func (d *JobDetail) FullHelp() [][]key.Binding { return [][]key.Binding{d.ShortHelp()} }
 
 // Compile-time assertion that JobDetail satisfies Modal.
 var _ Modal = (*JobDetail)(nil)

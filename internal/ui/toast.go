@@ -17,7 +17,7 @@ const (
 	// toastInfo is a neutral, accent-bordered notice (manual feedback).
 	toastInfo toastLevel = iota
 	// toastError is a failure notice (error-bordered).
-	toastErrorLevel
+	toastError
 	// toastSuccess is a recovery/success notice (success-bordered).
 	toastSuccess
 )
@@ -45,7 +45,7 @@ const refreshToastTag = "refresh"
 // toastBorderColor maps a toast level to its border color from the styles.
 func toastBorderColor(level toastLevel, styles theme.Styles) lipgloss.Style {
 	switch level {
-	case toastErrorLevel:
+	case toastError:
 		return styles.Error
 	case toastSuccess:
 		return styles.Success

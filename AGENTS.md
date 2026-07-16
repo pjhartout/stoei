@@ -20,7 +20,7 @@ and cancel jobs, and see cluster load — all without leaving the terminal.
 
 Dependencies flow one way: `ui → store → slurm`, enforced by depguard. The store
 never imports the UI; the slurm package never imports the store. Three test seams:
-`slurm.Runner`, `store.SlurmClient`, and the UI `Modal`/`Component` interfaces.
+`slurm.Runner`, `store.SlurmClient`, and the UI `Modal` interface.
 
 Async responsiveness is the #1 design driver. All IO happens inside `tea.Cmd`
 closures, never on the Update path. Refresh is two-tier (fast `squeue`, slow

@@ -5,7 +5,6 @@ import (
 	"strconv"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -16,7 +15,7 @@ import (
 
 // SettingsAppliedMsg is emitted when the user saves the settings form. The root
 // handles it by persisting the config, swapping the theme/keymap, and updating
-// the refresh intervals, history days, energy months, and log-viewer line count
+// the refresh intervals, history days, and log-viewer line count
 // live. The config it carries is already clamped to the config package's bounds.
 type SettingsAppliedMsg struct {
 	// Config is the new, clamped configuration to apply and persist.
@@ -34,12 +33,10 @@ type SettingsToastMsg struct {
 type fieldKind int
 
 const (
-	// fieldText is a numeric text-input field (refresh, history, lines, months).
+	// fieldText is a numeric text-input field (refresh, history, lines).
 	fieldText fieldKind = iota
 	// fieldEnum is a left/right cycling selector (theme, keybind mode).
 	fieldEnum
-	// fieldBool is a toggle (energy enabled).
-	fieldBool
 )
 
 // settingField is one editable row of the settings form.
@@ -54,9 +51,6 @@ type settingField struct {
 	options  []string
 	labels   []string
 	selected int
-
-	// boolVal backs a fieldBool row.
-	boolVal bool
 }
 
 // Field indices in the form, in display/focus order.
@@ -220,8 +214,6 @@ func (s *Settings) cycleCurrent(direction int) {
 			return
 		}
 		f.selected = (f.selected + direction + n) % n
-	case fieldBool:
-		f.boolVal = !f.boolVal
 	}
 }
 
@@ -311,20 +303,10 @@ func (s *Settings) renderField(i int) string {
 		value = f.input.View()
 	case fieldEnum:
 		value = "‹ " + f.labels[f.selected] + " ›"
-	case fieldBool:
-		value = "‹ " + boolLabel(f.boolVal) + " ›"
 	}
 
 	label := labelStyle.Render(f.label + ":")
 	return marker + label + "  " + s.styles.Text.Render(value)
-}
-
-// boolLabel renders a bool field's on/off label.
-func boolLabel(v bool) string {
-	if v {
-		return "Enabled"
-	}
-	return "Disabled"
 }
 
 // SetSize records the area and sizes the text inputs to fit the modal interior.
@@ -342,17 +324,6 @@ func (s *Settings) SetSize(w, h int) {
 
 // SetStyles re-themes the form.
 func (s *Settings) SetStyles(styles theme.Styles) { s.styles = styles }
-
-// ShortHelp returns the form's bindings.
-func (s *Settings) ShortHelp() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("ctrl+s"), key.WithHelp("ctrl+s", "save")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "cancel")),
-	}
-}
-
-// FullHelp returns the expanded bindings.
-func (s *Settings) FullHelp() [][]key.Binding { return [][]key.Binding{s.ShortHelp()} }
 
 // Compile-time assertion that Settings satisfies Modal.
 var _ Modal = (*Settings)(nil)

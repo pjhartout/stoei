@@ -247,9 +247,6 @@ func intervalsFromConfig(cfg config.Config) Intervals {
 	return Intervals{Fast: fast, Slow: fast * slowIntervalFactor}
 }
 
-// LogRing returns the app's log ring so the caller can wire it as a logging sink.
-func (a App) LogRing() *components.LogRing { return a.logRing }
-
 // Init fires the minimal-critical first wave (availability + running jobs +
 // history), then a batched dispatch of the heavy sections, and starts both
 // tickers. Each fetch bumps its section generation and marks it loading (I4).
@@ -992,10 +989,8 @@ func (a *App) refreshSidebar() {
 	a.frame.invalidate()
 }
 
-// observe feeds a fetch outcome to the health notifier and appends/clears a toast
-// on an edge transition (I9). On a failing edge it prefers a section-specific,
-// cause-aware message over the notifier's generic text so a slurmdbd outage reads
-// clearly (for example "Job history unavailable: slurmdbd connection refused").
+// observe feeds a fetch outcome to the health notifier and appends/clears a
+// toast on an edge transition (I9); the notifier composes the toast text.
 func (a *App) observe(section store.Section, err error) {
 	t, ok := a.notifier.Observe(section.String(), err == nil)
 	if !ok {
@@ -1003,7 +998,7 @@ func (a *App) observe(section store.Section, err error) {
 	}
 	level := toastSuccess
 	if t.Kind == toastFailed {
-		level = toastErrorLevel
+		level = toastError
 	}
 	a.pushToastLevel(t.Message, level)
 }
@@ -1453,17 +1448,11 @@ func (a App) size() (int, int) {
 	return w, h
 }
 
-// ShortHelp implements help.KeyMap, combining the active tab's bindings with the
-// global ones so the footer reflects the current context.
+// ShortHelp combines the active tab's bindings with the global ones so the
+// footer reflects the current context.
 func (a App) ShortHelp() []key.Binding {
 	bindings := a.activeShortHelp()
 	return append(bindings, a.keys.Help, a.keys.Refresh, a.keys.Quit)
-}
-
-// FullHelp implements help.KeyMap for the expanded view.
-func (a App) FullHelp() [][]key.Binding {
-	groups := a.activeFullHelp()
-	return append(groups, []key.Binding{a.keys.Refresh, a.keys.Help, a.keys.Quit})
 }
 
 // activeShortHelp returns the active tab's short-help bindings.
@@ -1479,21 +1468,5 @@ func (a App) activeShortHelp() []key.Binding {
 		return a.logsTab.ShortHelp()
 	default:
 		return a.jobs.ShortHelp()
-	}
-}
-
-// activeFullHelp returns the active tab's full-help groups.
-func (a App) activeFullHelp() [][]key.Binding {
-	switch a.active {
-	case tabNodes:
-		return a.nodes.FullHelp()
-	case tabUsers:
-		return a.users.FullHelp()
-	case tabPriority:
-		return a.priority.FullHelp()
-	case tabLogs:
-		return a.logsTab.FullHelp()
-	default:
-		return a.jobs.FullHelp()
 	}
 }

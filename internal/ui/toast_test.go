@@ -22,7 +22,7 @@ func TestRecoveredToastIsSuccessStyled(t *testing.T) {
 
 	// First, a failure to move the section into the failing state.
 	a.observe(store.SectionNodes, errBoom)
-	if len(a.toasts) != 1 || a.toasts[0].level != toastErrorLevel {
+	if len(a.toasts) != 1 || a.toasts[0].level != toastError {
 		t.Fatalf("after failure: toasts=%+v; want one error-level toast", a.toasts)
 	}
 
@@ -56,7 +56,7 @@ func TestToastsExpire(t *testing.T) {
 func TestRenderToastsLevels(t *testing.T) {
 	styles := theme.BuildStyles(theme.Charm(), true)
 	out := renderToasts([]toastItem{
-		{text: "failed thing", level: toastErrorLevel, ticks: 1},
+		{text: "failed thing", level: toastError, ticks: 1},
 		{text: "recovered thing", level: toastSuccess, ticks: 1},
 	}, 80, styles, 0)
 	if !strings.Contains(out, "failed thing") || !strings.Contains(out, "recovered thing") {
@@ -100,8 +100,8 @@ func TestRefreshToastAnimatesAndClearsOnCompletion(t *testing.T) {
 // the muted tone (fading out) instead of its level color.
 func TestRenderToastsFadeOnFinalTick(t *testing.T) {
 	styles := theme.BuildStyles(theme.Charm(), true)
-	fresh := renderToasts([]toastItem{{text: "note", level: toastErrorLevel, ticks: toastTTL}}, 80, styles, 0)
-	fading := renderToasts([]toastItem{{text: "note", level: toastErrorLevel, ticks: 1}}, 80, styles, 0)
+	fresh := renderToasts([]toastItem{{text: "note", level: toastError, ticks: toastTTL}}, 80, styles, 0)
+	fading := renderToasts([]toastItem{{text: "note", level: toastError, ticks: 1}}, 80, styles, 0)
 	if fresh == fading {
 		t.Error("final-tick toast should render dimmed, not identical to a fresh one")
 	}
@@ -113,7 +113,7 @@ func TestRenderToastsCapsWidth(t *testing.T) {
 	styles := theme.BuildStyles(theme.Charm(), true)
 	long := "Job history unavailable: slurmdbd connection refused"
 	for _, w := range []int{40, 30, 20} {
-		out := renderToasts([]toastItem{{text: long, level: toastErrorLevel, ticks: 1}}, w, styles, 0)
+		out := renderToasts([]toastItem{{text: long, level: toastError, ticks: 1}}, w, styles, 0)
 		if got := lipgloss.Width(out); got > w {
 			t.Errorf("toast box width %d exceeds terminal width %d:\n%s", got, w, out)
 		}

@@ -1,16 +1,14 @@
 package modals
 
 import (
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
 
-// Modal is the interface every overlay screen in this package implements. It
-// mirrors the ui.Component contract but is defined here so the modals package
-// does not import the ui package (which would be a cycle: ui imports modals).
-// The ui package adapts a Modal into a ui.Component with a thin wrapper.
+// Modal is the interface every overlay screen in this package implements. It is
+// the UI test seam: the root drives the modal stack through it without knowing
+// the concrete types.
 //
 // Update returns the modal as a Modal so the owner can reassign it (I3). A modal
 // whose Update returns done==true asks the root to pop it off the stack.
@@ -27,10 +25,6 @@ type Modal interface {
 	SetSize(width, height int)
 	// SetStyles re-themes the modal after a background/theme change.
 	SetStyles(styles theme.Styles)
-	// ShortHelp returns the condensed help bindings for the modal.
-	ShortHelp() []key.Binding
-	// FullHelp returns the expanded help bindings for the modal.
-	FullHelp() [][]key.Binding
 }
 
 // isCloseKey reports whether a key press dismisses a simple modal (esc or q).

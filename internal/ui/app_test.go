@@ -71,7 +71,7 @@ func TestFastTickReArmsOwnTierExactlyOnce(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
 	a.runningInFlight = false
 
-	model, cmd := a.Update(fastTickMsg{at: time.Now()})
+	model, cmd := a.Update(fastTickMsg{})
 	if _, ok := model.(App); !ok {
 		t.Fatalf("model type = %T; want App", model)
 	}
@@ -103,7 +103,7 @@ func TestFastTickReArmsButSkipsFetchWhenInFlight(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
 	a.runningInFlight = true
 
-	_, cmd := a.Update(fastTickMsg{at: time.Now()})
+	_, cmd := a.Update(fastTickMsg{})
 	msgs := drainCmd(cmd)
 
 	fast, slow := countTickMsgs(msgs)
@@ -145,7 +145,7 @@ func TestStartupGuardEngagedUntilFirstResult(t *testing.T) {
 func TestSlowTickReArmsOwnTierExactlyOnce(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
 
-	_, cmd := a.Update(slowTickMsg{at: time.Now()})
+	_, cmd := a.Update(slowTickMsg{})
 	msgs := drainCmd(cmd)
 
 	fast, slow := countTickMsgs(msgs)
@@ -254,7 +254,7 @@ func TestSlowTickReconcilesHistoryOnJobsTab(t *testing.T) {
 	a.active = tabJobs
 	before := a.store.Gen(store.SectionHistory)
 
-	a.Update(slowTickMsg{at: time.Now()})
+	a.Update(slowTickMsg{})
 
 	if a.store.Gen(store.SectionHistory) == before {
 		t.Error("slow tick on the Jobs tab did not reconcile history (completions would need manual refresh)")
@@ -268,7 +268,7 @@ func TestSlowTickSkipsHistoryOffJobsTab(t *testing.T) {
 	a.active = tabNodes
 	before := a.store.Gen(store.SectionHistory)
 
-	a.Update(slowTickMsg{at: time.Now()})
+	a.Update(slowTickMsg{})
 
 	if a.store.Gen(store.SectionHistory) != before {
 		t.Error("slow tick off the Jobs tab dispatched a history fetch; it should stay unpolled")
@@ -318,7 +318,7 @@ func TestTerminalBlurDoesNotFreezeLiveList(t *testing.T) {
 	m, _ := a.Update(tea.BlurMsg{})
 	a = m.(App)
 
-	_, cmd := a.Update(fastTickMsg{at: time.Now()})
+	_, cmd := a.Update(fastTickMsg{})
 	var sawRunningFetch bool
 	for _, msg := range drainCmd(cmd) {
 		if _, ok := msg.(runningJobsMsg); ok {

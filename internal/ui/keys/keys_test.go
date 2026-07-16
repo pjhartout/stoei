@@ -1,23 +1,9 @@
 package keys
 
-import (
-	"testing"
-
-	"charm.land/bubbles/v2/help"
-)
-
-// Compile-time check that KeyMap satisfies the bubbles/help.KeyMap interface.
-var _ help.KeyMap = KeyMap{}
+import "testing"
 
 func TestDefaultBindingsArePopulated(t *testing.T) {
 	k := Default()
-
-	if len(k.ShortHelp()) == 0 {
-		t.Error("ShortHelp returned no bindings")
-	}
-	if len(k.FullHelp()) == 0 {
-		t.Error("FullHelp returned no binding groups")
-	}
 
 	if got := k.Quit.Keys(); len(got) != 2 || got[0] != "q" || got[1] != "ctrl+c" {
 		t.Errorf("Quit keys = %v, want [q ctrl+c]", got)
@@ -69,11 +55,11 @@ func TestBuildKeyMapUnknownFallsBackToVim(t *testing.T) {
 	}
 }
 
-// TestHelpReflectsActiveMode asserts the help bar bindings carry the active
+// TestHelpReflectsActiveMode asserts the help binding carries the active
 // preset's keys, so the footer reflects the mode automatically.
 func TestHelpReflectsActiveMode(t *testing.T) {
 	emacs := BuildKeyMap(Emacs)
-	if emacs.ShortHelp()[0].Keys()[0] != "ctrl+h" {
-		t.Errorf("emacs ShortHelp help key = %q, want ctrl+h", emacs.ShortHelp()[0].Keys()[0])
+	if emacs.Help.Keys()[0] != "ctrl+h" {
+		t.Errorf("emacs help key = %q, want ctrl+h", emacs.Help.Keys()[0])
 	}
 }

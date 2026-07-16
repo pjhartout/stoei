@@ -1,7 +1,6 @@
 package modals
 
 import (
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/pjhartout/stoei/internal/store"
@@ -59,14 +58,6 @@ func (d *InfoDetail) SetSize(w, h int) { d.box.SetSize(w, h) }
 
 // SetStyles re-themes the modal (content keeps its pre-rendered styling).
 func (d *InfoDetail) SetStyles(styles theme.Styles) { d.box.SetStyles(styles) }
-
-// ShortHelp returns the modal's dismissal binding.
-func (d *InfoDetail) ShortHelp() []key.Binding {
-	return []key.Binding{key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close"))}
-}
-
-// FullHelp returns the expanded bindings.
-func (d *InfoDetail) FullHelp() [][]key.Binding { return [][]key.Binding{d.ShortHelp()} }
 
 // Compile-time assertion that InfoDetail satisfies Modal.
 var _ Modal = (*InfoDetail)(nil)

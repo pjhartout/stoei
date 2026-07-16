@@ -1,7 +1,3 @@
-// Package tabs holds the per-tab screen components rendered by the root model.
-// Each tab implements the ui.Component contract indirectly: the concrete types
-// here expose Update/View/SetSize/SetStyles/ShortHelp/FullHelp with the same
-// shapes, and the ui package adapts them where needed.
 package tabs
 
 import (
@@ -522,12 +518,4 @@ func (j *Jobs) CapturesInput() bool { return j.filtering }
 // ShortHelp returns the condensed help bindings.
 func (j *Jobs) ShortHelp() []key.Binding {
 	return []key.Binding{j.keys.Filter, j.keys.Sort}
-}
-
-// FullHelp returns the expanded help bindings.
-func (j *Jobs) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{j.table.KeyMap.LineUp, j.table.KeyMap.LineDown, j.keys.ScrollLeft, j.keys.ScrollRight},
-		{j.keys.Filter, j.keys.Sort, j.keys.ClearFilter},
-	}
 }

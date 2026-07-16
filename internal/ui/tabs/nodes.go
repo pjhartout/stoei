@@ -69,8 +69,8 @@ func (n *Nodes) SetStyles(styles theme.Styles) {
 // SetSize resizes the inner table.
 func (n *Nodes) SetSize(width, height int) { n.tbl.SetSize(width, height) }
 
-// Update handles tab-local input (filter/sort/navigation). Enter on a row will
-// open a node-detail modal in Phase 5; the hook is noted but not yet wired.
+// Update handles tab-local input (filter/sort/navigation). Enter on a row is
+// handled by the root, which opens the node-detail modal.
 func (n *Nodes) Update(msg tea.Msg) (*Nodes, tea.Cmd) {
 	cmd := n.tbl.Update(msg)
 	return n, cmd
@@ -170,6 +170,3 @@ func (n *Nodes) View() string {
 
 // ShortHelp returns the tab-local bindings.
 func (n *Nodes) ShortHelp() []key.Binding { return n.tbl.ShortHelp() }
-
-// FullHelp returns the expanded bindings.
-func (n *Nodes) FullHelp() [][]key.Binding { return n.tbl.FullHelp() }

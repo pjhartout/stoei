@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strings"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	"charm.land/bubbles/v2/textinput"
 	"charm.land/bubbles/v2/viewport"
@@ -73,11 +72,10 @@ type LogViewer struct {
 	showLineNums bool
 
 	// search state
-	search       textinput.Model
-	searching    bool
-	searchTerm   string
-	matchCount   int
-	currentMatch int
+	search     textinput.Model
+	searching  bool
+	searchTerm string
+	matchCount int
 
 	width  int
 	height int
@@ -110,7 +108,6 @@ func NewLogViewer(styles theme.Styles, path, label string, maxLines int) *LogVie
 		spin:         sp,
 		search:       si,
 		showLineNums: true,
-		currentMatch: -1,
 	}
 	v.applyGutter()
 	return v
@@ -305,7 +302,6 @@ func (v *LogViewer) performSearch() tea.Cmd {
 	if v.searchTerm == "" {
 		v.vp.ClearHighlights()
 		v.matchCount = 0
-		v.currentMatch = -1
 		return nil
 	}
 	content := strings.Join(v.rawLines, "\n")
@@ -317,11 +313,9 @@ func (v *LogViewer) performSearch() tea.Cmd {
 	v.matchCount = len(matches)
 	if v.matchCount == 0 {
 		v.vp.ClearHighlights()
-		v.currentMatch = -1
 		return toast("No matches found")
 	}
 	v.vp.SetHighlights(matches)
-	v.currentMatch = 0
 	return toast(fmt.Sprintf("Found %d matches", v.matchCount))
 }
 
@@ -477,20 +471,6 @@ func (v *LogViewer) SetStyles(styles theme.Styles) {
 	v.vp.HighlightStyle = styles.Warning.Reverse(true)
 	v.vp.SelectedHighlightStyle = styles.Success.Reverse(true)
 }
-
-// ShortHelp returns the viewer's bindings.
-func (v *LogViewer) ShortHelp() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("/"), key.WithHelp("/", "search")),
-		key.NewBinding(key.WithKeys("n", "N"), key.WithHelp("n/N", "next/prev")),
-		key.NewBinding(key.WithKeys("r"), key.WithHelp("r", "reload")),
-		key.NewBinding(key.WithKeys("e"), key.WithHelp("e", "editor")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close")),
-	}
-}
-
-// FullHelp returns the expanded bindings.
-func (v *LogViewer) FullHelp() [][]key.Binding { return [][]key.Binding{v.ShortHelp()} }
 
 // Compile-time assertion that LogViewer satisfies Modal.
 var _ Modal = (*LogViewer)(nil)

@@ -117,8 +117,3 @@ func (l *Logs) CapturesInput() bool { return false }
 func (l *Logs) ShortHelp() []key.Binding {
 	return []key.Binding{l.vp.KeyMap.Up, l.vp.KeyMap.Down}
 }
-
-// FullHelp returns the scroll bindings grouped.
-func (l *Logs) FullHelp() [][]key.Binding {
-	return [][]key.Binding{{l.vp.KeyMap.Up, l.vp.KeyMap.Down, l.vp.KeyMap.PageUp, l.vp.KeyMap.PageDown}}
-}

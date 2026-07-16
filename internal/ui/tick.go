@@ -15,27 +15,17 @@ const (
 )
 
 // Intervals holds the two refresh-tier durations. A zero Intervals is invalid;
-// use DefaultIntervals or build one explicitly.
+// the live values are derived from the user config (intervalsFromConfig).
 type Intervals struct {
 	Fast time.Duration
 	Slow time.Duration
 }
 
-// DefaultIntervals returns the locked default refresh intervals (60s fast, 4min
-// slow).
-func DefaultIntervals() Intervals {
-	return Intervals{
-		Fast: defaultFastInterval,
-		Slow: defaultFastInterval * slowIntervalFactor,
-	}
-}
-
-// fastTickMsg fires on the fast refresh tier. It carries the time it fired so
-// elapsed/age rendering can use the loop's clock.
-type fastTickMsg struct{ at time.Time }
+// fastTickMsg fires on the fast refresh tier.
+type fastTickMsg struct{}
 
 // slowTickMsg fires on the slow refresh tier.
-type slowTickMsg struct{ at time.Time }
+type slowTickMsg struct{}
 
 // toastTickInterval is the cadence of toast expiry. Toasts age in ticks of this
 // tier rather than the fast tier so their ~20s lifetime stays independent of the
@@ -43,12 +33,12 @@ type slowTickMsg struct{ at time.Time }
 const toastTickInterval = 10 * time.Second
 
 // toastTickMsg drives toast expiry.
-type toastTickMsg struct{ at time.Time }
+type toastTickMsg struct{}
 
 // toastTick returns a Cmd that fires a single toastTickMsg after d. Like the
 // other tiers it is re-armed only from its own handler.
 func toastTick(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(t time.Time) tea.Msg { return toastTickMsg{at: t} })
+	return tea.Tick(d, func(time.Time) tea.Msg { return toastTickMsg{} })
 }
 
 // spinnerTickInterval is the frame cadence of the loading-spinner animation
@@ -58,13 +48,13 @@ func toastTick(d time.Duration) tea.Cmd {
 const spinnerTickInterval = 100 * time.Millisecond
 
 // spinnerTickMsg advances the loading-spinner animation frames.
-type spinnerTickMsg struct{ at time.Time }
+type spinnerTickMsg struct{}
 
 // spinnerTick returns a Cmd that fires a single spinnerTickMsg after d. It is
 // started when a load begins and re-armed only while at least one section is
 // still loading (handleSpinnerTick), so it never runs when the UI is idle.
 func spinnerTick(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(t time.Time) tea.Msg { return spinnerTickMsg{at: t} })
+	return tea.Tick(d, func(time.Time) tea.Msg { return spinnerTickMsg{} })
 }
 
 // animTickInterval is the frame cadence of the chrome shimmer (~30 fps; the
@@ -105,11 +95,11 @@ func animTick(d time.Duration) tea.Cmd {
 // fastTickMsg, dispatches the fast fetches and calls fastTick again. It is never
 // re-armed from resize/keypress, which would geometrically multiply timers.
 func fastTick(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(t time.Time) tea.Msg { return fastTickMsg{at: t} })
+	return tea.Tick(d, func(time.Time) tea.Msg { return fastTickMsg{} })
 }
 
 // slowTick returns a Cmd that fires a single slowTickMsg after d. Like fastTick,
 // it is re-armed only from the slowTickMsg handler.
 func slowTick(d time.Duration) tea.Cmd {
-	return tea.Tick(d, func(t time.Time) tea.Msg { return slowTickMsg{at: t} })
+	return tea.Tick(d, func(time.Time) tea.Msg { return slowTickMsg{} })
 }

@@ -5,7 +5,6 @@ import (
 	"strings"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -320,18 +319,6 @@ func (m *JobModify) SetSize(w, _ int) {
 
 // SetStyles re-themes the modal.
 func (m *JobModify) SetStyles(styles theme.Styles) { m.styles = styles }
-
-// ShortHelp returns the modify modal's bindings.
-func (m *JobModify) ShortHelp() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("up", "down"), key.WithHelp("↑/↓", "choose")),
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "select")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "back/close")),
-	}
-}
-
-// FullHelp returns the expanded bindings.
-func (m *JobModify) FullHelp() [][]key.Binding { return [][]key.Binding{m.ShortHelp()} }
 
 // Compile-time assertion that JobModify satisfies Modal.
 var _ Modal = (*JobModify)(nil)

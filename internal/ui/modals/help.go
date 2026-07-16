@@ -162,13 +162,5 @@ func (h *Help) SetStyles(styles theme.Styles) {
 	h.box.SetContent(renderHelpSections(helpSections(h.km), styles))
 }
 
-// ShortHelp returns the help modal's own dismissal binding.
-func (h *Help) ShortHelp() []key.Binding {
-	return []key.Binding{key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close"))}
-}
-
-// FullHelp returns the expanded bindings.
-func (h *Help) FullHelp() [][]key.Binding { return [][]key.Binding{h.ShortHelp()} }
-
 // Compile-time assertion that Help satisfies Modal.
 var _ Modal = (*Help)(nil)

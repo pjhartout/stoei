@@ -3,7 +3,6 @@ package modals
 import (
 	"context"
 
-	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/spinner"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
@@ -131,14 +130,6 @@ func (n *NodeDetail) SetStyles(styles theme.Styles) {
 	n.styles = styles
 	n.box.SetStyles(styles)
 }
-
-// ShortHelp returns the node modal's bindings.
-func (n *NodeDetail) ShortHelp() []key.Binding {
-	return []key.Binding{key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close"))}
-}
-
-// FullHelp returns the expanded bindings.
-func (n *NodeDetail) FullHelp() [][]key.Binding { return [][]key.Binding{n.ShortHelp()} }
 
 // Compile-time assertion that NodeDetail satisfies Modal.
 var _ Modal = (*NodeDetail)(nil)

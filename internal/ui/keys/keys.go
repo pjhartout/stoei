@@ -1,8 +1,7 @@
-// Package keys defines the application's keybindings. KeyMap is a struct of
-// key.Binding values that satisfies bubbles/help.KeyMap so the help bar renders
-// itself from the active bindings. Two presets are available: vim (default) and
-// emacs. BuildKeyMap returns a fresh KeyMap for a mode so the footer/help reflect
-// the active preset automatically.
+// Package keys defines the application's keybindings as a struct of
+// key.Binding values. Two presets are available: vim (default) and emacs.
+// BuildKeyMap returns a fresh KeyMap for a mode so the footer/help reflect the
+// active preset automatically.
 package keys
 
 import "charm.land/bubbles/v2/key"
@@ -110,19 +109,5 @@ func emacsKeyMap() KeyMap {
 			key.WithKeys("ctrl+q", "ctrl+c"),
 			key.WithHelp("C-q", "quit"),
 		),
-	}
-}
-
-// ShortHelp returns the bindings shown in the condensed help bar.
-func (k KeyMap) ShortHelp() []key.Binding {
-	return []key.Binding{k.Help, k.Settings, k.Quit}
-}
-
-// FullHelp returns the bindings shown in the expanded help view, grouped by
-// column.
-func (k KeyMap) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{k.Up, k.Down},
-		{k.Refresh, k.Settings, k.Help, k.Quit},
 	}
 }

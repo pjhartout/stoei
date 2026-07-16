@@ -254,11 +254,6 @@ func (u *Users) ShortHelp() []key.Binding {
 	return append(u.active().ShortHelp(), userSubtabBindings()...)
 }
 
-// FullHelp returns the active pane's bindings plus the sub-tab switch group.
-func (u *Users) FullHelp() [][]key.Binding {
-	return append(u.active().FullHelp(), userSubtabBindings())
-}
-
 // userSubtabBindings are the r/p sub-tab switch bindings shown in help.
 func userSubtabBindings() []key.Binding {
 	return []key.Binding{

@@ -271,11 +271,3 @@ func (ft *filterTable) View() string {
 func (ft *filterTable) ShortHelp() []key.Binding {
 	return []key.Binding{ft.keys.Filter, ft.keys.Sort}
 }
-
-// FullHelp returns the table navigation plus filter/sort bindings.
-func (ft *filterTable) FullHelp() [][]key.Binding {
-	return [][]key.Binding{
-		{ft.table.KeyMap.LineUp, ft.table.KeyMap.LineDown, ft.keys.ScrollLeft, ft.keys.ScrollRight},
-		{ft.keys.Filter, ft.keys.Sort, ft.keys.ClearFilter},
-	}
-}

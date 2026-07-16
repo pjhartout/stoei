@@ -2,7 +2,6 @@ package ui
 
 import (
 	"testing"
-	"time"
 
 	"github.com/pjhartout/stoei/internal/store"
 )
@@ -17,7 +16,7 @@ func TestSpinnerTickAnimatesWhileLoadingThenStops(t *testing.T) {
 	a.store.SetLoading(store.SectionRunningJobs, a.store.NextGen(store.SectionRunningJobs))
 
 	a.frame.dirty = false
-	m, cmd := a.Update(spinnerTickMsg{at: time.Now()})
+	m, cmd := a.Update(spinnerTickMsg{})
 	a = m.(App)
 	if !a.frame.dirty {
 		t.Error("spinner tick should mark the frame dirty so the spinner re-renders")
@@ -31,7 +30,7 @@ func TestSpinnerTickAnimatesWhileLoadingThenStops(t *testing.T) {
 
 	// The section finishes loading -> idle.
 	a.store.SetRunningJobs(nil, a.store.NextGen(store.SectionRunningJobs), nil)
-	m, cmd = a.Update(spinnerTickMsg{at: time.Now()})
+	m, cmd = a.Update(spinnerTickMsg{})
 	a = m.(App)
 	if cmd != nil {
 		t.Error("spinner tick should not re-arm when nothing is loading")

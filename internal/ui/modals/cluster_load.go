@@ -1,7 +1,6 @@
 package modals
 
 import (
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 
 	"github.com/pjhartout/stoei/internal/store"
@@ -51,14 +50,6 @@ func (c *ClusterLoad) SetStyles(styles theme.Styles) {
 	c.box.SetStyles(styles)
 	c.box.SetContent(components.ClusterLoadContent(c.stats, styles, c.loaded))
 }
-
-// ShortHelp returns the modal's dismissal binding.
-func (c *ClusterLoad) ShortHelp() []key.Binding {
-	return []key.Binding{key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "close"))}
-}
-
-// FullHelp returns the expanded bindings.
-func (c *ClusterLoad) FullHelp() [][]key.Binding { return [][]key.Binding{c.ShortHelp()} }
 
 // Compile-time assertion that ClusterLoad satisfies Modal.
 var _ Modal = (*ClusterLoad)(nil)

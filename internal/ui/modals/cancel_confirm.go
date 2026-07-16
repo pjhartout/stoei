@@ -4,7 +4,6 @@ import (
 	"context"
 	"time"
 
-	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -42,9 +41,6 @@ type CancelConfirm struct {
 	jobID   string
 	jobName string
 	choice  confirmChoice
-
-	width  int
-	height int
 }
 
 // NewCancelConfirm builds the confirm modal for jobID/jobName. Focus defaults to
@@ -150,23 +146,11 @@ func (c *CancelConfirm) button(label string, focused bool, style lipgloss.Style)
 		Render(label)
 }
 
-// SetSize records the terminal size (the modal is content-sized, not stretched).
-func (c *CancelConfirm) SetSize(w, h int) { c.width, c.height = w, h }
+// SetSize is a no-op: the modal is content-sized, not stretched.
+func (c *CancelConfirm) SetSize(int, int) {}
 
 // SetStyles re-themes the modal.
 func (c *CancelConfirm) SetStyles(styles theme.Styles) { c.styles = styles }
-
-// ShortHelp returns the confirm modal's bindings.
-func (c *CancelConfirm) ShortHelp() []key.Binding {
-	return []key.Binding{
-		key.NewBinding(key.WithKeys("left", "right"), key.WithHelp("←/→", "choose")),
-		key.NewBinding(key.WithKeys("enter"), key.WithHelp("enter", "activate")),
-		key.NewBinding(key.WithKeys("esc"), key.WithHelp("esc", "abort")),
-	}
-}
-
-// FullHelp returns the expanded bindings.
-func (c *CancelConfirm) FullHelp() [][]key.Binding { return [][]key.Binding{c.ShortHelp()} }
 
 // Compile-time assertion that CancelConfirm satisfies Modal.
 var _ Modal = (*CancelConfirm)(nil)

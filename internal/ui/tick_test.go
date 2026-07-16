@@ -5,19 +5,6 @@ import (
 	"time"
 )
 
-func TestDefaultIntervals(t *testing.T) {
-	iv := DefaultIntervals()
-	if iv.Fast != time.Minute {
-		t.Errorf("fast = %v; want 1m", iv.Fast)
-	}
-	if iv.Slow != 4*time.Minute {
-		t.Errorf("slow = %v; want 4m", iv.Slow)
-	}
-	if iv.Slow != iv.Fast*slowIntervalFactor {
-		t.Errorf("slow (%v) != fast*%d (%v)", iv.Slow, slowIntervalFactor, iv.Fast*slowIntervalFactor)
-	}
-}
-
 func TestFastTickProducesFastTickMsg(t *testing.T) {
 	// Use a 1ns interval so the underlying timer Cmd returns promptly; we assert
 	// only the message type, not timing.
