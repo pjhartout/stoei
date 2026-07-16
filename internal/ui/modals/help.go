@@ -5,6 +5,7 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 
 	"github.com/pjhartout/stoei/internal/ui/keys"
 	"github.com/pjhartout/stoei/internal/ui/theme"
@@ -126,12 +127,13 @@ func renderHelpSections(sections []helpSection, styles theme.Styles) string {
 	return strings.Join(blocks, "\n\n")
 }
 
-// padLeft right-aligns s within width.
+// padLeft right-aligns s within width, measured in display cells so keys like
+// "↑/↓" (3 cells, 7 bytes) line up with ASCII ones.
 func padLeft(s string, width int) string {
-	if len(s) >= width {
-		return s
+	if w := ansi.StringWidth(s); w < width {
+		return strings.Repeat(" ", width-w) + s
 	}
-	return strings.Repeat(" ", width-len(s)) + s
+	return s
 }
 
 // Init has nothing to start for the help modal.

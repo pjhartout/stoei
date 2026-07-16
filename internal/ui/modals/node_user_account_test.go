@@ -3,6 +3,7 @@ package modals
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -118,5 +119,23 @@ func TestInfoDetailEscCloses(t *testing.T) {
 	_, _, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !done {
 		t.Error("esc should close the info detail modal")
+	}
+}
+
+// TestTruncMeasuresCellsNotBytes asserts trunc cuts by display cells: a
+// multi-byte name must survive un-mangled (no mid-rune cut) and double-width
+// runes must count as two cells.
+func TestTruncMeasuresCellsNotBytes(t *testing.T) {
+	if got := trunc("ünïcödé", 5); got != "ünïcö" {
+		t.Errorf("trunc(ünïcödé, 5) = %q, want %q", got, "ünïcö")
+	}
+	if got := trunc("日本語ジョブ", 4); got != "日本" {
+		t.Errorf("trunc(日本語ジョブ, 4) = %q, want %q (2 double-width runes)", got, "日本")
+	}
+	if got := trunc("ascii", 10); got != "ascii" {
+		t.Errorf("trunc(ascii, 10) = %q, want unchanged", got)
+	}
+	if !utf8.ValidString(trunc("ünïcödé", 3)) {
+		t.Error("trunc produced invalid UTF-8")
 	}
 }

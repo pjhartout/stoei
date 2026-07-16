@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/charmbracelet/x/ansi"
+
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
@@ -353,10 +355,8 @@ func parseF(s string) float64 {
 	return v
 }
 
-// trunc truncates s to width.
+// trunc truncates s to width display cells, never splitting a rune — a
+// byte-based cut corrupts multi-byte job names and misaligns wide runes.
 func trunc(s string, width int) string {
-	if len(s) > width {
-		return s[:width]
-	}
-	return s
+	return ansi.Truncate(s, width, "")
 }

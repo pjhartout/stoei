@@ -66,3 +66,15 @@ func TestHelpClosesOnQuestionMark(t *testing.T) {
 		}
 	}
 }
+
+// TestPadLeftAlignsByCells asserts padding is computed from display width, so a
+// key like "↑/↓" (3 cells, 7 bytes) right-aligns identically to a 3-cell ASCII
+// key instead of drifting 4 columns.
+func TestPadLeftAlignsByCells(t *testing.T) {
+	if got := padLeft("↑/↓", 6); got != "   ↑/↓" {
+		t.Errorf("padLeft(↑/↓, 6) = %q, want three leading spaces", got)
+	}
+	if got, want := padLeft("↑/↓", 6), padLeft("a/b", 6); len([]rune(got)) != len([]rune(want)) {
+		t.Errorf("unicode and ascii keys pad to different rune-prefixed widths: %q vs %q", got, want)
+	}
+}
