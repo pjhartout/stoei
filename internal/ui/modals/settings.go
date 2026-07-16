@@ -136,7 +136,8 @@ func indexOf(opts []string, v string) int {
 func (s *Settings) Init() tea.Cmd { return textinput.Blink }
 
 // Update handles navigation, inline editing, save, and cancel. Returns done=true
-// on save or cancel so the root pops the modal.
+// on a successful save or cancel so the root pops the modal; invalid input
+// toasts and keeps the modal open so the user can fix the field.
 func (s *Settings) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 	km, ok := msg.(tea.KeyPressMsg)
 	if !ok {
@@ -147,7 +148,8 @@ func (s *Settings) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 	case "esc":
 		return s, nil, true
 	case "ctrl+s":
-		return s, s.save(), true
+		cmd, saved := s.save()
+		return s, cmd, saved
 	case "up", "shift+tab":
 		s.moveFocus(-1)
 		return s, nil, false
@@ -163,7 +165,8 @@ func (s *Settings) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 	case "enter":
 		// Enter saves from the last field, otherwise advances.
 		if s.focus == numFields-1 {
-			return s, s.save(), true
+			cmd, saved := s.save()
+			return s, cmd, saved
 		}
 		s.moveFocus(1)
 		return s, nil, false
@@ -219,34 +222,36 @@ func (s *Settings) cycleCurrent(direction int) {
 	}
 }
 
-// save builds, clamps, and emits the new config, or a toast on invalid input.
-func (s *Settings) save() tea.Cmd {
+// save builds, clamps, and emits the new config. On invalid input it returns a
+// toast Cmd and saved=false so the modal stays open for the user to fix the
+// field.
+func (s *Settings) save() (cmd tea.Cmd, saved bool) {
 	cfg := config.Default()
 	cfg.Theme = s.fields[fThemeIdx].options[s.fields[fThemeIdx].selected]
 	cfg.KeybindMode = s.fields[fKeybindIdx].options[s.fields[fKeybindIdx].selected]
 
 	refresh, err := parseFloat(s.fields[fRefreshIdx].input.Value())
 	if err != nil {
-		return toastCmd("Refresh interval must be a number")
+		return toastCmd("Refresh interval must be a number"), false
 	}
 	cfg.RefreshInterval = refresh
 
 	history, err := parseInt(s.fields[fHistoryIdx].input.Value())
 	if err != nil {
-		return toastCmd("Job history days must be a number")
+		return toastCmd("Job history days must be a number"), false
 	}
 	cfg.JobHistoryDays = history
 
 	lines, err := parseInt(s.fields[fLinesIdx].input.Value())
 	if err != nil {
-		return toastCmd("Log viewer lines must be a number")
+		return toastCmd("Log viewer lines must be a number"), false
 	}
 	cfg.LogViewerLines = lines
 
 	// Clamp through the pure config path so out-of-range fields fall back to the
 	// defaults rather than persisting invalid values.
 	clamped, _ := config.Load(mustMarshalRaw(cfg))
-	return func() tea.Msg { return SettingsAppliedMsg{Config: clamped} }
+	return func() tea.Msg { return SettingsAppliedMsg{Config: clamped} }, true
 }
 
 // mustMarshalRaw serializes cfg to YAML without clamping so config.Load can do
