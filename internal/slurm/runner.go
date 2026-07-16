@@ -2,6 +2,7 @@ package slurm
 
 import (
 	"bytes"
+	"cmp"
 	"context"
 	"fmt"
 	"os/exec"
@@ -68,7 +69,10 @@ func hasHardFailureSignal(stderr string) bool {
 // ExecRunner is the production Runner. It shells out with exec.CommandContext so
 // that cancelling the context kills the underlying process (for example an
 // orphaned squeue).
-type ExecRunner struct{}
+type ExecRunner struct {
+	// WaitDelay overrides the post-cancel grace period; zero means execWaitDelay.
+	WaitDelay time.Duration
+}
 
 // execWaitDelay bounds how long Run may keep waiting after its context is
 // cancelled. Killing the process is not enough: Wait blocks until the stdout
@@ -83,9 +87,9 @@ const execWaitDelay = 2 * time.Second
 // It returns a *CommandError when the command exits non-zero, or when it exits 0
 // but printed a hard-failure signal (a "connection refused" from slurmdbd) to
 // stderr — that case otherwise looks like an empty-but-successful result.
-func (ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+func (r ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
 	cmd := exec.CommandContext(ctx, name, args...)
-	cmd.WaitDelay = execWaitDelay
+	cmd.WaitDelay = cmp.Or(r.WaitDelay, execWaitDelay)
 	var stderr bytes.Buffer
 	cmd.Stderr = &stderr
 	out, err := cmd.Output()

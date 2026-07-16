@@ -92,16 +92,18 @@ func TestExecRunnerNonZeroExitWrapsExitError(t *testing.T) {
 // would keep Run blocked past the cancel — the fetch message then never arrives
 // and the section's dispatch guard never releases, freezing every later refresh.
 // Run must return within the WaitDelay grace instead of blocking until the pipe
-// closes on its own (here, a backgrounded sleep holding it for 20s).
+// closes on its own (here, a backgrounded sleep holding it for 5s). The test
+// shrinks WaitDelay so the pass path stays fast; a broken grace blocks ~5s and
+// trips the elapsed check.
 func TestExecRunnerReturnsAfterContextCancelDespiteHeldPipe(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
 	start := time.Now()
-	_, err := ExecRunner{}.Run(ctx, "sh", "-c", `sleep 20 & exec sleep 20`)
+	_, err := ExecRunner{WaitDelay: 150 * time.Millisecond}.Run(ctx, "sh", "-c", `sleep 5 & exec sleep 5`)
 	if err == nil {
 		t.Fatal("expected an error from the cancelled command, got nil")
 	}
-	if elapsed := time.Since(start); elapsed > execWaitDelay+5*time.Second {
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Fatalf("Run blocked %v past context cancel; want return within the WaitDelay grace", elapsed)
 	}
 }
