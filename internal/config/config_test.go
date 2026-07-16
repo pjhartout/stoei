@@ -1,6 +1,7 @@
 package config
 
 import (
+	"path/filepath"
 	"reflect"
 	"testing"
 )
@@ -118,5 +119,33 @@ func TestLoadInvalidYAMLReturnsDefaults(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, Default()) {
 		t.Errorf("malformed Load = %+v, want defaults", got)
+	}
+}
+
+// TestSaveLoadFileRoundTrips asserts Save persists through its temp+rename path
+// and LoadFile reads the same config back, leaving no temp litter behind.
+func TestSaveLoadFileRoundTrips(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "nested", "config.yaml")
+	in := Config{
+		Theme:           "dracula",
+		RefreshInterval: 12.5,
+		JobHistoryDays:  30,
+		LogViewerLines:  20000,
+		KeybindMode:     KeybindEmacs,
+	}
+	if err := Save(path, in); err != nil {
+		t.Fatalf("Save error: %v", err)
+	}
+	got, err := LoadFile(path)
+	if err != nil {
+		t.Fatalf("LoadFile error: %v", err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Errorf("round-trip = %+v, want %+v", got, in)
+	}
+	leftovers, err := filepath.Glob(filepath.Join(dir, "nested", "*.tmp"))
+	if err != nil || len(leftovers) != 0 {
+		t.Errorf("temp files left behind: %v (err %v)", leftovers, err)
 	}
 }

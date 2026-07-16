@@ -183,6 +183,9 @@ func LoadFile(path string) (Config, error) {
 }
 
 // Save marshals c and writes it to path, creating parent directories as needed.
+// The write goes through a temp file and rename so a crash or full disk
+// mid-write can never leave a truncated config that LoadFile would silently
+// replace with defaults.
 func Save(path string, c Config) error {
 	data, err := Marshal(c)
 	if err != nil {
@@ -191,7 +194,21 @@ func Save(path string, c Config) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
 	}
-	return os.WriteFile(path, data, 0o644) //nolint:gosec // user config, not a secret
+	f, err := os.CreateTemp(filepath.Dir(path), "config-*.tmp")
+	if err != nil {
+		return err
+	}
+	tmp := f.Name()
+	if _, err := f.Write(data); err != nil {
+		_ = f.Close()
+		_ = os.Remove(tmp)
+		return err
+	}
+	if err := f.Close(); err != nil {
+		_ = os.Remove(tmp)
+		return err
+	}
+	return os.Rename(tmp, path)
 }
 
 // Dir resolves the configuration directory, honoring STOEI_CONFIG_DIR, then
