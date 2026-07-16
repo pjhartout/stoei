@@ -105,7 +105,30 @@ func TestLogViewerSearchHighlightsAndNavigates(t *testing.T) {
 	v.Update(tea.KeyPressMsg{Code: 'N', Text: "N"})
 }
 
-// TestLogViewerReloadIssuesCmd asserts r re-issues the read as a Cmd.
+// flattenMsgs runs a Cmd and recursively flattens any nested tea.Batch layers,
+// returning every message produced, so assertions never depend on batch shape
+// or child ordering.
+func flattenMsgs(cmd tea.Cmd) []tea.Msg {
+	if cmd == nil {
+		return nil
+	}
+	msg := cmd()
+	batch, ok := msg.(tea.BatchMsg)
+	if !ok {
+		if msg == nil {
+			return nil
+		}
+		return []tea.Msg{msg}
+	}
+	var out []tea.Msg
+	for _, c := range batch {
+		out = append(out, flattenMsgs(c)...)
+	}
+	return out
+}
+
+// TestLogViewerReloadIssuesCmd asserts r re-issues the read as a Cmd: the fresh
+// logLoadedMsg must appear somewhere in whatever batch reload returns.
 func TestLogViewerReloadIssuesCmd(t *testing.T) {
 	path := writeTempLog(t, []string{"one"})
 	v := NewLogViewer(testStyles(), path, "stdout", 0)
@@ -119,10 +142,9 @@ func TestLogViewerReloadIssuesCmd(t *testing.T) {
 	if cmd == nil {
 		t.Fatal("reload must issue a load Cmd")
 	}
-	// Draining must yield a fresh logLoadedMsg somewhere in the batch.
 	found := false
-	for _, c := range []tea.Cmd{cmd} {
-		if _, ok := firstMsg(c).(logLoadedMsg); ok {
+	for _, m := range flattenMsgs(cmd) {
+		if _, ok := m.(logLoadedMsg); ok {
 			found = true
 		}
 	}

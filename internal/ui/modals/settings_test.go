@@ -106,8 +106,10 @@ func TestSettingsClampsOutOfRange(t *testing.T) {
 	}
 }
 
-// TestSettingsInvalidInputToasts asserts non-numeric input emits a toast (not an
-// apply) and does not close the modal.
+// TestSettingsInvalidInputToasts asserts saving with non-numeric input emits a
+// SettingsToastMsg instead of a SettingsAppliedMsg, and that ctrl+s still
+// returns done=true: the modal closes and the toast is the user's feedback, so
+// an invalid value must never reach the applied config.
 func TestSettingsInvalidInputToasts(t *testing.T) {
 	s := newTestSettings()
 	s.focusField(fHistoryIdx)
@@ -115,8 +117,7 @@ func TestSettingsInvalidInputToasts(t *testing.T) {
 
 	_, cmd, done := s.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
 	if !done {
-		// Save returns done=true (the modal closes) but emits a toast Cmd.
-		t.Log("modal closes on save attempt")
+		t.Error("ctrl+s must close the modal even on invalid input; the toast is the feedback")
 	}
 	msg := drainToMsg(cmd)
 	if _, ok := msg.(SettingsToastMsg); !ok {
