@@ -185,6 +185,16 @@ func TestParseRunningJobsEdgeCases(t *testing.T) {
 	if got := ParseRunningJobs(in); len(got) != 1 {
 		t.Errorf("got %d jobs, want 1 (short row dropped)", len(got))
 	}
+	// A job name containing the delimiter (sbatch -J 'train|eval|v2') must not
+	// shift the fixed fields behind it.
+	in = header + "\n102|train|eval|v2|RUNNING|2:00|1|n02|2024-01-15T10:00:00|2024-01-15T10:01:00"
+	got := ParseRunningJobs(in)
+	if len(got) != 1 {
+		t.Fatalf("got %d jobs, want 1", len(got))
+	}
+	if got[0].Name != "train|eval|v2" || got[0].State != "RUNNING" || got[0].StartTime != "2024-01-15T10:01:00" {
+		t.Errorf("pipe-in-name row parsed as %+v", got[0])
+	}
 }
 
 func TestParseAllUsersJobs(t *testing.T) {

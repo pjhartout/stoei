@@ -188,15 +188,19 @@ func ParseRunningJobs(raw string) []RunningJob {
 		for i := range parts {
 			parts[i] = strings.TrimSpace(parts[i])
 		}
+		// A job name may itself contain the delimiter (sbatch -J 'a|b'), and only
+		// the name can: anchor the six fixed fields at the tail and rejoin the
+		// middle as the name instead of indexing forward past parts[0].
+		tail := parts[len(parts)-6:]
 		jobs = append(jobs, RunningJob{
 			ID:         parts[0],
-			Name:       parts[1],
-			State:      parts[2],
-			Time:       parts[3],
-			Nodes:      parts[4],
-			NodeList:   parts[5],
-			SubmitTime: parts[6],
-			StartTime:  parts[7],
+			Name:       strings.Join(parts[1:len(parts)-6], "|"),
+			State:      tail[0],
+			Time:       tail[1],
+			Nodes:      tail[2],
+			NodeList:   tail[3],
+			SubmitTime: tail[4],
+			StartTime:  tail[5],
 			Raw:        parts,
 		})
 	}
