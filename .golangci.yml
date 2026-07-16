@@ -22,6 +22,7 @@ linters:
       #
       #   * internal/ui/... must NOT import internal/slurm directly; it goes
       #     through internal/store.
+      #   * internal/store must NOT import internal/ui.
       #   * internal/slurm must NOT import internal/ui or internal/store.
       #
       # store is allowed to import slurm, which is why there is no rule denying
@@ -33,6 +34,12 @@ linters:
           deny:
             - pkg: github.com/pjhartout/stoei/internal/slurm
               desc: "ui must go through internal/store, not import internal/slurm directly"
+        store-no-ui:
+          files:
+            - "**/internal/store/**"
+          deny:
+            - pkg: github.com/pjhartout/stoei/internal/ui
+              desc: "store must not import ui; the dependency flows ui -> store"
         slurm-no-upper-layers:
           files:
             - "**/internal/slurm/**"
