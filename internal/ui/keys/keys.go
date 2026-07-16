@@ -6,15 +6,12 @@ package keys
 
 import "charm.land/bubbles/v2/key"
 
-// Mode identifies a keybinding preset.
-type Mode = string
-
 // Available keybinding modes.
 const (
 	// Vim is the default preset.
-	Vim Mode = "vim"
+	Vim = "vim"
 	// Emacs is the alternate preset.
-	Emacs Mode = "emacs"
+	Emacs = "emacs"
 )
 
 // KeyMap is the set of global keybindings. It implements help.KeyMap. The keys
@@ -37,7 +34,7 @@ type KeyMap struct {
 
 // BuildKeyMap returns a fresh KeyMap for the given preset. Unknown modes fall
 // back to the vim preset.
-func BuildKeyMap(mode Mode) KeyMap {
+func BuildKeyMap(mode string) KeyMap {
 	if mode == Emacs {
 		return emacsKeyMap()
 	}

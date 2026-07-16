@@ -39,15 +39,11 @@ const (
 // frost/polar-night scheme. Must stay in sync with theme.DefaultThemeName.
 const DefaultTheme = "nord"
 
-// KeybindMode is the keybinding preset name. There are exactly two presets,
-// "vim" and "emacs".
-type KeybindMode = string
-
 // Keybind modes. KeybindVim and KeybindEmacs are the two valid presets; Vim is
 // the default.
 const (
-	KeybindVim   KeybindMode = "vim"
-	KeybindEmacs KeybindMode = "emacs"
+	KeybindVim   = "vim"
+	KeybindEmacs = "emacs"
 	// DefaultKeybindMode is the default keybinding preset.
 	DefaultKeybindMode = KeybindVim
 )

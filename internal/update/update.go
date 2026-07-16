@@ -6,6 +6,7 @@ package update
 
 import (
 	"archive/tar"
+	"bytes"
 	"compress/gzip"
 	"context"
 	"crypto/sha256"
@@ -181,7 +182,7 @@ func checksumFor(checksums []byte, name string) (string, error) {
 
 // extractBinary pulls the "stoei" executable out of a release tar.gz.
 func extractBinary(archive []byte) ([]byte, error) {
-	gz, err := gzip.NewReader(strings.NewReader(string(archive)))
+	gz, err := gzip.NewReader(bytes.NewReader(archive))
 	if err != nil {
 		return nil, err
 	}

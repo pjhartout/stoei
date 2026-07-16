@@ -3,6 +3,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"os"
 
 	tea "charm.land/bubbletea/v2"
@@ -19,11 +20,25 @@ import (
 // -ldflags "-X main.version=...". Local builds report "dev".
 var version = "dev"
 
+// usage prints the CLI surface: the TUI launches with no arguments.
+func usage(w io.Writer) {
+	_, _ = fmt.Fprintln(w, `stoei — a terminal UI for monitoring Slurm jobs
+
+Usage:
+  stoei            launch the TUI
+  stoei update     replace this binary with the latest release
+  stoei reset      clear the persistent job journal
+  stoei version    print the version`)
+}
+
 func main() {
 	if len(os.Args) > 1 {
 		switch os.Args[1] {
 		case "--version", "-v", "version":
 			fmt.Println("stoei", version)
+			return
+		case "--help", "-h", "help":
+			usage(os.Stdout)
 			return
 		case "reset":
 			// Clear the persistent job journal, starting the local history fresh.
@@ -42,6 +57,10 @@ func main() {
 				os.Exit(1)
 			}
 			return
+		default:
+			fmt.Fprintf(os.Stderr, "stoei: unknown command %q\n\n", os.Args[1])
+			usage(os.Stderr)
+			os.Exit(2)
 		}
 	}
 
@@ -63,10 +82,9 @@ func main() {
 	// Wire the one-way dependency chain: a Runner shells out to Slurm, the Client
 	// builds/parses commands, the Store holds the data, and the root model renders
 	// it. Job history comes from the controller ("scontrol show jobs")
-	// accumulated into a persistent on-disk journal — never slurmdbd/sacct —
-	// so the head node is not queried at all; squeue, scontrol, and the rest run
-	// live. The alt-screen is a View field in Bubble Tea v2, so NewProgram takes
-	// just the model.
+	// accumulated into a persistent on-disk journal, so slurmdbd/sacct are never
+	// queried; squeue, scontrol, and the rest run live. The alt-screen is a View
+	// field in Bubble Tea v2, so NewProgram takes just the model.
 	client := slurm.NewClient(slurm.ExecRunner{}, slurm.WithJournal(slurm.JournalPath()))
 
 	ring := components.NewLogRing(components.DefaultMaxLogLines)
