@@ -4,6 +4,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // ControllerJob is one job from the controller's live view (the per-user
@@ -137,12 +138,17 @@ func baseState(state string) string {
 }
 
 // HistoryJobsFor derives the current user's job-history rows (newest first) and
-// requeue statistics from journal jobs. An empty username returns every job.
-func HistoryJobsFor(jobs []ControllerJob, username string) ([]HistoryJob, HistoryStats) {
+// requeue statistics from journal jobs. An empty username returns every job. A
+// non-zero cutoff drops jobs whose most recent parseable timestamp (end, else
+// start, else submit) lies before it.
+func HistoryJobsFor(jobs []ControllerJob, username string, cutoff time.Time) ([]HistoryJob, HistoryStats) {
 	var out []HistoryJob
 	stats := HistoryStats{}
 	for _, j := range jobs {
 		if username != "" && j.User != username {
+			continue
+		}
+		if !cutoff.IsZero() && jobBefore(j, cutoff) {
 			continue
 		}
 		out = append(out, HistoryJob{
@@ -160,4 +166,16 @@ func HistoryJobsFor(jobs []ControllerJob, username string) ([]HistoryJob, Histor
 	stats.TotalJobs = len(out)
 	sort.SliceStable(out, func(a, b int) bool { return out[a].Submit > out[b].Submit })
 	return out, stats
+}
+
+// jobBefore reports whether j's most recent parseable timestamp (end, else
+// start, else submit) is before cutoff. A job with no parseable timestamp is
+// never before: the history window must not hide a live or malformed record.
+func jobBefore(j ControllerJob, cutoff time.Time) bool {
+	for _, s := range []string{j.End, j.Start, j.Submit} {
+		if t, ok := ParseSlurmTimestamp(s); ok {
+			return t.Before(cutoff)
+		}
+	}
+	return false
 }

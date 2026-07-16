@@ -190,9 +190,10 @@ func (c *Client) AllUsersJobs(ctx context.Context) ([]AllUsersJob, error) {
 }
 
 // JobHistory returns the current user's job history and requeue statistics from
-// the journal (never sacct). days is accepted for API compatibility only;
-// history is whatever the journal has accumulated.
-func (c *Client) JobHistory(ctx context.Context, _ int) ([]HistoryJob, HistoryStats, error) {
+// the journal (never sacct), windowed to the last days days: a job whose most
+// recent parseable timestamp is older is excluded. days <= 0 disables the
+// window.
+func (c *Client) JobHistory(ctx context.Context, days int) ([]HistoryJob, HistoryStats, error) {
 	if err := validateUsername(c.username); err != nil {
 		return nil, HistoryStats{}, err
 	}
@@ -200,7 +201,11 @@ func (c *Client) JobHistory(ctx context.Context, _ int) ([]HistoryJob, HistorySt
 	if err != nil {
 		return nil, HistoryStats{}, err
 	}
-	history, stats := HistoryJobsFor(jobs, c.username)
+	var cutoff time.Time
+	if days > 0 {
+		cutoff = c.now().AddDate(0, 0, -days)
+	}
+	history, stats := HistoryJobsFor(jobs, c.username, cutoff)
 	return history, stats, nil
 }
 

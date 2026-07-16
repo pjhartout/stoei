@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // fixtureRunner is a Runner that returns the contents of a testdata fixture per
@@ -100,7 +101,10 @@ func TestClientJobHistoryFromJournal(t *testing.T) {
 		"0:30:00", "1:0", "0", "8", "cpu-node-05", "cpu=8",
 	)
 	r := &fixtureRunner{outputs: map[string]string{"squeue": out}}
-	c := NewClient(r, WithUsername("alice"), WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")))
+	c := NewClient(r, WithUsername("alice"),
+		WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")),
+		WithClock(func() time.Time { return time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC) }),
+	)
 
 	jobs, stats, err := c.JobHistory(context.Background(), 7)
 	if err != nil {
@@ -432,5 +436,52 @@ func TestClientHoldJobRejectsBadID(t *testing.T) {
 	}
 	if len(r.calls) != 0 {
 		t.Errorf("scontrol called despite invalid ID: %v", r.calls)
+	}
+}
+
+// TestClientJobHistoryWindow asserts the days window excludes jobs whose most
+// recent timestamp is older, keeps unparseable-timestamp jobs, and is disabled
+// for days <= 0.
+func TestClientJobHistoryWindow(t *testing.T) {
+	out := journalRow(t,
+		"2001", "2001", "N/A", "alice", "old", "COMPLETED", "gpu",
+		"2024-01-01T06:00:00", "2024-01-01T06:05:00", "2024-01-01T10:05:00",
+		"4:00:00", "0:0", "0", "32", "gpu-node-01", "cpu=32",
+	) + "\n" + journalRow(t,
+		"2002", "2002", "N/A", "alice", "recent", "COMPLETED", "cpu",
+		"2024-01-15T11:00:00", "2024-01-15T11:05:00", "2024-01-15T11:35:00",
+		"0:30:00", "0:0", "0", "8", "cpu-node-05", "cpu=8",
+	) + "\n" + journalRow(t,
+		"2003", "2003", "N/A", "alice", "running", "RUNNING", "cpu",
+		"Unknown", "Unknown", "Unknown",
+		"0:10:00", "0:0", "0", "8", "cpu-node-06", "cpu=8",
+	)
+	newC := func() *Client {
+		r := &fixtureRunner{outputs: map[string]string{"squeue": out}}
+		return NewClient(r, WithUsername("alice"),
+			WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")),
+			WithClock(func() time.Time { return time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC) }),
+		)
+	}
+
+	jobs, stats, err := newC().JobHistory(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 2 || stats.TotalJobs != 2 {
+		t.Errorf("windowed history = %d jobs (%+v), want 2 (old job excluded, unknown-timestamp kept)", len(jobs), jobs)
+	}
+	for _, j := range jobs {
+		if j.ID == "2001" {
+			t.Error("job outside the 7-day window was not excluded")
+		}
+	}
+
+	jobs, _, err = newC().JobHistory(context.Background(), 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(jobs) != 3 {
+		t.Errorf("days=0 history = %d jobs, want all 3 (window disabled)", len(jobs))
 	}
 }

@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // TestCompletedJobRecordPersistsToJournal asserts a mid-session completion observed
@@ -160,5 +161,25 @@ func mustUpsert(t *testing.T, j *jobJournal, jobs ...ControllerJob) {
 	t.Helper()
 	if err := j.upsert(jobs); err != nil {
 		t.Fatalf("upsert: %v", err)
+	}
+}
+
+// TestJournalPrunesRecordsBeyondRetention asserts an upsert drops records last
+// seen beyond the 90-day retention (the job_history_days ceiling), so the file
+// cannot grow without bound.
+func TestJournalPrunesRecordsBeyondRetention(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.jsonl")
+	j := newJobJournal(path)
+	t0 := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	j.now = func() time.Time { return t0 }
+	mustUpsert(t, j, ControllerJob{ID: "old", State: "COMPLETED"})
+
+	j.now = func() time.Time { return t0.Add(journalRetention + 24*time.Hour) }
+	mustUpsert(t, j, ControllerJob{ID: "new", State: "RUNNING"})
+
+	all := j.all()
+	if len(all) != 1 || all[0].ID != "new" {
+		t.Errorf("journal after retention pruning = %+v, want only the new record", all)
 	}
 }

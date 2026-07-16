@@ -52,11 +52,18 @@ func newJobJournal(path string) *jobJournal {
 	return &jobJournal{path: path, now: time.Now}
 }
 
+// journalRetention bounds how long an unobserved record is kept. It matches the
+// 90-day ceiling of the job_history_days setting: a record last seen beyond it
+// can never enter the history window again, so upsert drops it to keep the file
+// from growing without bound.
+const journalRetention = 90 * 24 * time.Hour
+
 // upsert merges observed jobs into the journal and rewrites it atomically. A job
 // already recorded in a terminal state keeps its final record (only LastSeen is
-// touched); any other job is inserted or updated, preserving FirstSeen. The
-// read-merge-write cycle runs under a cross-process file lock so concurrent
-// stoei instances cannot clobber each other's records.
+// touched); any other job is inserted or updated, preserving FirstSeen; records
+// last seen beyond journalRetention are pruned. The read-merge-write cycle runs
+// under a cross-process file lock so concurrent stoei instances cannot clobber
+// each other's records.
 func (j *jobJournal) upsert(jobs []ControllerJob) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -81,6 +88,12 @@ func (j *jobJournal) upsert(jobs []ControllerJob) error {
 			rec.FirstSeen = existing.FirstSeen
 		}
 		recs[job.ID] = rec
+	}
+	horizon := j.now().Add(-journalRetention)
+	for id, r := range recs {
+		if t, err := time.Parse(time.RFC3339, r.LastSeen); err == nil && t.Before(horizon) {
+			delete(recs, id)
+		}
 	}
 	return j.write(recs)
 }
