@@ -266,3 +266,25 @@ func TestFindUserStats(t *testing.T) {
 		t.Errorf("FindUserStats(nobody) should be ok=false")
 	}
 }
+
+// TestParseNodeCount asserts a plain count parses as-is and a pending job's
+// min-max request ("4-8") resolves to its guaranteed lower bound rather than
+// being miscounted as an enumeration.
+func TestParseNodeCount(t *testing.T) {
+	cases := []struct {
+		in   string
+		want int
+	}{
+		{"4", 4},
+		{"4-8", 4},
+		{"1-2", 1},
+		{"", 0},
+		{"x", 0},
+		{"-8", 0},
+	}
+	for _, c := range cases {
+		if got := parseNodeCount(c.in); got != c.want {
+			t.Errorf("parseNodeCount(%q) = %d, want %d", c.in, got, c.want)
+		}
+	}
+}

@@ -532,18 +532,11 @@ func singleNodeModel(nodes []string, gpuModelByNode map[string]string) string {
 }
 
 // parseNodeCount parses a node count that may be a single number ("4") or a
-// range ("4-8", meaning 5 nodes).
+// pending job's min-max request ("4-8"), which resolves to its guaranteed lower
+// bound — the range is a request span, not an enumeration of nodes.
 func parseNodeCount(nodesStr string) int {
-	if strings.Contains(nodesStr, "-") {
-		parts := strings.Split(nodesStr, "-")
-		if len(parts) == 2 {
-			start, err1 := strconv.Atoi(parts[0])
-			end, err2 := strconv.Atoi(parts[1])
-			if err1 == nil && err2 == nil {
-				return end - start + 1
-			}
-			return 0
-		}
+	if lo, _, ok := strings.Cut(nodesStr, "-"); ok {
+		nodesStr = lo
 	}
 	n, err := strconv.Atoi(nodesStr)
 	if err != nil {
