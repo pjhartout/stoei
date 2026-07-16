@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
@@ -126,6 +127,32 @@ func TestJournalPersistsAndKeepsTerminalFinal(t *testing.T) {
 	}
 	if _, err := os.Stat(path); err != nil {
 		t.Errorf("journal file missing: %v", err)
+	}
+}
+
+// TestJournalConcurrentUpsertsLoseNothing drives two journal handles (as two
+// stoei processes would) upserting disjoint jobs into the same file
+// concurrently. The cross-process lock must serialize each read-merge-write
+// cycle so neither handle's whole-file rewrite discards the other's records.
+func TestJournalConcurrentUpsertsLoseNothing(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.jsonl")
+	handles := []*jobJournal{newJobJournal(path), newJobJournal(path)}
+	var wg sync.WaitGroup
+	for i, h := range handles {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for k := range 20 {
+				id := fmt.Sprintf("%d-%d", i, k)
+				if err := h.upsert([]ControllerJob{{ID: id, State: "COMPLETED"}}); err != nil {
+					t.Errorf("upsert %s: %v", id, err)
+				}
+			}
+		}()
+	}
+	wg.Wait()
+	if got := len(newJobJournal(path).all()); got != 40 {
+		t.Errorf("journal has %d records after concurrent upserts, want 40 (records lost)", got)
 	}
 }
 

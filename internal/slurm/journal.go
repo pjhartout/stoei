@@ -38,8 +38,9 @@ type journalRecord struct {
 // Because slurmdbd is no longer queried,
 // it is the durable job history: it accumulates across runs, and a job already
 // recorded in a terminal state is never overwritten by a later (stale) record, so
-// final outcomes stick. It is stored as JSON Lines and rewritten atomically; all
-// methods are safe for concurrent use.
+// final outcomes stick. It is stored as JSON Lines and rewritten atomically
+// under a cross-process file lock; all methods are safe for concurrent use,
+// including from concurrent stoei instances.
 type jobJournal struct {
 	path string
 	mu   sync.Mutex
@@ -53,10 +54,17 @@ func newJobJournal(path string) *jobJournal {
 
 // upsert merges observed jobs into the journal and rewrites it atomically. A job
 // already recorded in a terminal state keeps its final record (only LastSeen is
-// touched); any other job is inserted or updated, preserving FirstSeen.
+// touched); any other job is inserted or updated, preserving FirstSeen. The
+// read-merge-write cycle runs under a cross-process file lock so concurrent
+// stoei instances cannot clobber each other's records.
 func (j *jobJournal) upsert(jobs []ControllerJob) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
+	if err := os.MkdirAll(filepath.Dir(j.path), 0o755); err != nil {
+		return err
+	}
+	unlock := lockJournal(j.path)
+	defer unlock()
 	recs := j.load()
 	now := j.now().UTC().Format(time.RFC3339)
 	for _, job := range jobs {
@@ -115,11 +123,10 @@ func (j *jobJournal) load() map[string]journalRecord {
 }
 
 // write rewrites the journal atomically. The temp file name is unique per
-// writer so concurrent stoei instances never publish each other's partial file.
+// writer so concurrent stoei instances never publish each other's partial file;
+// upsert's cross-process lock additionally serializes whole read-merge-write
+// cycles so a rename cannot discard another instance's merge.
 func (j *jobJournal) write(recs map[string]journalRecord) error {
-	if err := os.MkdirAll(filepath.Dir(j.path), 0o755); err != nil {
-		return err
-	}
 	f, err := os.CreateTemp(filepath.Dir(j.path), "jobs-*.tmp")
 	if err != nil {
 		return err
