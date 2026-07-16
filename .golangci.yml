@@ -7,14 +7,19 @@ linters:
   default: none
   enable:
     - errcheck
+    - errorlint # %w wrapping and errors.Is/As over ==/type assertions
+    - exhaustive # enum switches must cover every value (default counts)
     - godot # doc comments end with a period (consistent docstrings)
     - govet
     - ineffassign
+    - nolintlint # nolint directives must be specific and actually used
     - staticcheck # includes ST1020/ST1021: doc comments start with the name
     - unused
     - depguard
 
   settings:
+    exhaustive:
+      default-signifies-exhaustive: true
     godot:
       scope: declarations
     depguard:

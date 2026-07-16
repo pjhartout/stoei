@@ -19,8 +19,16 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v6
         with:
-          go-version: "1.25"
+          go-version-file: go.mod
           check-latest: true
+
+      # A tag pushed outside scripts/release must never publish an untested
+      # binary: gate the release on the same checks the branch CI runs.
+      - name: go vet
+        run: go vet ./...
+
+      - name: Test (race)
+        run: go test ./... -race
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7

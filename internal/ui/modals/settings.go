@@ -214,6 +214,8 @@ func (s *Settings) cycleCurrent(direction int) {
 			return
 		}
 		f.selected = (f.selected + direction + n) % n
+	default:
+		// fieldText edits through its input, not by cycling.
 	}
 }
 

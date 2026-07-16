@@ -99,7 +99,6 @@ func readCache() (path, tag string, fresh bool) {
 		return "", "", false
 	}
 	path = filepath.Join(dir, "stoei", "latest-release")
-	//nolint:errcheck // absent or unreadable cache simply means a network lookup.
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return "", "", false
 	}

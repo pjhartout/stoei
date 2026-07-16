@@ -720,7 +720,11 @@ func (a *App) openDetailForActive() tea.Cmd {
 				return nil
 			}
 			return a.pushModal(modals.NewAccountDetail(a.store, a.styles, k))
+		default:
+			// PriorityDetailNone: no detail target selected.
 		}
+	default:
+		// The Logs tab has no per-row detail.
 	}
 	return nil
 }
@@ -935,6 +939,7 @@ func (a App) routeToActive(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.priority, cmd = a.priority.Update(msg)
 	case tabLogs:
 		a.logsTab, cmd = a.logsTab.Update(msg)
+	default:
 	}
 	a.frame.invalidate()
 	return a, cmd
