@@ -599,6 +599,12 @@ func (a App) handleModalMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 
 	case modals.SettingsAppliedMsg:
 		return a, a.applyConfig(msg.Config), true
+
+	case settingsSavedMsg:
+		if msg.err != nil {
+			a.pushToast("Failed to save settings: " + msg.err.Error())
+		}
+		return a, nil, true
 	}
 	return a, nil, false
 }
@@ -1123,12 +1129,12 @@ func (a *App) rebuildStyles() {
 	}
 }
 
-// applyConfig persists the new config and applies it live: it swaps the theme
-// (rebuilds styles and re-themes every sub-model), swaps the keymap (so the
-// footer/help reflect the new preset), and updates the refresh intervals. The
-// history/log-line windows are read from a.cfg on the next dispatch, so updating
-// a.cfg suffices. A manual refresh is triggered so the new history window takes
-// effect at once.
+// applyConfig applies the new config live — it swaps the theme (rebuilds styles
+// and re-themes every sub-model), swaps the keymap (so the footer/help reflect
+// the new preset), and updates the refresh intervals — and persists it from a
+// Cmd, keeping the disk write off the Update path. The history/log-line windows
+// are read from a.cfg on the next dispatch, so updating a.cfg suffices. A manual
+// refresh is triggered so the new history window takes effect at once.
 func (a *App) applyConfig(cfg config.Config) tea.Cmd {
 	themeChanged := cfg.Theme != a.cfg.Theme
 	a.cfg = cfg
@@ -1141,15 +1147,14 @@ func (a *App) applyConfig(cfg config.Config) tea.Cmd {
 	a.applyKeyModeToTabs()
 	a.intervals = intervalsFromConfig(cfg)
 
+	var save tea.Cmd
 	if a.configPath != "" {
-		if err := config.Save(a.configPath, cfg); err != nil {
-			a.pushToast("Failed to save settings: " + err.Error())
-		}
+		save = saveConfig(a.configPath, cfg)
 	}
 
 	a.frame.invalidate()
 	// Re-fetch so the new history window is reflected immediately.
-	return a.manualRefresh()
+	return tea.Batch(save, a.manualRefresh())
 }
 
 // pushModal pushes a modal onto the stack, sizes it, and returns its Init Cmd so

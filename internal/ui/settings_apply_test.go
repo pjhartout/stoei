@@ -1,6 +1,8 @@
 package ui
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	tea "charm.land/bubbletea/v2"
@@ -64,6 +66,35 @@ func TestApplyConfigSwapsThemeKeymapIntervals(t *testing.T) {
 	}
 	if a.cfg != newCfg {
 		t.Errorf("cfg not stored: %+v", a.cfg)
+	}
+}
+
+// TestApplyConfigSavesFromCmd asserts the config write happens inside the
+// returned Cmd (never on the Update path) and actually reaches disk.
+func TestApplyConfigSavesFromCmd(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{UsernameStr: "alice"})
+	a.configPath = filepath.Join(t.TempDir(), "config.yaml")
+
+	m, cmd := a.Update(modals.SettingsAppliedMsg{Config: config.Default()})
+	a = m.(App)
+
+	if _, err := os.Stat(a.configPath); err == nil {
+		t.Fatal("config written during Update; the write must happen inside the Cmd")
+	}
+	var saw bool
+	for _, msg := range drainCmd(cmd) {
+		if sm, ok := msg.(settingsSavedMsg); ok {
+			saw = true
+			if sm.err != nil {
+				t.Errorf("save failed: %v", sm.err)
+			}
+		}
+	}
+	if !saw {
+		t.Fatal("applyConfig returned no save Cmd")
+	}
+	if _, err := os.Stat(a.configPath); err != nil {
+		t.Errorf("config not written after draining the Cmd: %v", err)
 	}
 }
 

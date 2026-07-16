@@ -7,6 +7,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
+	"github.com/pjhartout/stoei/internal/config"
 	"github.com/pjhartout/stoei/internal/store"
 	"github.com/pjhartout/stoei/internal/update"
 )
@@ -26,6 +27,17 @@ func checkLatestRelease() tea.Cmd {
 			return latestReleaseMsg{}
 		}
 		return latestReleaseMsg{tag: tag}
+	}
+}
+
+// settingsSavedMsg carries the result of persisting the settings to disk.
+type settingsSavedMsg struct{ err error }
+
+// saveConfig writes cfg to path from a Cmd so a stalled home filesystem (an NFS
+// or GPFS hiccup on a login node) can never freeze the UI mid-keystroke.
+func saveConfig(path string, cfg config.Config) tea.Cmd {
+	return func() tea.Msg {
+		return settingsSavedMsg{err: config.Save(path, cfg)}
 	}
 }
 
