@@ -117,6 +117,30 @@ func TestFastTickReArmsButSkipsFetchWhenInFlight(t *testing.T) {
 	}
 }
 
+// TestStartupGuardEngagedUntilFirstResult asserts the single-flight guard is
+// already engaged at construction (Init's value receiver discards the flag
+// dispatchRunning sets there) and that a stale-generation result cannot release
+// it — only the newest fetch's result may.
+func TestStartupGuardEngagedUntilFirstResult(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	if !a.runningInFlight {
+		t.Fatal("runningInFlight must start true: Init dispatches the first fetch from a value receiver")
+	}
+
+	gen := a.store.NextGen(store.SectionRunningJobs)
+	m, _ := a.Update(runningJobsMsg{gen: gen - 1})
+	a = m.(App)
+	if !a.runningInFlight {
+		t.Error("a stale-generation result released the single-flight guard")
+	}
+
+	m, _ = a.Update(runningJobsMsg{gen: gen})
+	a = m.(App)
+	if a.runningInFlight {
+		t.Error("the current-generation result did not release the guard")
+	}
+}
+
 // TestSlowTickReArmsOwnTierExactlyOnce asserts I2 for the slow tier.
 func TestSlowTickReArmsOwnTierExactlyOnce(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
@@ -287,6 +311,7 @@ func TestManualRefreshDispatchesHistoryOnce(t *testing.T) {
 // would otherwise freeze the list the user is watching).
 func TestTerminalBlurDoesNotFreezeLiveList(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
+	a.runningInFlight = false
 
 	// A blur event is now an ordinary, ignored message; it must not latch any state
 	// that suppresses dispatch.

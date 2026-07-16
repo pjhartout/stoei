@@ -196,18 +196,21 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 		frame:      &frameCache{dirty: true},
 		// spinnerActive and animActive start true because Init batches the first
 		// spinner and anim ticks; focused starts true because a terminal that
-		// never reports focus should still animate.
-		spinnerActive: true,
-		focused:       true,
-		animActive:    true,
-		lastInput:     time.Now(),
-		jobs:          tabs.NewJobs(s, username, styles),
-		nodes:         tabs.NewNodes(s, styles),
-		users:         tabs.NewUsers(s, styles),
-		priority:      tabs.NewPriority(s, styles, username),
-		logsTab:       tabs.NewLogs(ring, styles),
-		sidebar:       components.NewSidebar(styles),
-		detailCache:   modals.NewJobDetailCache(),
+		// never reports focus should still animate. runningInFlight starts true
+		// because Init dispatches the first running fetch from a value receiver,
+		// so the flag dispatchRunning sets there is lost with Init's model copy.
+		spinnerActive:   true,
+		focused:         true,
+		animActive:      true,
+		runningInFlight: true,
+		lastInput:       time.Now(),
+		jobs:            tabs.NewJobs(s, username, styles),
+		nodes:           tabs.NewNodes(s, styles),
+		users:           tabs.NewUsers(s, styles),
+		priority:        tabs.NewPriority(s, styles, username),
+		logsTab:         tabs.NewLogs(ring, styles),
+		sidebar:         components.NewSidebar(styles),
+		detailCache:     modals.NewJobDetailCache(),
 	}
 	// Apply the tab-local filter/sort bindings for the active preset so an
 	// emacs-mode config rebinds them (C-s filter, C-o sort) from the start.
@@ -475,7 +478,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case runningJobsMsg:
-		a.runningInFlight = false
+		// Only the newest fetch may release the single-flight guard; a stale
+		// generation arriving late must not unlock a still-running fetch.
+		if msg.gen >= a.store.Gen(store.SectionRunningJobs) {
+			a.runningInFlight = false
+		}
 		// The manual-refresh progress toast is done the moment the result lands.
 		a.dropToasts(refreshToastTag)
 		vanished := a.store.SetRunningJobs(msg.jobs, msg.gen, msg.err)
