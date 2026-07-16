@@ -11,8 +11,8 @@ import (
 // uses time.Now.
 var timelineNow = time.Now
 
-// parseRestarts parses the sacct Restart field into an int, returning 0 when it
-// is not a plain non-negative integer.
+// parseRestarts parses a history job's Restart field into an int, returning 0
+// when it is not a plain non-negative integer.
 func parseRestarts(s string) int {
 	s = strings.TrimSpace(s)
 	if s == "" {

@@ -29,8 +29,7 @@ type AllUsersJob struct {
 // RunningJob is one row of the pipe-delimited "squeue -o" output used for the
 // current user's running/pending jobs. Fields follow the format string
 // "%i|%j|%T|%M|%D|%R|%V|%S" (id, name, state, time, nodes, nodelist, submit,
-// start). Raw holds every pipe-separated field so consumers can read columns
-// the struct does not name explicitly.
+// start).
 type RunningJob struct {
 	ID         string
 	Name       string
@@ -40,12 +39,10 @@ type RunningJob struct {
 	NodeList   string
 	SubmitTime string
 	StartTime  string
-	Raw        []string
 }
 
-// HistoryJob is one job from the controller journal (scontrol show jobs). It
-// mirrors the ten-column layout "JobID,JobName,State,Restart,Elapsed,ExitCode,
-// NodeList,Submit,Start,End". Raw holds every pipe-separated field of the row.
+// HistoryJob is one row of the job-history view, derived from the journal's
+// ControllerJob records by HistoryJobsFor (slurmdbd/sacct are never queried).
 type HistoryJob struct {
 	ID       string
 	Name     string
@@ -57,11 +54,10 @@ type HistoryJob struct {
 	Submit   string
 	Start    string
 	End      string
-	Raw      []string
 }
 
-// HistoryStats are the aggregate requeue counters derived from a job-history
-// query, returned alongside the parsed jobs by ParseHistory.
+// HistoryStats are the aggregate requeue counters derived from journal jobs by
+// HistoryJobsFor, alongside the history rows.
 type HistoryStats struct {
 	TotalJobs     int
 	TotalRequeues int

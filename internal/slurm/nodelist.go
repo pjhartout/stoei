@@ -2,6 +2,7 @@ package slurm
 
 import (
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -21,7 +22,7 @@ func ExpandNodeList(nodelist string) []string {
 	for name := range set {
 		out = append(out, name)
 	}
-	sortStrings(out)
+	slices.Sort(out)
 	return out
 }
 

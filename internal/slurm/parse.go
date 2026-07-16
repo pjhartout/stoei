@@ -201,7 +201,6 @@ func ParseRunningJobs(raw string) []RunningJob {
 			NodeList:   tail[3],
 			SubmitTime: tail[4],
 			StartTime:  tail[5],
-			Raw:        parts,
 		})
 	}
 	return jobs
@@ -354,7 +353,3 @@ func splitNonTrailing(raw string) []string {
 	}
 	return strings.Split(trimmed, "\n")
 }
-
-// sortStrings sorts s in place. It is a thin wrapper so callers in this package
-// avoid importing sort directly for a single use.
-func sortStrings(s []string) { sort.Strings(s) }

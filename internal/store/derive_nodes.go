@@ -159,8 +159,8 @@ type NodeJob struct {
 // JobsOnNode returns the jobs whose allocated NodeList includes node, sorted by
 // user then job id. CPUs and GPUs come from each job's TRES and are whole-job
 // totals, so a multi-node job's counts are its full allocation, not the share on
-// this node. ponytail: per-node split needs per-node TRES that squeue doesn't
-// give us; whole-job totals if a job spans nodes.
+// this node — a per-node split would need per-node TRES that squeue does not
+// expose.
 func JobsOnNode(jobs []AllUsersJob, node string) []NodeJob {
 	node = strings.TrimSpace(node)
 	var out []NodeJob
