@@ -1,0 +1,48 @@
+JobId=47701 ArrayJobId=47701 ArrayTaskId=50-99%10 ArrayTaskThrottle=10 JobName=train_array
+   UserId=testuser(1000) GroupId=researchers(1000)
+   Priority=4294901730 Nice=0 Account=ml_research QOS=normal
+   JobState=PENDING Reason=JobArrayTaskLimit Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:00:00 TimeLimit=1-00:00:00 TimeMin=N/A
+   SubmitTime=2024-01-15T08:00:00 EligibleTime=2024-01-15T08:00:00
+   Partition=gpu NumNodes=1 NumCPUs=4 NumTasks=1 CPUs/Task=4
+   TRES=cpu=4,mem=32G,node=1,gres/gpu=1
+   Command=/home/testuser/projects/ml/train_array.sh
+   WorkDir=/home/testuser/projects/ml
+   StdErr=/home/testuser/projects/ml/logs/train_%A_%a.err
+   StdOut=/home/testuser/projects/ml/logs/train_%A_%a.out
+   NodeList=(null)
+
+JobId=47749 ArrayJobId=47701 ArrayTaskId=48 ArrayTaskThrottle=10 JobName=train_array
+   UserId=testuser(1000) GroupId=researchers(1000)
+   Priority=4294901730 Nice=0 Account=ml_research QOS=normal
+   JobState=RUNNING Reason=None Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=01:12:03 TimeLimit=1-00:00:00 TimeMin=N/A
+   SubmitTime=2024-01-15T08:00:00 EligibleTime=2024-01-15T08:00:00
+   StartTime=2024-01-15T09:00:00 EndTime=2024-01-16T09:00:00 Deadline=N/A
+   Partition=gpu NumNodes=1 NumCPUs=4 NumTasks=1 CPUs/Task=4
+   TRES=cpu=4,mem=32G,node=1,gres/gpu=1
+   Command=/home/testuser/projects/ml/train_array.sh
+   WorkDir=/home/testuser/projects/ml
+   StdErr=/home/testuser/projects/ml/logs/train_%A_%a.err
+   StdOut=/home/testuser/projects/ml/logs/train_%A_%a.out
+   NodeList=gpu-node-02
+   BatchHost=gpu-node-02
+
+JobId=47710 ArrayJobId=47701 ArrayTaskId=9 ArrayTaskThrottle=10 JobName=train_array
+   UserId=testuser(1000) GroupId=researchers(1000)
+   Priority=4294901730 Nice=0 Account=ml_research QOS=normal
+   JobState=COMPLETED Reason=None Dependency=(null)
+   Requeue=1 Restarts=0 BatchFlag=1 Reboot=0 ExitCode=0:0
+   RunTime=00:58:41 TimeLimit=1-00:00:00 TimeMin=N/A
+   SubmitTime=2024-01-15T08:00:00 EligibleTime=2024-01-15T08:00:00
+   StartTime=2024-01-15T08:01:00 EndTime=2024-01-15T08:59:41 Deadline=N/A
+   Partition=gpu NumNodes=1 NumCPUs=4 NumTasks=1 CPUs/Task=4
+   TRES=cpu=4,mem=32G,node=1,gres/gpu=1
+   Command=/home/testuser/projects/ml/train_array.sh
+   WorkDir=/home/testuser/projects/ml
+   StdErr=/home/testuser/projects/ml/logs/train_%A_%a.err
+   StdOut=/home/testuser/projects/ml/logs/train_%A_%a.out
+   NodeList=gpu-node-01
+   BatchHost=gpu-node-01

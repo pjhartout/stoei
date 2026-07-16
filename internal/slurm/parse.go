@@ -31,6 +31,32 @@ func ParseScontrolFields(raw string) map[string]string {
 	return result
 }
 
+// ParseScontrolJobRecords splits multi-record "scontrol show jobid" output into
+// one Key=Value map per record. An array job yields one record per task plus
+// the pending aggregate; records are anchored on lines starting with "JobId="
+// rather than blank lines, matching how ParseNodes anchors on "NodeName=".
+func ParseScontrolJobRecords(raw string) []map[string]string {
+	var records []map[string]string
+	lines := strings.Split(raw, "\n")
+	start := -1
+	flush := func(end int) {
+		if start < 0 {
+			return
+		}
+		if f := ParseScontrolFields(strings.Join(lines[start:end], "\n")); len(f) > 0 {
+			records = append(records, f)
+		}
+	}
+	for i, line := range lines {
+		if strings.HasPrefix(strings.TrimSpace(line), "JobId=") {
+			flush(i)
+			start = i
+		}
+	}
+	flush(len(lines))
+	return records
+}
+
 // ParseNodes parses "scontrol show nodes" output into a slice of Node records.
 // Records are split on the "NodeName=" anchor rather than on blank lines, so
 // blank lines that SLURM emits within a single node's block (for example before

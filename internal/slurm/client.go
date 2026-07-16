@@ -258,11 +258,25 @@ func (c *Client) JobDetail(ctx context.Context, jobID string) (JobDetail, error)
 	if err != nil {
 		return JobDetail{}, fmt.Errorf("job %s not found: %w", jobID, err)
 	}
-	fields := ParseScontrolFields(strings.TrimSpace(string(out)))
-	if len(fields) == 0 {
+	records := ParseScontrolJobRecords(strings.TrimSpace(string(out)))
+	if len(records) == 0 {
 		return JobDetail{}, fmt.Errorf("job %s: could not parse scontrol output", jobID)
 	}
-	return JobDetail{Fields: fields, Source: "scontrol"}, nil
+	return JobDetail{Fields: pickActiveJobRecord(records), Source: "scontrol"}, nil
+}
+
+// pickActiveJobRecord returns the first non-terminal record of a (possibly
+// multi-record) scontrol job lookup. An array job lists one record per task and
+// the controller retains finished tasks for MinJobAge, so flattening would let
+// a recently finished task's state mask a still-active array. When every record
+// is terminal the first one stands for the job.
+func pickActiveJobRecord(records []map[string]string) map[string]string {
+	for _, f := range records {
+		if !IsTerminalState(f["JobState"]) {
+			return f
+		}
+	}
+	return records[0]
 }
 
 // terminalJobStates are the SLURM base job states that mean a job has finished.
@@ -298,7 +312,13 @@ func (c *Client) CompletedJobRecord(ctx context.Context, jobID string) (HistoryJ
 	if err != nil {
 		return HistoryJob{}, false, err
 	}
-	f := ParseScontrolFields(strings.TrimSpace(string(out)))
+	records := ParseScontrolJobRecords(strings.TrimSpace(string(out)))
+	if len(records) == 0 {
+		return HistoryJob{}, false, nil
+	}
+	// The pick is the first non-terminal record, so an array counts as finished
+	// only once every retained task record is terminal.
+	f := pickActiveJobRecord(records)
 	if f["JobId"] == "" || !IsTerminalState(f["JobState"]) {
 		return HistoryJob{}, false, nil
 	}

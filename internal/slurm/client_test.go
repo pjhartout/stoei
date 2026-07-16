@@ -204,6 +204,27 @@ func TestClientJobDetailNormalizesArrayID(t *testing.T) {
 	}
 }
 
+// TestClientJobDetailArrayPicksActiveRecord verifies a partially pending array
+// job reports an active state even when the controller still lists a finished
+// task last: the detail must come from a non-terminal record, or the UI would
+// refuse to modify a live array.
+func TestClientJobDetailArrayPicksActiveRecord(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_job_array.txt")}}
+	c := NewClient(r, WithUsername("alice"))
+
+	detail, err := c.JobDetail(context.Background(), "47701_[50-99%10]")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := detail.Fields["JobState"]; IsTerminalState(got) {
+		t.Errorf("JobState = %q, want a non-terminal record", got)
+	}
+	if detail.Fields["ArrayJobId"] != "47701" || detail.Fields["ArrayTaskThrottle"] != "10" {
+		t.Errorf("array fields = ArrayJobId=%q ArrayTaskThrottle=%q, want 47701/10",
+			detail.Fields["ArrayJobId"], detail.Fields["ArrayTaskThrottle"])
+	}
+}
+
 // TestClientNodeDetail verifies NodeDetail runs "scontrol show node <name>" and
 // parses the Key=Value fields.
 func TestClientNodeDetail(t *testing.T) {

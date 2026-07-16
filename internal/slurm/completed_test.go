@@ -43,6 +43,20 @@ func TestCompletedJobRecordCancelledIsTerminal(t *testing.T) {
 	}
 }
 
+// TestCompletedJobRecordArrayStillActive verifies an array job with running or
+// pending tasks is not treated as finished just because a completed task record
+// appears in the multi-record scontrol output.
+func TestCompletedJobRecordArrayStillActive(t *testing.T) {
+	out := "JobId=999 ArrayJobId=999 ArrayTaskId=1 JobState=COMPLETED EndTime=2024-01-15T08:11:00\n" +
+		"JobId=1000 ArrayJobId=999 ArrayTaskId=2 JobState=RUNNING RunTime=00:01:00"
+	c := NewClient(&FakeRunner{Outputs: map[string][]byte{"scontrol": []byte(out)}})
+
+	_, found, err := c.CompletedJobRecord(context.Background(), "999")
+	if err != nil || found {
+		t.Errorf("found=%v err=%v, want false/nil (array still has a running task)", found, err)
+	}
+}
+
 func TestCompletedJobRecordPropagatesError(t *testing.T) {
 	c := NewClient(&FakeRunner{Errs: map[string]error{"scontrol": errors.New("boom")}})
 

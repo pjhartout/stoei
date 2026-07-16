@@ -48,6 +48,35 @@ func TestParseScontrolFieldsEmpty(t *testing.T) {
 	}
 }
 
+// TestParseScontrolJobRecords verifies multi-record array output is split into
+// per-task maps instead of flattened into one (where the last record's
+// JobState would clobber the rest).
+func TestParseScontrolJobRecords(t *testing.T) {
+	records := ParseScontrolJobRecords(readFixture(t, "scontrol_job_array.txt"))
+	if len(records) != 3 {
+		t.Fatalf("got %d records, want 3", len(records))
+	}
+	wantStates := []string{"PENDING", "RUNNING", "COMPLETED"}
+	for i, want := range wantStates {
+		if got := records[i]["JobState"]; got != want {
+			t.Errorf("record %d JobState = %q, want %q", i, got, want)
+		}
+	}
+	if records[0]["ArrayTaskId"] != "50-99%10" || records[1]["ArrayTaskId"] != "48" {
+		t.Errorf("ArrayTaskId split wrong: %q, %q", records[0]["ArrayTaskId"], records[1]["ArrayTaskId"])
+	}
+}
+
+func TestParseScontrolJobRecordsSingleJob(t *testing.T) {
+	records := ParseScontrolJobRecords(readFixture(t, "scontrol_job_12345.txt"))
+	if len(records) != 1 {
+		t.Fatalf("got %d records, want 1", len(records))
+	}
+	if records[0]["JobId"] != "12345" || records[0]["JobState"] != "RUNNING" {
+		t.Errorf("record = %+v", records[0])
+	}
+}
+
 func TestParseNodes(t *testing.T) {
 	nodes := ParseNodes(readFixture(t, "scontrol_nodes.txt"))
 	if len(nodes) != 6 {
