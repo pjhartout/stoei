@@ -2,6 +2,7 @@ package tabs
 
 import (
 	"regexp"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -184,7 +185,7 @@ func (s sortState) cycle(cols []column) sortState {
 	case sortAsc:
 		return sortState{columnIdx: s.columnIdx, direction: sortDesc}
 	case sortDesc:
-		pos := indexOf(sortable, s.columnIdx)
+		pos := slices.Index(sortable, s.columnIdx)
 		next := pos + 1
 		if pos < 0 || next >= len(sortable) {
 			return sortState{columnIdx: -1, direction: sortNone}
@@ -193,16 +194,6 @@ func (s sortState) cycle(cols []column) sortState {
 	default:
 		return sortState{columnIdx: sortable[0], direction: sortAsc}
 	}
-}
-
-// indexOf returns the position of v in xs, or -1 when absent.
-func indexOf(xs []int, v int) int {
-	for i, x := range xs {
-		if x == v {
-			return i
-		}
-	}
-	return -1
 }
 
 // rankedKey is a precomputed, comparable sort key for one row. rank orders

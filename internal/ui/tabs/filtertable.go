@@ -18,11 +18,11 @@ import (
 // input unchanged yields an undecorated table.
 type rowDecorator func(plain []string, styles theme.Styles) table.Row
 
-// filterTable is a reusable filterable, sortable bubbles/v2 table shared by the
-// Nodes, Users, and Priority tabs. It factors out the Jobs-tab pattern: a table
-// fed plain rows, a column-scoped "/" filter, an "o" sort cycle, and cursor
-// restoration by the stable first-column key. Each owning tab supplies the
-// columns, the plain rows (rebuilt from the store), and a row decorator.
+// filterTable is the filterable, sortable bubbles/v2 table shared by every tab
+// (Jobs, Nodes, Users, and Priority): a table fed plain rows, a column-scoped
+// "/" filter, an "o" sort cycle, and cursor restoration by the stable
+// first-column key. Each owning tab supplies the columns, the plain rows
+// (rebuilt from the store), and a row decorator.
 type filterTable struct {
 	styles theme.Styles
 	keys   JobsKeyMap
@@ -36,6 +36,10 @@ type filterTable struct {
 	filtering   bool
 	filterState filterState
 	sortState   sortState
+
+	// minWidth floors each fitted column width; nil applies no floor (the Jobs
+	// tab content-fits its columns instead of using the key-derived defaults).
+	minWidth func(column) int
 
 	// rows is the current plain (undecorated) row set, kept so a re-theme or
 	// re-sort can rebuild the display rows without the owner re-supplying them.
@@ -80,6 +84,7 @@ func newFilterTable(columns []column, styles theme.Styles, decorator rowDecorato
 		filter:      fi,
 		filterState: parseFilterWith("", columns),
 		sortState:   sortState{columnIdx: -1, direction: sortNone},
+		minWidth:    filterTableColumnWidth,
 	}
 }
 
@@ -158,7 +163,7 @@ func (ft *filterTable) rebuild() {
 	}
 	sorted := ft.sortState.sortRows(filtered)
 
-	fitTableColumns(&ft.table, sortedColumns(ft.columns, ft.sortState), sorted, filterTableColumnWidth)
+	fitTableColumns(&ft.table, sortedColumns(ft.columns, ft.sortState), sorted, ft.minWidth)
 	ft.syncWidth()
 
 	display := make([]table.Row, len(sorted))

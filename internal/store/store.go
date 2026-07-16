@@ -169,24 +169,34 @@ func (s *Store) NextGen(section Section) uint64 {
 // Gen returns the section's current request generation without bumping it.
 func (s *Store) Gen(section Section) uint64 { return s.gen[section] }
 
-// State returns the load state of a section.
-func (s *Store) State(section Section) State {
+// meta returns the section's Meta, or nil for an unknown section. It is the
+// single section-to-Meta mapping; the per-section accessors derive from it so
+// adding a section means touching exactly one switch.
+func (s *Store) meta(section Section) *Meta {
 	switch section {
 	case SectionRunningJobs:
-		return s.RunningJobsMeta.State
+		return &s.RunningJobsMeta
 	case SectionHistory:
-		return s.HistoryMeta.State
+		return &s.HistoryMeta
 	case SectionNodes:
-		return s.NodesMeta.State
+		return &s.NodesMeta
 	case SectionAllUsersJobs:
-		return s.AllUsersJobsMeta.State
+		return &s.AllUsersJobsMeta
 	case SectionFairShare:
-		return s.FairShareMeta.State
+		return &s.FairShareMeta
 	case SectionPendingPrio:
-		return s.PendingPrioMeta.State
+		return &s.PendingPrioMeta
 	default:
-		return StateIdle
+		return nil
 	}
+}
+
+// State returns the load state of a section.
+func (s *Store) State(section Section) State {
+	if m := s.meta(section); m != nil {
+		return m.State
+	}
+	return StateIdle
 }
 
 // AnyLoading reports whether any section currently has a fetch in flight. The UI
@@ -204,22 +214,10 @@ func (s *Store) AnyLoading() bool {
 // SectionErr returns the most recent fetch error for a section, or nil. It lets
 // a tab render an inline error badge for a failed section.
 func (s *Store) SectionErr(section Section) error {
-	switch section {
-	case SectionRunningJobs:
-		return s.RunningJobsMeta.Err
-	case SectionHistory:
-		return s.HistoryMeta.Err
-	case SectionNodes:
-		return s.NodesMeta.Err
-	case SectionAllUsersJobs:
-		return s.AllUsersJobsMeta.Err
-	case SectionFairShare:
-		return s.FairShareMeta.Err
-	case SectionPendingPrio:
-		return s.PendingPrioMeta.Err
-	default:
-		return nil
+	if m := s.meta(section); m != nil {
+		return m.Err
 	}
+	return nil
 }
 
 // SetLoading marks a section as loading for the given generation, provided that
@@ -229,19 +227,8 @@ func (s *Store) SetLoading(section Section, gen uint64) {
 	if gen < s.gen[section] {
 		return
 	}
-	switch section {
-	case SectionRunningJobs:
-		s.RunningJobsMeta.State = StateLoading
-	case SectionHistory:
-		s.HistoryMeta.State = StateLoading
-	case SectionNodes:
-		s.NodesMeta.State = StateLoading
-	case SectionAllUsersJobs:
-		s.AllUsersJobsMeta.State = StateLoading
-	case SectionFairShare:
-		s.FairShareMeta.State = StateLoading
-	case SectionPendingPrio:
-		s.PendingPrioMeta.State = StateLoading
+	if m := s.meta(section); m != nil {
+		m.State = StateLoading
 	}
 }
 

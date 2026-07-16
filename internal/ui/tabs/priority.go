@@ -465,21 +465,10 @@ func (p *Priority) buildSummary(users, accounts []userPriorityRow) string {
 	return lipgloss.JoinVertical(lipgloss.Left, lines...)
 }
 
-// fairShareStyle returns the style for a fair-share value: green at/above the
-// success threshold, yellow at/above the warning threshold, red below it.
+// fairShareStyle returns the style for a fair-share value via the shared
+// store.FairShareRole classification (an unparseable value gets the default).
 func fairShareStyle(fairShare string, styles theme.Styles) lipgloss.Style {
-	v, ok := parseFloat(fairShare)
-	if !ok {
-		return styles.Text
-	}
-	switch {
-	case v >= fairShareSuccessThreshold:
-		return styles.Success
-	case v >= fairShareWarningThreshold:
-		return styles.Warning
-	default:
-		return styles.Error
-	}
+	return styles.StateRoleStyle(store.FairShareRole(fairShare))
 }
 
 // fairShareCell renders a bold, colored FairShare cell, passing through an

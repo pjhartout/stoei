@@ -1,6 +1,7 @@
 package store
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/pjhartout/stoei/internal/slurm"
@@ -29,6 +30,26 @@ const (
 	// value is colored as a warning; below it the value is colored as an error.
 	FairShareWarningThreshold = 0.2
 )
+
+// FairShareRole classifies a fair-share value into a semantic color role:
+// "success" at/above FairShareSuccessThreshold, "warning" at/above
+// FairShareWarningThreshold, "error" below, and "" when the value does not
+// parse. Sharing the classification keeps the Priority tab and the detail
+// modals colored identically.
+func FairShareRole(fairShare string) string {
+	v, err := strconv.ParseFloat(strings.TrimSpace(fairShare), 64)
+	if err != nil {
+		return ""
+	}
+	switch {
+	case v >= FairShareSuccessThreshold:
+		return "success"
+	case v >= FairShareWarningThreshold:
+		return "warning"
+	default:
+		return "error"
+	}
+}
 
 // StateRole classifies a Slurm job or node state into a semantic color role —
 // "success", "warning", "error", "muted", or "" for the default — so the tables

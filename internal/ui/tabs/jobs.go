@@ -7,7 +7,6 @@ import (
 
 	"charm.land/bubbles/v2/key"
 	"charm.land/bubbles/v2/table"
-	"charm.land/bubbles/v2/textinput"
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
@@ -62,104 +61,57 @@ func jobsKeysForMode(mode string) JobsKeyMap {
 	}
 }
 
-// Jobs is the live running-jobs tab. It renders a bubbles/v2 table from the
-// store's RunningJobs, colors the State column, keeps a My-Usage banner, and
-// supports column-scoped filtering and numeric-aware sorting. The cursor is
-// preserved across refreshes by re-selecting the previously selected job id
-// (I6); the table is never rebuilt from scratch on a tick, only its rows are
-// replaced and the cursor restored.
+// Jobs is the live running-jobs tab. It renders the shared filterTable from
+// the store's RunningJobs, colors the State column via its row decorator, and
+// keeps a My-Usage banner. The cursor is preserved across refreshes by
+// re-selecting the previously selected job id (I6); the table is never rebuilt
+// from scratch on a tick, only its rows are replaced and the cursor restored.
 type Jobs struct {
 	store    *store.Store
 	username string
 	styles   theme.Styles
-	keys     JobsKeyMap
 
-	table  table.Model
-	filter textinput.Model
-
-	// filtering is true while the filter input is open and focused.
-	filtering   bool
-	filterState filterState
-	sortState   sortState
+	ft filterTable
 
 	// status renders a debounced per-section spinner / error badge in place of a
 	// bare empty table while the running-jobs section loads or fails.
 	status   sectionStatus
 	rowCount int
-
-	width  int
-	height int
-
-	// xOffset is the horizontal scroll position, engaged only when the fitted
-	// columns overflow the pane.
-	xOffset int
 }
 
 // NewJobs returns a Jobs tab bound to s for the given username, styled with
 // styles. The username drives the My-Usage banner lookup.
 func NewJobs(s *store.Store, username string, styles theme.Styles) *Jobs {
-	cols := make([]table.Column, len(jobColumns))
-	for i, c := range jobColumns {
-		cols[i] = table.Column{Title: c.title, Width: defaultColumnWidth(c.key)}
-	}
-
-	t := table.New(
-		table.WithColumns(cols),
-		table.WithFocused(true),
-	)
-	t.SetStyles(tableStyles(styles))
-
-	fi := textinput.New()
-	fi.Placeholder = "Filter… (e.g. 'state:RUNNING' or a search term)"
+	ft := newFilterTable(jobColumns, styles, jobRowDecorator)
+	// Jobs content-fits its columns with no per-key floor, and its filter example
+	// uses a job state rather than a node state.
+	ft.minWidth = nil
+	ft.filter.Placeholder = "Filter… (e.g. 'state:RUNNING' or a search term)"
 
 	j := &Jobs{
-		store:       s,
-		username:    username,
-		styles:      styles,
-		keys:        defaultJobsKeys(),
-		table:       t,
-		filter:      fi,
-		filterState: parseFilter(""),
-		sortState:   sortState{columnIdx: -1, direction: sortNone},
-		status:      newSectionStatus(),
+		store:    s,
+		username: username,
+		styles:   styles,
+		ft:       ft,
+		status:   newSectionStatus(),
 	}
 	j.Refresh()
 	return j
 }
 
-// defaultColumnWidth returns a sensible initial width per column key.
-func defaultColumnWidth(key string) int {
-	switch key {
-	case "jobid":
-		return 12
-	case "name":
-		return 24
-	case "state":
-		return 12
-	case "time":
-		return 12
-	case "nodes":
-		return 6
-	case "nodelist":
-		return 20
-	case "timeline":
-		return 26
-	default:
-		return 10
+// jobRowDecorator converts a plain row into a rendered table row, coloring the
+// State cell. The other cells are passed through verbatim.
+func jobRowDecorator(plain []string, styles theme.Styles) table.Row {
+	row := make(table.Row, len(plain))
+	copy(row, plain)
+	if len(row) > stateColumnIndex {
+		row[stateColumnIndex] = colorState(plain[stateColumnIndex], styles)
 	}
+	return row
 }
 
-// syncWidth sizes the inner table to the full fitted-content width so the
-// bubbles viewport never truncates rows itself; View windows the result back to
-// the pane. The horizontal offset is re-clamped so a shrink never leaves the
-// view scrolled past the content.
-func (j *Jobs) syncWidth() {
-	content := tableContentWidth(j.table.Columns())
-	w := max(j.width, content)
-	j.table.SetWidth(w)
-	j.table.SetStyles(tableStylesWidth(j.styles, w))
-	j.xOffset = clampHScroll(j.xOffset, content, j.width)
-}
+// stateColumnIndex is the index of the State column in jobColumns.
+var stateColumnIndex = columnIndex("state")
 
 // tableStyles maps the app theme onto the bubbles table styles. Cells and the
 // header use a single left pad (no right pad) so columns sit one space apart
@@ -187,30 +139,18 @@ func tableStylesWidth(styles theme.Styles, width int) table.Styles {
 }
 
 // SetKeyMode switches the Jobs tab's filter/sort bindings to the given preset.
-func (j *Jobs) SetKeyMode(mode string) { j.keys = jobsKeysForMode(mode) }
+func (j *Jobs) SetKeyMode(mode string) { j.ft.SetKeyMode(mode) }
 
 // SetStyles re-themes the tab after a background/theme change.
 func (j *Jobs) SetStyles(styles theme.Styles) {
 	j.styles = styles
+	j.ft.styles = styles
 	j.Refresh()
 }
 
-// SetSize informs the tab of the available area and resizes the inner table,
-// reserving rows for the banner and (when open) the filter input.
+// SetSize informs the tab of the available area, reserving rows for the banner.
 func (j *Jobs) SetSize(width, height int) {
-	j.width = width
-	j.height = height
-	j.filter.SetWidth(max(width-2, 10))
-
-	tableHeight := height - bannerReservedRows
-	if j.filtering {
-		tableHeight -= filterReservedRows
-	}
-	if tableHeight < 1 {
-		tableHeight = 1
-	}
-	j.table.SetHeight(tableHeight)
-	j.syncWidth()
+	j.ft.SetSize(width, height-bannerReservedRows)
 }
 
 const (
@@ -225,88 +165,15 @@ const (
 // Update handles tab-local input and refreshes. The root routes input here only
 // when no modal is active and the Jobs tab is selected.
 func (j *Jobs) Update(msg tea.Msg) (*Jobs, tea.Cmd) {
-	switch msg := msg.(type) {
-	case tea.KeyPressMsg:
-		if j.filtering {
-			return j.updateFiltering(msg)
-		}
-		switch {
-		case key.Matches(msg, j.keys.Filter):
-			j.filtering = true
-			j.filter.Focus()
-			j.SetSize(j.width, j.height)
-			return j, textinput.Blink
-		case key.Matches(msg, j.keys.Sort):
-			j.sortState = j.sortState.cycle(jobColumns)
-			j.Refresh()
-			return j, nil
-		case key.Matches(msg, j.keys.ScrollLeft):
-			j.xOffset = clampHScroll(j.xOffset-hscrollStep, tableContentWidth(j.table.Columns()), j.width)
-			return j, nil
-		case key.Matches(msg, j.keys.ScrollRight):
-			j.xOffset = clampHScroll(j.xOffset+hscrollStep, tableContentWidth(j.table.Columns()), j.width)
-			return j, nil
-		}
-	}
-
-	var cmd tea.Cmd
-	j.table, cmd = j.table.Update(msg)
-	return j, cmd
-}
-
-// updateFiltering handles input while the filter bar is open: Esc clears and
-// closes, Enter closes but keeps the query, and every other key edits the query
-// and re-applies the filter live.
-func (j *Jobs) updateFiltering(msg tea.KeyPressMsg) (*Jobs, tea.Cmd) {
-	switch {
-	case key.Matches(msg, j.keys.ClearFilter):
-		j.filtering = false
-		j.filter.SetValue("")
-		j.filter.Blur()
-		j.filterState = parseFilter("")
-		j.SetSize(j.width, j.height)
-		j.Refresh()
-		return j, nil
-	case msg.String() == "enter":
-		j.filtering = false
-		j.filter.Blur()
-		j.SetSize(j.width, j.height)
-		return j, nil
-	}
-
-	var cmd tea.Cmd
-	j.filter, cmd = j.filter.Update(msg)
-	j.filterState = parseFilter(j.filter.Value())
-	j.Refresh()
-	return j, cmd
+	return j, j.ft.Update(msg)
 }
 
 // Refresh rebuilds the table rows from the store, preserving the cursor by job
 // id (I6). It is called on every fast tick (the store already holds freshly
-// fetched running jobs) and after a filter/sort change. The cursor is restored
-// by id; when the previously selected job is gone the index is clamped.
+// fetched running jobs) and after a filter/sort change.
 func (j *Jobs) Refresh() {
-	selectedID := j.selectedJobID()
-
 	plain := j.plainRows()
-	filtered := plain[:0:0]
-	for _, row := range plain {
-		if j.filterState.matches(row) {
-			filtered = append(filtered, row)
-		}
-	}
-	sorted := j.sortState.sortRows(filtered)
-
-	fitTableColumns(&j.table, sortedColumns(jobColumns, j.sortState), sorted, nil)
-	j.syncWidth()
-
-	rows := make([]table.Row, len(sorted))
-	for i, row := range sorted {
-		rows[i] = j.displayRow(row)
-	}
-	j.table.SetRows(rows)
-
-	reselect(&j.table, sorted, selectedID)
+	j.ft.SetRows(plain)
 
 	// Track loading/error state of the running-jobs section so View can show a
 	// debounced spinner or error badge instead of a bare empty table. "hasData" is
@@ -337,26 +204,12 @@ func (j *Jobs) plainRows() [][]string {
 	return rows
 }
 
-// displayRow converts a plain row into a rendered table row, coloring the State
-// cell. The other cells are passed through verbatim.
-func (j *Jobs) displayRow(plain []string) table.Row {
-	row := make(table.Row, len(plain))
-	copy(row, plain)
-	if len(row) > stateColumnIndex {
-		row[stateColumnIndex] = colorState(plain[stateColumnIndex], j.styles)
-	}
-	return row
-}
-
-// stateColumnIndex is the index of the State column in jobColumns.
-var stateColumnIndex = columnIndex("state")
-
 // SelectedJob returns the id, state, and active flag of the currently selected
 // job, looked up in the merged job list by id. ok is false when no row is
 // selected or the id is no longer present. The root uses this to open a job
 // detail (with the live state for cache-evict) or a cancel-confirm modal.
 func (j *Jobs) SelectedJob() (id, state string, active, ok bool) {
-	id = j.selectedJobID()
+	id = j.ft.SelectedKey()
 	if id == "" {
 		return "", "", false, false
 	}
@@ -374,22 +227,7 @@ func (j *Jobs) SelectedJob() (id, state string, active, ok bool) {
 // column, markup-stripped), or "" when no row is selected. The root passes it to
 // the cancel-confirm modal for display.
 func (j *Jobs) SelectedJobName() string {
-	row := j.table.SelectedRow()
-	nameIdx := columnIndex("name")
-	if nameIdx < 0 || nameIdx >= len(row) {
-		return ""
-	}
-	return strings.TrimSpace(row[nameIdx])
-}
-
-// selectedJobID returns the job id (first cell, markup-stripped) of the
-// currently selected table row, or "" when the table is empty.
-func (j *Jobs) selectedJobID() string {
-	row := j.table.SelectedRow()
-	if len(row) == 0 {
-		return ""
-	}
-	return strings.TrimSpace(row[0])
+	return j.ft.SelectedCell(columnIndex("name"))
 }
 
 // reselect restores the table cursor to the row whose stable first-column key
@@ -433,8 +271,8 @@ func (j *Jobs) View() string {
 	}
 
 	parts := []string{banner, ""}
-	if j.filtering {
-		parts = append(parts, j.styles.Text.Render(j.filter.View()))
+	if j.ft.filtering {
+		parts = append(parts, j.styles.Text.Render(j.ft.filter.View()))
 	}
 	if line, ok := j.status.statusLine(
 		j.store.State(store.SectionRunningJobs), j.rowCount > 0,
@@ -442,7 +280,7 @@ func (j *Jobs) View() string {
 	); ok {
 		parts = append(parts, line)
 	}
-	parts = append(parts, hscrollWindow(j.table.View(), j.xOffset, tableContentWidth(j.table.Columns()), j.width))
+	parts = append(parts, hscrollWindow(j.ft.table.View(), j.ft.xOffset, tableContentWidth(j.ft.table.Columns()), j.ft.width))
 
 	return lipgloss.JoinVertical(lipgloss.Left, parts...)
 }
@@ -513,9 +351,7 @@ func compactGPUTypes(types string) string {
 // (the filter bar is open and focused). The root consults this so global keys
 // like 'q' are routed to the filter instead of quitting the app while the user
 // is typing a query.
-func (j *Jobs) CapturesInput() bool { return j.filtering }
+func (j *Jobs) CapturesInput() bool { return j.ft.CapturesInput() }
 
 // ShortHelp returns the condensed help bindings.
-func (j *Jobs) ShortHelp() []key.Binding {
-	return []key.Binding{j.keys.Filter, j.keys.Sort}
-}
+func (j *Jobs) ShortHelp() []key.Binding { return j.ft.ShortHelp() }

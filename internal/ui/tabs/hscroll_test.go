@@ -38,19 +38,19 @@ func TestSortedColumnHeaderShowsDirection(t *testing.T) {
 		t.Errorf("unsorted table should carry no sort arrow:\n%s", v)
 	}
 
-	j.sortState = sortState{columnIdx: 0, direction: sortAsc}
+	j.ft.sortState = sortState{columnIdx: 0, direction: sortAsc}
 	j.Refresh()
 	if !strings.Contains(j.View(), "Job ID ↑") {
 		t.Errorf("ascending sort arrow missing from header:\n%s", j.View())
 	}
 
-	j.sortState = sortState{columnIdx: 0, direction: sortDesc}
+	j.ft.sortState = sortState{columnIdx: 0, direction: sortDesc}
 	j.Refresh()
 	if !strings.Contains(j.View(), "Job ID ↓") {
 		t.Errorf("descending sort arrow missing from header:\n%s", j.View())
 	}
 
-	j.sortState = sortState{columnIdx: -1, direction: sortNone}
+	j.ft.sortState = sortState{columnIdx: -1, direction: sortNone}
 	j.Refresh()
 	if v := j.View(); strings.Contains(v, "↑") || strings.Contains(v, "↓") {
 		t.Errorf("cleared sort should remove the arrow:\n%s", v)

@@ -12,13 +12,6 @@ import (
 	"github.com/pjhartout/stoei/internal/ui/theme"
 )
 
-// fairShareSuccess / fairShareWarning are the fair-share color thresholds,
-// sourced from store so the tab and the detail modals share one definition.
-const (
-	fairShareSuccess = store.FairShareSuccessThreshold
-	fairShareWarning = store.FairShareWarningThreshold
-)
-
 // These caps limit how many rows each list section of the user/account detail
 // blocks renders before collapsing the remainder into an "... and N more" line.
 const (
@@ -39,7 +32,10 @@ func summaryLine(label, value string, styles theme.Styles) string {
 // from the all-users list filtered to this user.
 func formatUserInfo(username string, st *store.Store, styles theme.Styles) string {
 	jobs := userJobs(st, username)
-	userStats := findUserStats(store.AggregateUserStats(jobs, store.NodeGPUModels(st.Nodes)), username)
+	userStats, ok := store.FindUserStats(store.AggregateUserStats(jobs, store.NodeGPUModels(st.Nodes)), username)
+	if !ok {
+		userStats = store.UserStats{Username: username}
+	}
 	pending := findPendingStats(st.PendingUserStats(), username)
 	fair := findFairShare(st.FairShare, username)
 	prios := userPriorities(st.PendingPrio, username)
@@ -269,17 +265,6 @@ func userJobStateCell(state string, styles theme.Styles) string {
 	return styles.StateRoleStyle(role).Bold(true).Render(cell)
 }
 
-// findUserStats returns the stats for username, or a zero-valued entry tagged
-// with the username when the user is absent.
-func findUserStats(stats []store.UserStats, username string) store.UserStats {
-	for _, s := range stats {
-		if s.Username == username {
-			return s
-		}
-	}
-	return store.UserStats{Username: username}
-}
-
 // findPendingStats returns the pending-resource stats for username, or nil when
 // the user has none.
 func findPendingStats(stats []store.UserPendingStats, username string) *store.UserPendingStats {
@@ -327,23 +312,15 @@ func accountPriorities(entries []store.PriorityEntry, usernames map[string]struc
 	return out
 }
 
-// fairShareColored renders a fair-share value colored by threshold: green at or
-// above the success threshold, yellow at or above the warning threshold, red
-// below. A non-numeric value is returned uncolored.
+// fairShareColored renders a fair-share value colored by the shared
+// store.FairShareRole classification. A non-numeric value is returned uncolored.
 func fairShareColored(fairShare string, styles theme.Styles) string {
 	raw := strings.TrimSpace(fairShare)
-	v, err := strconv.ParseFloat(raw, 64)
-	if err != nil {
+	role := store.FairShareRole(raw)
+	if role == "" {
 		return raw
 	}
-	switch {
-	case v >= fairShareSuccess:
-		return styles.Success.Bold(true).Render(raw)
-	case v >= fairShareWarning:
-		return styles.Warning.Bold(true).Render(raw)
-	default:
-		return styles.Error.Bold(true).Render(raw)
-	}
+	return styles.StateRoleStyle(role).Bold(true).Render(raw)
 }
 
 // parseF parses a float, returning 0 on failure (sort key only).

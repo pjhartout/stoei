@@ -8,6 +8,7 @@ package theme
 
 import (
 	"image/color"
+	"slices"
 	"strings"
 
 	"charm.land/lipgloss/v2"
@@ -171,9 +172,8 @@ func solid(hex string) AdaptiveColor {
 // maps its source roles onto Theme roles: Accent←primary, AccentAlt←accent,
 // Text←text_base, Subtle←text_muted, Border←border, Error/Success/Warning from
 // the semantic colors, Muted←secondary.
-var palettes = func() map[string]Theme {
+var palettes, themeOrder = func() (map[string]Theme, []string) {
 	ts := []Theme{
-		Charm(),
 		opencode("oc-1", "#fab283", "#034cff", "#f5f5f5", "#b8b0b0", "#3a3333", "#fc533a", "#12c905", "#fcd53a", "#716c6b"),
 		opencode("tokyonight", "#7aa2f7", "#7aa2f7", "#c0caf5", "#7a88cf", "#3a3e57", "#f7768e", "#9ece6a", "#e0af68", "#1a1b26"),
 		opencode("dracula", "#bd93f9", "#bd93f9", "#f8f8f2", "#b6b9e4", "#3f415a", "#ff5555", "#50fa7b", "#ffb86c", "#1d1e28"),
@@ -187,12 +187,15 @@ var palettes = func() map[string]Theme {
 		opencode("nightowl", "#82aaff", "#82aaff", "#d6deeb", "#5f7e97", "#3a5a75", "#ef5350", "#c5e478", "#ecc48d", "#011627"),
 		opencode("vesper", "#ffc799", "#ffc799", "#ffffff", "#a0a0a0", "#282828", "#ff8080", "#99ffe4", "#ffc799", "#101010"),
 		opencode("gruvbox", "#fabd2f", "#83a598", "#ebdbb2", "#a89984", "#504945", "#fb4934", "#b8bb26", "#fe8019", "#928374"),
+		Charm(),
 	}
 	m := make(map[string]Theme, len(ts))
-	for _, t := range ts {
+	order := make([]string, len(ts))
+	for i, t := range ts {
 		m[t.Name] = t
+		order[i] = t.Name
 	}
-	return m
+	return m, order
 }()
 
 // opencode builds a Theme from an OpenCode-style palette of single hex colors
@@ -222,26 +225,10 @@ func ByName(name string) Theme {
 	return palettes[DefaultThemeName]
 }
 
-// Names returns the registered theme names in a stable order independent of map
-// iteration, matching the cycling order the settings form uses.
-func Names() []string {
-	return []string{
-		"oc-1",
-		"tokyonight",
-		"dracula",
-		"monokai",
-		"solarized",
-		"nord",
-		"catppuccin",
-		"ayu",
-		"onedarkpro",
-		"shadesofpurple",
-		"nightowl",
-		"vesper",
-		"gruvbox",
-		"charm",
-	}
-}
+// Names returns the registered theme names in registration order — the cycling
+// order the settings form uses — derived from the same slice as the registry so
+// the two can never drift.
+func Names() []string { return slices.Clone(themeOrder) }
 
 // Charm returns the default charm.land-flavored palette. It retains distinct
 // light/dark variants (the only adaptive palette); the OpenCode palettes are

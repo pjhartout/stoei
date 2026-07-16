@@ -116,8 +116,8 @@ func TestCursorPreservedAcrossReorder(t *testing.T) {
 	j, st := seedJobs(t, jobs)
 
 	// Move the cursor to job "1003" (index 2).
-	j.table.SetCursor(2)
-	if got := j.selectedJobID(); got != "1003" {
+	j.ft.table.SetCursor(2)
+	if got := j.ft.SelectedKey(); got != "1003" {
 		t.Fatalf("setup: selected = %q; want 1003", got)
 	}
 
@@ -130,7 +130,7 @@ func TestCursorPreservedAcrossReorder(t *testing.T) {
 	st.SetRunningJobs(reordered, st.NextGen(store.SectionRunningJobs), nil)
 	j.Refresh()
 
-	if got := j.selectedJobID(); got != "1003" {
+	if got := j.ft.SelectedKey(); got != "1003" {
 		t.Errorf("after reorder: selected = %q; want 1003 (cursor must follow id)", got)
 	}
 }
@@ -143,7 +143,7 @@ func TestLiveTimeUpdatesWithoutMovingCursor(t *testing.T) {
 		{ID: "1002", Name: "b", State: "RUNNING", Time: "2:00", Nodes: "1", NodeList: "n02"},
 	}
 	j, st := seedJobs(t, jobs)
-	j.table.SetCursor(1)
+	j.ft.table.SetCursor(1)
 
 	advanced := []store.RunningJob{
 		{ID: "1001", Name: "a", State: "RUNNING", Time: "1:05", Nodes: "1", NodeList: "n01"},
@@ -152,11 +152,11 @@ func TestLiveTimeUpdatesWithoutMovingCursor(t *testing.T) {
 	st.SetRunningJobs(advanced, st.NextGen(store.SectionRunningJobs), nil)
 	j.Refresh()
 
-	if got := j.selectedJobID(); got != "1002" {
+	if got := j.ft.SelectedKey(); got != "1002" {
 		t.Errorf("cursor moved: selected = %q; want 1002", got)
 	}
-	if !strings.Contains(j.table.View(), "2:05") {
-		t.Errorf("live Time not updated; view:\n%s", j.table.View())
+	if !strings.Contains(j.ft.table.View(), "2:05") {
+		t.Errorf("live Time not updated; view:\n%s", j.ft.table.View())
 	}
 }
 
@@ -168,10 +168,10 @@ func TestFilterNarrowsRows(t *testing.T) {
 	}
 	j, _ := seedJobs(t, jobs)
 
-	j.filterState = parseFilter("state:RUNNING")
+	j.ft.filterState = parseFilter("state:RUNNING")
 	j.Refresh()
 
-	view := j.table.View()
+	view := j.ft.table.View()
 	if !strings.Contains(view, "train") {
 		t.Errorf("running job missing after filter; view:\n%s", view)
 	}
@@ -219,7 +219,7 @@ func TestHistoryJobsRenderInTable(t *testing.T) {
 	}, store.HistoryStats{}, st.NextGen(store.SectionHistory), nil)
 	j.Refresh()
 
-	view := j.table.View()
+	view := j.ft.table.View()
 	for _, want := range []string{"1001", "running_job", "2002", "done_job", "2003", "broke_job"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("merged table view missing %q; view:\n%s", want, view)
@@ -246,7 +246,7 @@ func TestEmacsModeRebindsFilterSort(t *testing.T) {
 		t.Error("emacs mode: '/' should not open the filter")
 	}
 	_, _ = j.Update(tea.KeyPressMsg{Code: 's', Mod: tea.ModCtrl})
-	if !j.filtering {
+	if !j.ft.filtering {
 		t.Error("emacs mode: ctrl+s did not open the filter")
 	}
 }
@@ -256,7 +256,7 @@ func TestEmacsModeRebindsFilterSort(t *testing.T) {
 func slashOpensFilter(t *testing.T, j *Jobs) bool {
 	t.Helper()
 	_, _ = j.Update(tea.KeyPressMsg{Code: '/', Text: "/"})
-	opened := j.filtering
+	opened := j.ft.filtering
 	if opened {
 		_, _ = j.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	}

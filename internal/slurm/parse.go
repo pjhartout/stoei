@@ -270,7 +270,7 @@ const fairShareFieldCount = 8
 // first eight columns are used.
 func ParseFairShare(raw string) []FairShareEntry {
 	var entries []FairShareEntry
-	for _, parts := range iterPipeRows(raw, fairShareFieldCount, true) {
+	for _, parts := range iterPipeRows(raw, fairShareFieldCount) {
 		entries = append(entries, FairShareEntry{
 			Account:      parts[0],
 			User:         parts[1],
@@ -293,7 +293,7 @@ const priorityFieldCount = 9
 // Rows with fewer than nine fields are skipped and every field is trimmed.
 func ParsePriority(raw string) []PriorityEntry {
 	var entries []PriorityEntry
-	for _, parts := range iterPipeRows(raw, priorityFieldCount, true) {
+	for _, parts := range iterPipeRows(raw, priorityFieldCount) {
 		entries = append(entries, PriorityEntry{
 			JobID:     parts[0],
 			User:      parts[1],
@@ -322,19 +322,17 @@ func priorityValue(s string) float64 {
 	return v
 }
 
-// iterPipeRows yields the pipe-separated fields of each non-blank line in out
-// that has at least numFields columns, optionally trimming each field.
-func iterPipeRows(out string, numFields int, strip bool) [][]string {
+// iterPipeRows yields the trimmed pipe-separated fields of each non-blank line
+// in out that has at least numFields columns.
+func iterPipeRows(out string, numFields int) [][]string {
 	var rows [][]string
 	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
 		if strings.TrimSpace(line) == "" {
 			continue
 		}
 		parts := strings.Split(line, "|")
-		if strip {
-			for i := range parts {
-				parts[i] = strings.TrimSpace(parts[i])
-			}
+		for i := range parts {
+			parts[i] = strings.TrimSpace(parts[i])
 		}
 		if len(parts) >= numFields {
 			rows = append(rows, parts)
