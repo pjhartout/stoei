@@ -169,6 +169,28 @@ func TestClientPendingPriorityCommand(t *testing.T) {
 	}
 }
 
+// TestClientJobDetailErrorPhrasing asserts only scontrol's own invalid-job-id
+// failure reads as "not found"; a timeout or unreachable controller keeps its
+// real cause instead of masquerading as the job not existing.
+func TestClientJobDetailErrorPhrasing(t *testing.T) {
+	r := &FakeRunner{Errs: map[string]error{"scontrol": &CommandError{
+		Name:   "scontrol",
+		Stderr: "slurm_load_jobs error: Invalid job id specified",
+		Err:    errors.New("exit status 1"),
+	}}}
+	if _, err := NewClient(r).JobDetail(context.Background(), "999"); err == nil || !strings.Contains(err.Error(), "not found") {
+		t.Errorf("invalid-job-id error = %v, want not-found phrasing", err)
+	}
+
+	r = &FakeRunner{Errs: map[string]error{"scontrol": &CommandError{
+		Name: "scontrol",
+		Err:  context.DeadlineExceeded,
+	}}}
+	if _, err := NewClient(r).JobDetail(context.Background(), "999"); err == nil || strings.Contains(err.Error(), "not found") {
+		t.Errorf("timeout error = %v, must not read as not-found", err)
+	}
+}
+
 func TestClientJobDetailScontrol(t *testing.T) {
 	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_job_12345.txt")}}
 	c := NewClient(r, WithUsername("alice"))

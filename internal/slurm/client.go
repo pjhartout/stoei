@@ -256,7 +256,13 @@ func (c *Client) JobDetail(ctx context.Context, jobID string) (JobDetail, error)
 
 	out, err := c.runner.Run(ctx, "scontrol", "show", "jobid", normalized)
 	if err != nil {
-		return JobDetail{}, fmt.Errorf("job %s not found: %w", jobID, err)
+		// Only scontrol's own "Invalid job id" reads as not-found; a timeout or
+		// unreachable controller must not masquerade as the job not existing.
+		var ce *CommandError
+		if errors.As(err, &ce) && strings.Contains(strings.ToLower(ce.Stderr), "invalid job id") {
+			return JobDetail{}, fmt.Errorf("job %s not found: %w", jobID, err)
+		}
+		return JobDetail{}, fmt.Errorf("job %s: %w", jobID, err)
 	}
 	records := ParseScontrolJobRecords(strings.TrimSpace(string(out)))
 	if len(records) == 0 {
