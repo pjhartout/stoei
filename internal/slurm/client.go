@@ -26,8 +26,9 @@ var (
 
 // Client builds Slurm commands and parses their output. It wraps a Runner (the
 // only seam to the OS). Job history comes from per-user controller snapshots
-// accumulated into a persistent journal, never from slurmdbd/sacct. A zero
-// Client is not usable; construct one with NewClient.
+// accumulated into a persistent journal, reconciled at most once per day
+// against sacct when available. A zero Client is not usable; construct one
+// with NewClient.
 type Client struct {
 	runner Runner
 	// username is the resolved current user, used by the per-user getters.
@@ -42,6 +43,13 @@ type Client struct {
 
 	mu        sync.Mutex
 	lastFetch time.Time // last journal query time, for the throttle
+	// lastAcct is the last sacct reconcile attempt (success or not), for the
+	// daily cadence. acctFailing suppresses repeat warnings during an ongoing
+	// sacct outage (I9); acctWarning holds a pending warning until AcctWarning
+	// collects it.
+	lastAcct    time.Time
+	acctFailing bool
+	acctWarning string
 }
 
 // Option configures a Client.
@@ -190,13 +198,15 @@ func (c *Client) AllUsersJobs(ctx context.Context) ([]AllUsersJob, error) {
 }
 
 // JobHistory returns the current user's job history and requeue statistics from
-// the journal (never sacct), windowed to the last days days: a job whose most
-// recent parseable timestamp is older is excluded. days <= 0 disables the
-// window.
+// the journal, windowed to the last days days: a job whose most recent
+// parseable timestamp is older is excluded. days <= 0 disables the window. It
+// additionally reconciles the journal against sacct at most once per day
+// (best-effort — see reconcileAcct).
 func (c *Client) JobHistory(ctx context.Context, days int) ([]HistoryJob, HistoryStats, error) {
 	if err := validateUsername(c.username); err != nil {
 		return nil, HistoryStats{}, err
 	}
+	c.reconcileAcct(ctx)
 	jobs, err := c.journalJobs(ctx)
 	if err != nil {
 		return nil, HistoryStats{}, err

@@ -41,11 +41,14 @@ func main() {
 			usage(os.Stdout)
 			return
 		case "reset":
-			// Clear the persistent job journal, starting the local history fresh.
+			// Clear the persistent job journal and the sacct reconcile stamp,
+			// starting the local history fresh with an immediate backfill.
 			if path := slurm.JournalPath(); path != "" {
-				if err := os.Remove(path); err != nil && !os.IsNotExist(err) {
-					fmt.Fprintln(os.Stderr, "stoei: reset failed:", err)
-					os.Exit(1)
+				for _, p := range []string{path, slurm.AcctStampPath(path)} {
+					if err := os.Remove(p); err != nil && !os.IsNotExist(err) {
+						fmt.Fprintln(os.Stderr, "stoei: reset failed:", err)
+						os.Exit(1)
+					}
 				}
 			}
 			fmt.Println("stoei: cleared the job journal")
@@ -82,8 +85,9 @@ func main() {
 	// Wire the one-way dependency chain: a Runner shells out to Slurm, the Client
 	// builds/parses commands, the Store holds the data, and the root model renders
 	// it. Job history comes from the controller ("scontrol show jobs")
-	// accumulated into a persistent on-disk journal, so slurmdbd/sacct are never
-	// queried; squeue, scontrol, and the rest run live. The alt-screen is a View
+	// accumulated into a persistent on-disk journal, reconciled against a single
+	// daily sacct query; squeue, scontrol, and the rest run live. The
+	// alt-screen is a View
 	// field in Bubble Tea v2, so NewProgram takes just the model.
 	client := slurm.NewClient(slurm.ExecRunner{}, slurm.WithJournal(slurm.JournalPath()))
 

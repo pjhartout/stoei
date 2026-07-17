@@ -72,7 +72,7 @@ go build -o stoei ./cmd/stoei
 stoei
 ```
 
-stoei runs the Slurm CLIs (`squeue`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. It never queries `sacct`/slurmdbd. Check the version with `stoei --version`.
+stoei runs the Slurm CLIs (`squeue`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. It queries `sacct`/slurmdbd at most once per day, to reconcile the job-history journal. Check the version with `stoei --version`.
 
 > [!WARNING]
 > stoei polls the Slurm controller (headnode) directly on every refresh, since
@@ -112,7 +112,7 @@ Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refres
 - Slurm CLIs on `PATH`: `squeue`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
 - A login node where those commands talk to your cluster
 
-Job history comes from the controller (a per-user `squeue -t all` snapshot plus `scontrol show jobid` completion records) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl` — `sacct`/`slurmdbd` is never queried, so the history reflects jobs stoei has observed (running, pending, and recently finished), building up over time. Run `stoei reset` to clear the journal.
+Job history comes from the controller (a per-user `squeue -t all` snapshot plus `scontrol show jobid` completion records) accumulated into a persistent journal at `${XDG_DATA_HOME:-~/.local/share}/stoei/jobs.jsonl`. Once per day — shared across sessions via a stamp file next to the journal, so frequent restarts don't repeat it — the journal is reconciled against a single per-user `sacct` query, which backfills jobs that finished (or ran entirely) while stoei was not watching; when `sacct` is unavailable stoei warns once and the history reflects only jobs stoei has observed. Run `stoei reset` to clear the journal.
 
 ## Development
 

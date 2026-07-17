@@ -26,6 +26,9 @@ type SlurmClient interface {
 	// JobHistory returns the current user's job history for the last days days
 	// plus aggregate requeue statistics.
 	JobHistory(ctx context.Context, days int) ([]slurm.HistoryJob, slurm.HistoryStats, error)
+	// AcctWarning returns and clears the one-shot warning from a failed sacct
+	// journal reconcile; "" when there is none.
+	AcctWarning() string
 	// ClusterNodes returns every cluster node.
 	ClusterNodes(ctx context.Context) ([]slurm.Node, error)
 	// FairShare returns fair-share priority data for all users and accounts.

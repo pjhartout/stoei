@@ -490,6 +490,11 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, a.fetchCompletions(vanished), true
 
 	case historyMsg:
+		// The sacct reconcile warning is one-shot at the client, so this cannot
+		// repeat (the no-spam rule, I9).
+		if msg.warn != "" {
+			a.pushToastLevel(msg.warn, toastError)
+		}
 		a.store.SetHistory(msg.jobs, msg.stats, msg.gen, msg.err)
 		a.observeGen(store.SectionHistory, msg.gen, msg.err)
 		a.jobs.Refresh() // Completed/failed history jobs merge into the Jobs table.

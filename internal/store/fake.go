@@ -56,6 +56,15 @@ type FakeClient struct {
 	LastCompletedJobID string
 	// LastHistoryDays is the day window passed to the most recent JobHistory call.
 	LastHistoryDays int
+	// AcctWarningMsg is returned (and cleared) by the next AcctWarning call.
+	AcctWarningMsg string
+}
+
+// AcctWarning implements SlurmClient, mirroring the real one-shot semantics.
+func (f *FakeClient) AcctWarning() string {
+	w := f.AcctWarningMsg
+	f.AcctWarningMsg = ""
+	return w
 }
 
 // Available implements SlurmClient.

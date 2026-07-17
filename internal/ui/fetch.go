@@ -66,11 +66,13 @@ type runningJobsMsg struct {
 	err  error
 }
 
-// historyMsg carries a job-history fetch result.
+// historyMsg carries a job-history fetch result. warn is the one-shot sacct
+// reconcile warning ("" almost always) surfaced as a toast.
 type historyMsg struct {
 	gen   uint64
 	jobs  []store.HistoryJob
 	stats store.HistoryStats
+	warn  string
 	err   error
 }
 
@@ -188,7 +190,7 @@ func fetchHistory(client store.SlurmClient, gen uint64, days int) tea.Cmd {
 			stats = s
 			return j, e
 		})
-		return historyMsg{gen: gen, jobs: jobs, stats: stats, err: err}
+		return historyMsg{gen: gen, jobs: jobs, stats: stats, warn: client.AcctWarning(), err: err}
 	}
 }
 
