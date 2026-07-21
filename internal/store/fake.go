@@ -58,7 +58,12 @@ type FakeClient struct {
 	LastHistoryDays int
 	// AcctWarningMsg is returned (and cleared) by the next AcctWarning call.
 	AcctWarningMsg string
+	// AcctDueFlag is returned by AcctDue.
+	AcctDueFlag bool
 }
+
+// AcctDue implements SlurmClient.
+func (f *FakeClient) AcctDue() bool { return f.AcctDueFlag }
 
 // AcctWarning implements SlurmClient, mirroring the real one-shot semantics.
 func (f *FakeClient) AcctWarning() string {

@@ -76,6 +76,13 @@ type historyMsg struct {
 	err   error
 }
 
+// acctReconcilingMsg signals that the in-flight history fetch carries the daily
+// sacct reconcile. The progress toast is pushed from Update on this message —
+// never directly in the dispatch helper — because Init dispatches on a model
+// copy the runtime discards, which would silently drop the toast at startup
+// (the one moment the reconcile reliably runs).
+type acctReconcilingMsg struct{}
+
 // completedJobMsg carries the scontrol-sourced final record for a job that just
 // left the running queue (found is false when the controller no longer has it or
 // it is not yet terminal). It is merged into history without a sacct query.

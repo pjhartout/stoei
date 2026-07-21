@@ -314,11 +314,17 @@ func (a *App) fetchCompletions(ids []string) tea.Cmd {
 }
 
 // dispatchHistory bumps the history generation, marks it loading, and returns the
-// fetch Cmd.
+// fetch Cmd. When the fetch will carry the daily sacct reconcile, it batches an
+// acctReconcilingMsg so Update pushes the spinner toast — a direct push here
+// would be lost when Init dispatches on a discarded model copy.
 func (a *App) dispatchHistory() tea.Cmd {
 	gen := a.store.NextGen(store.SectionHistory)
 	a.store.SetLoading(store.SectionHistory, gen)
-	return fetchHistory(a.client, gen, a.cfg.JobHistoryDays)
+	fetch := fetchHistory(a.client, gen, a.cfg.JobHistoryDays)
+	if a.client.AcctDue() {
+		return tea.Batch(func() tea.Msg { return acctReconcilingMsg{} }, fetch)
+	}
+	return fetch
 }
 
 // dispatchHistoryIfIdle dispatches a history refresh unless one is already in
@@ -489,7 +495,17 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		a.frame.invalidate()
 		return a, a.fetchCompletions(vanished), true
 
+	case acctReconcilingMsg:
+		// Skip when the fetch already landed: a toast pushed after its drop
+		// event would linger for the full TTL.
+		if a.store.State(store.SectionHistory) == store.StateLoading {
+			a.pushToastTagged("Reconciling job history", toastInfo, acctToastTag)
+			a.frame.invalidate()
+		}
+		return a, nil, true
+
 	case historyMsg:
+		a.dropToasts(acctToastTag)
 		// The sacct reconcile warning is one-shot at the client, so this cannot
 		// repeat (the no-spam rule, I9).
 		if msg.warn != "" {

@@ -42,6 +42,11 @@ type toastItem struct {
 // while the fetch is in flight and is dropped the moment the result lands.
 const refreshToastTag = "refresh"
 
+// acctToastTag marks the sacct-reconcile progress toast shown while a history
+// fetch that carries the daily reconcile is in flight; like the refresh toast
+// it animates a spinner and is dropped when the history result lands.
+const acctToastTag = "acct-reconcile"
+
 // toastBorderColor maps a toast level to its border color from the styles.
 func toastBorderColor(level toastLevel, styles theme.Styles) lipgloss.Style {
 	switch level {

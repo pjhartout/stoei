@@ -29,6 +29,9 @@ type SlurmClient interface {
 	// AcctWarning returns and clears the one-shot warning from a failed sacct
 	// journal reconcile; "" when there is none.
 	AcctWarning() string
+	// AcctDue reports whether the next JobHistory call will attempt the sacct
+	// reconcile, so the UI can show progress feedback for the slower fetch.
+	AcctDue() bool
 	// ClusterNodes returns every cluster node.
 	ClusterNodes(ctx context.Context) ([]slurm.Node, error)
 	// FairShare returns fair-share priority data for all users and accounts.

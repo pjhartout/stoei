@@ -96,6 +96,49 @@ func TestRefreshToastAnimatesAndClearsOnCompletion(t *testing.T) {
 	}
 }
 
+// TestAcctReconcileToastShowsAndClears asserts a history dispatch that carries
+// the daily sacct reconcile emits the toast through Update — a direct push
+// would be lost on the discarded Init model copy — and that the history result
+// drops it immediately. It drives the dispatched Cmd like the runtime would.
+func TestAcctReconcileToastShowsAndClears(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{UsernameStr: "alice", AcctDueFlag: true})
+	var sawReconciling bool
+	for _, msg := range drainCmd(a.dispatchHistory()) {
+		if _, ok := msg.(acctReconcilingMsg); ok {
+			sawReconciling = true
+			m, _ := a.Update(msg)
+			a = m.(App)
+		}
+	}
+	if !sawReconciling {
+		t.Fatal("dispatch with reconcile due did not emit acctReconcilingMsg")
+	}
+	if len(a.toasts) != 1 || a.toasts[0].tag != acctToastTag {
+		t.Fatalf("after acctReconcilingMsg: toasts=%+v; want one acct progress toast", a.toasts)
+	}
+	m, _ := a.Update(historyMsg{gen: a.store.Gen(store.SectionHistory)})
+	a = m.(App)
+	if len(a.toasts) != 0 {
+		t.Errorf("acct progress toast survived the history result: %+v", a.toasts)
+	}
+
+	// A reconciling signal that loses the race against its own result must not
+	// push a toast nothing will drop.
+	m, _ = a.Update(acctReconcilingMsg{})
+	a = m.(App)
+	if len(a.toasts) != 0 {
+		t.Errorf("late acctReconcilingMsg pushed an undropped toast: %+v", a.toasts)
+	}
+
+	// Without a due reconcile the dispatch stays silent.
+	b := newTestApp(t, &store.FakeClient{UsernameStr: "alice"})
+	for _, msg := range drainCmd(b.dispatchHistory()) {
+		if _, ok := msg.(acctReconcilingMsg); ok {
+			t.Error("dispatch without reconcile due emitted acctReconcilingMsg")
+		}
+	}
+}
+
 // TestRenderToastsFadeOnFinalTick asserts a toast on its last tick renders in
 // the muted tone (fading out) instead of its level color.
 func TestRenderToastsFadeOnFinalTick(t *testing.T) {
