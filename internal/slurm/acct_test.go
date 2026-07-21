@@ -106,6 +106,67 @@ func TestReconcileAcctPreservesRestart(t *testing.T) {
 	t.Fatal("job 4242 missing from history")
 }
 
+// TestReconcileAcctPrunesStaleArrayLeader covers the pending-range placeholder:
+// sacct reports a dispatched array only as per-task rows, so a bare leader id
+// stuck in a live state must be pruned once its tasks are accounted, instead of
+// lingering as an UNKNOWN history row.
+func TestReconcileAcctPrunesStaleArrayLeader(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.jsonl")
+	seed := newJobJournal(path)
+	if err := seed.upsert([]ControllerJob{{
+		ID: "5320952", User: "alice", Name: "submit.sh", State: "PENDING",
+		Submit: "2026-07-17T15:47:49",
+	}}); err != nil {
+		t.Fatalf("seed journal: %v", err)
+	}
+
+	arrayOut := "5320952_0|alice|COMPLETED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T17:05:41|01:17:52|0:0|node01|32|cpu=32|submit.sh\n" +
+		"5320952_1|alice|FAILED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T16:49:52|01:02:03|1:0|node02|32|cpu=32|submit.sh\n"
+	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(arrayOut)}}
+	c := NewClient(r, WithUsername("alice"), WithJournal(path))
+	jobs, _, err := c.JobHistory(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("JobHistory: %v", err)
+	}
+	ids := map[string]bool{}
+	for _, j := range jobs {
+		ids[j.ID] = true
+	}
+	if ids["5320952"] {
+		t.Error("stale array-leader placeholder survived the reconcile")
+	}
+	if !ids["5320952_0"] || !ids["5320952_1"] {
+		t.Errorf("array tasks missing from history: %v", ids)
+	}
+}
+
+// TestAcctDue covers the UI progress gate: due before the first attempt of the
+// interval, not after (success or failure), and never without a journal.
+func TestAcctDue(t *testing.T) {
+	cur := time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC)
+	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(acctOut)}}
+	c := NewClient(r, WithUsername("alice"),
+		WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")),
+		WithClock(func() time.Time { return cur }),
+	)
+	if !c.AcctDue() {
+		t.Error("AcctDue must be true before the first attempt")
+	}
+	if _, _, err := c.JobHistory(context.Background(), 7); err != nil {
+		t.Fatalf("JobHistory: %v", err)
+	}
+	if c.AcctDue() {
+		t.Error("AcctDue must be false after an attempt")
+	}
+	cur = cur.Add(25 * time.Hour)
+	if !c.AcctDue() {
+		t.Error("AcctDue must re-arm after the interval")
+	}
+	if NewClient(r).AcctDue() {
+		t.Error("AcctDue must be false without a journal")
+	}
+}
+
 // TestReconcileAcctFailure is the failover: history still works from the
 // journal, the warning is delivered exactly once, sacct is not retried before
 // the daily interval elapses, and no stamp is written — so a fresh session

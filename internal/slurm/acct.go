@@ -111,6 +111,9 @@ func (c *Client) reconcileAcct(ctx context.Context) {
 	if err == nil {
 		err = c.journal.upsert(c.mergeAcct(jobs))
 	}
+	if err == nil {
+		err = c.journal.remove(staleLeaderIDs(c.journal.all(), jobs))
+	}
 	c.mu.Lock()
 	if err != nil {
 		if !c.acctFailing {
@@ -146,6 +149,45 @@ func (c *Client) mergeAcct(jobs []ControllerJob) []ControllerJob {
 		terminal = append(terminal, j)
 	}
 	return terminal
+}
+
+// staleLeaderIDs returns journal ids stuck in a live state that sacct reports
+// only as per-task rows: the pending-range array-leader placeholder (a bare
+// "5320952" left PENDING after every task dispatched). sacct never lists a
+// dispatched array leader, so without pruning the placeholder outlives its
+// tasks and renders as an UNKNOWN history row forever. A leader whose array
+// still has pending tasks is re-added by the next squeue journal query within
+// seconds, so a premature prune self-heals.
+func staleLeaderIDs(journal, acct []ControllerJob) []string {
+	ids := make(map[string]bool, len(acct))
+	arrays := make(map[string]bool)
+	for _, j := range acct {
+		ids[j.ID] = true
+		if base, _, ok := strings.Cut(j.ID, "_"); ok {
+			arrays[base] = true
+		}
+	}
+	var stale []string
+	for _, j := range journal {
+		if !IsTerminalState(j.State) && !ids[j.ID] && arrays[j.ID] {
+			stale = append(stale, j.ID)
+		}
+	}
+	return stale
+}
+
+// AcctDue reports whether the next JobHistory call will attempt the sacct
+// reconcile, so the UI can show progress feedback for the slower fetch. It
+// consults only in-memory state — never the stamp file — because it runs on
+// the UI's Update path, where file IO is forbidden; the cost is one brief
+// false positive per launch when the stamp then suppresses the reconcile.
+func (c *Client) AcctDue() bool {
+	if c.journal == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.lastAcct.IsZero() || c.now().Sub(c.lastAcct) >= acctReconcileInterval
 }
 
 // AcctStampPath returns the cross-session sacct reconcile stamp, kept next to

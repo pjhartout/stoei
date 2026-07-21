@@ -98,6 +98,24 @@ func (j *jobJournal) upsert(jobs []ControllerJob) error {
 	return j.write(recs)
 }
 
+// remove deletes the given ids and rewrites the journal atomically under the
+// cross-process lock. An empty ids is a no-op. It is used by the sacct
+// reconcile to drop stale array-leader placeholders.
+func (j *jobJournal) remove(ids []string) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	j.mu.Lock()
+	defer j.mu.Unlock()
+	unlock := lockJournal(j.path)
+	defer unlock()
+	recs := j.load()
+	for _, id := range ids {
+		delete(recs, id)
+	}
+	return j.write(recs)
+}
+
 // all returns every recorded job, without the bookkeeping timestamps.
 func (j *jobJournal) all() []ControllerJob {
 	j.mu.Lock()
