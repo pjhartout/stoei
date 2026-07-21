@@ -40,6 +40,15 @@ func TestParseAcctJobs(t *testing.T) {
 	if jobs[1].Name != "prep|sweep" {
 		t.Errorf("pipe-bearing job name mangled: %q", jobs[1].Name)
 	}
+	// A single-task bracket id (a task cancelled while pending) must normalize
+	// to the squeue "_N" form so the terminal record settles the journal row;
+	// a multi-task range keeps its bracket id.
+	brackets := ParseAcctJobs(
+		"5337331_[90]|alice|CANCELLED by 6427|gpu|2026-07-21T17:13:35|Unknown|2026-07-21T17:24:35|00:00:00|0:0|None assigned|1|cpu=1|chemprot\n" +
+			"5109800_[4-60%2]|alice|CANCELLED by 8255|gpu|2026-06-22T16:22:49|Unknown|2026-06-29T09:29:57|00:00:00|0:0|None assigned|1|cpu=1|binder\n")
+	if len(brackets) != 2 || brackets[0].ID != "5337331_90" || brackets[1].ID != "5109800_[4-60%2]" {
+		t.Errorf("bracket id normalization: %+v", brackets)
+	}
 }
 
 // TestReconcileAcct is the reconcile happy path: sacct's terminal records land
@@ -106,17 +115,30 @@ func TestReconcileAcctPreservesRestart(t *testing.T) {
 	t.Fatal("job 4242 missing from history")
 }
 
-// TestReconcileAcctPrunesStaleArrayLeader covers the pending-range placeholder:
-// sacct reports a dispatched array only as per-task rows, so a bare leader id
-// stuck in a live state must be pruned once its tasks are accounted, instead of
-// lingering as an UNKNOWN history row.
-func TestReconcileAcctPrunesStaleArrayLeader(t *testing.T) {
+// TestReconcileAcctPrunesStaleOwnedRows covers the per-user prune: journal
+// rows stuck in a live state the sacct dump can never settle — a dispatched
+// array leader (sacct lists only per-task rows) and a legacy row keyed by a
+// raw per-task JobId — must be dropped instead of lingering as UNKNOWN
+// history rows. Another user's row survives: the per-user dump cannot vouch
+// for it.
+func TestReconcileAcctPrunesStaleOwnedRows(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "jobs.jsonl")
 	seed := newJobJournal(path)
 	if err := seed.upsert([]ControllerJob{{
 		ID: "5320952", User: "alice", Name: "submit.sh", State: "PENDING",
 		Submit: "2026-07-17T15:47:49",
 	}}); err != nil {
+		t.Fatalf("seed journal: %v", err)
+	}
+	if err := seed.upsert([]ControllerJob{
+		// A legacy row keyed by the raw per-task JobId: sacct only ever lists
+		// the "%A_%a" form, so this can never be settled — prune it.
+		{ID: "5131633", User: "alice", Name: "legacy", State: "RUNNING",
+			Submit: "2026-06-26T13:36:08"},
+		// Another user's legacy row: the per-user dump cannot vouch for it.
+		{ID: "7777", User: "bob", Name: "foreign", State: "RUNNING",
+			Submit: "2026-07-17T09:00:00"},
+	}); err != nil {
 		t.Fatalf("seed journal: %v", err)
 	}
 
@@ -138,6 +160,73 @@ func TestReconcileAcctPrunesStaleArrayLeader(t *testing.T) {
 	if !ids["5320952_0"] || !ids["5320952_1"] {
 		t.Errorf("array tasks missing from history: %v", ids)
 	}
+	if ids["5131633"] {
+		t.Error("legacy raw-task-id row survived the reconcile")
+	}
+	all := map[string]bool{}
+	for _, j := range c.journal.all() {
+		all[j.ID] = true
+	}
+	if !all["7777"] {
+		t.Error("another user's row must survive the per-user prune")
+	}
+}
+
+// TestReconcileAcctSettlesPendingCancelledTask covers the bracket-id case: a
+// task cancelled while still pending is reported by sacct as "123_[90]" while
+// the journal keys it "123_90"; the normalized terminal record must settle the
+// row rather than leave it stuck PENDING (rendered UNKNOWN).
+func TestReconcileAcctSettlesPendingCancelledTask(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.jsonl")
+	seed := newJobJournal(path)
+	if err := seed.upsert([]ControllerJob{{
+		ID: "5337331_90", User: "alice", Name: "chemprot", State: "PENDING",
+		Submit: "2026-07-21T17:13:35",
+	}}); err != nil {
+		t.Fatalf("seed journal: %v", err)
+	}
+
+	out := "5337331_[90]|alice|CANCELLED by 6427|gpu|2026-07-21T17:13:35|Unknown|2026-07-21T17:24:35|00:00:00|0:0|None assigned|1|cpu=1|chemprot\n"
+	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(out)}}
+	c := NewClient(r, WithUsername("alice"), WithJournal(path))
+	jobs, _, err := c.JobHistory(context.Background(), 7)
+	if err != nil {
+		t.Fatalf("JobHistory: %v", err)
+	}
+	for _, j := range jobs {
+		if j.ID == "5337331_90" {
+			if j.State != "CANCELLED" {
+				t.Errorf("state = %q, want CANCELLED settled from the bracket record", j.State)
+			}
+			return
+		}
+	}
+	t.Fatal("job 5337331_90 missing from history")
+}
+
+// TestReconcileAcctEmptyDumpKeepsLiveRows is the prune guard: a successful but
+// empty sacct dump must not classify every live row as stale at once.
+func TestReconcileAcctEmptyDumpKeepsLiveRows(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.jsonl")
+	seed := newJobJournal(path)
+	if err := seed.upsert([]ControllerJob{{
+		ID: "4242", User: "alice", Name: "train", State: "RUNNING",
+		Submit: "2026-07-17T09:00:00",
+	}}); err != nil {
+		t.Fatalf("seed journal: %v", err)
+	}
+
+	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte("")}}
+	c := NewClient(r, WithUsername("alice"), WithJournal(path))
+	if _, _, err := c.JobHistory(context.Background(), 7); err != nil {
+		t.Fatalf("JobHistory: %v", err)
+	}
+	for _, j := range c.journal.all() {
+		if j.ID == "4242" {
+			return
+		}
+	}
+	t.Error("live row pruned on an empty sacct dump")
 }
 
 // TestAcctDue covers the UI progress gate: due before the first attempt of the

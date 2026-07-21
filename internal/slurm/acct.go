@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 )
@@ -18,9 +19,17 @@ const acctFormat = "JobID,User,State,Partition,Submit,Start,End," +
 // acctFieldCount is the number of pipe-delimited columns acctFormat produces.
 var acctFieldCount = strings.Count(acctFormat, ",") + 1
 
+// acctSingleTaskID matches sacct's bracket form of a single array task, e.g.
+// "5337331_[90]" or "5337331_[90%2]": a task cancelled while still pending.
+// squeue reports such a split-off task without brackets ("5337331_90"), so the
+// bracket must be stripped for the terminal record to settle the journal row.
+// Multi-task ranges are left untouched; staleOwnedIDs covers their split rows.
+var acctSingleTaskID = regexp.MustCompile(`^(\d+)_\[(\d+)(?:%\d+)?\]$`)
+
 // ParseAcctJobs parses pipe-delimited "sacct -n -P -X" output into
 // ControllerJob records. Malformed lines are skipped; states are reduced to
-// their base token so "CANCELLED by 1001" matches the journal's shape.
+// their base token so "CANCELLED by 1001" matches the journal's shape, and
+// single-task bracket ids are normalized to the squeue form.
 func ParseAcctJobs(raw string) []ControllerJob {
 	var jobs []ControllerJob
 	for _, line := range strings.Split(strings.TrimSpace(raw), "\n") {
@@ -28,8 +37,12 @@ func ParseAcctJobs(raw string) []ControllerJob {
 		if len(f) != acctFieldCount || f[0] == "" {
 			continue
 		}
+		id := f[0]
+		if m := acctSingleTaskID.FindStringSubmatch(id); m != nil {
+			id = m[1] + "_" + m[2]
+		}
 		jobs = append(jobs, ControllerJob{
-			ID:        f[0],
+			ID:        id,
 			User:      f[1],
 			State:     baseState(f[2]),
 			Partition: f[3],
@@ -112,7 +125,7 @@ func (c *Client) reconcileAcct(ctx context.Context) {
 		err = c.journal.upsert(c.mergeAcct(jobs))
 	}
 	if err == nil {
-		err = c.journal.remove(staleLeaderIDs(c.journal.all(), jobs))
+		err = c.journal.remove(staleOwnedIDs(c.journal.all(), jobs, c.username))
 	}
 	c.mu.Lock()
 	if err != nil {
@@ -151,25 +164,29 @@ func (c *Client) mergeAcct(jobs []ControllerJob) []ControllerJob {
 	return terminal
 }
 
-// staleLeaderIDs returns journal ids stuck in a live state that sacct reports
-// only as per-task rows: the pending-range array-leader placeholder (a bare
-// "5320952" left PENDING after every task dispatched). sacct never lists a
-// dispatched array leader, so without pruning the placeholder outlives its
-// tasks and renders as an UNKNOWN history row forever. A leader whose array
-// still has pending tasks is re-added by the next squeue journal query within
-// seconds, so a premature prune self-heals.
-func staleLeaderIDs(journal, acct []ControllerJob) []string {
+// staleOwnedIDs returns the current user's journal ids stuck in a live state
+// that a non-empty sacct dump does not list. The per-user dump covers live and
+// terminal jobs alike, so an id absent from it is no real job anymore — it is
+// an id-shape artifact the upsert can never settle: a dispatched array leader
+// (sacct lists only per-task rows), a split pending task cancelled inside a
+// range ("123_[4-60%2]"), or a legacy row keyed by a raw per-task JobId from
+// before the "%A_%a" normalization. Without pruning, such rows render as
+// UNKNOWN history forever. A genuinely live job pruned by accounting lag is
+// re-added by the next squeue journal query within seconds, so a premature
+// prune self-heals. Other users' legacy rows are left to the retention prune
+// (the dump cannot vouch for them), and an empty dump aborts: it would
+// classify every live row as stale at once.
+func staleOwnedIDs(journal, acct []ControllerJob, user string) []string {
+	if len(acct) == 0 {
+		return nil
+	}
 	ids := make(map[string]bool, len(acct))
-	arrays := make(map[string]bool)
 	for _, j := range acct {
 		ids[j.ID] = true
-		if base, _, ok := strings.Cut(j.ID, "_"); ok {
-			arrays[base] = true
-		}
 	}
 	var stale []string
 	for _, j := range journal {
-		if !IsTerminalState(j.State) && !ids[j.ID] && arrays[j.ID] {
+		if j.User == user && !IsTerminalState(j.State) && !ids[j.ID] {
 			stale = append(stale, j.ID)
 		}
 	}

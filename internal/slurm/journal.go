@@ -100,7 +100,7 @@ func (j *jobJournal) upsert(jobs []ControllerJob) error {
 
 // remove deletes the given ids and rewrites the journal atomically under the
 // cross-process lock. An empty ids is a no-op. It is used by the sacct
-// reconcile to drop stale array-leader placeholders.
+// reconcile to drop the user's stale live records sacct no longer lists.
 func (j *jobJournal) remove(ids []string) error {
 	if len(ids) == 0 {
 		return nil
