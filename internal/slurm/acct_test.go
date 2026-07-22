@@ -56,7 +56,10 @@ func TestParseAcctJobs(t *testing.T) {
 // queried exactly once across history fetches inside the daily interval.
 func TestReconcileAcct(t *testing.T) {
 	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(acctOut)}}
-	c := NewClient(r, WithUsername("alice"), WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")))
+	c := NewClient(r, WithUsername("alice"),
+		WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")),
+		WithClock(func() time.Time { return time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC) }),
+	)
 
 	for range 2 {
 		jobs, _, err := c.JobHistory(context.Background(), 7)
@@ -96,7 +99,9 @@ func TestReconcileAcctPreservesRestart(t *testing.T) {
 	}
 
 	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(acctOut)}}
-	c := NewClient(r, WithUsername("alice"), WithJournal(path))
+	c := NewClient(r, WithUsername("alice"), WithJournal(path),
+		WithClock(func() time.Time { return time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC) }),
+	)
 	jobs, _, err := c.JobHistory(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("JobHistory: %v", err)
@@ -145,7 +150,9 @@ func TestReconcileAcctPrunesStaleOwnedRows(t *testing.T) {
 	arrayOut := "5320952_0|alice|COMPLETED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T17:05:41|01:17:52|0:0|node01|32|cpu=32|submit.sh\n" +
 		"5320952_1|alice|FAILED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T16:49:52|01:02:03|1:0|node02|32|cpu=32|submit.sh\n"
 	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(arrayOut)}}
-	c := NewClient(r, WithUsername("alice"), WithJournal(path))
+	c := NewClient(r, WithUsername("alice"), WithJournal(path),
+		WithClock(func() time.Time { return time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC) }),
+	)
 	jobs, _, err := c.JobHistory(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("JobHistory: %v", err)
@@ -188,7 +195,9 @@ func TestReconcileAcctSettlesPendingCancelledTask(t *testing.T) {
 
 	out := "5337331_[90]|alice|CANCELLED by 6427|gpu|2026-07-21T17:13:35|Unknown|2026-07-21T17:24:35|00:00:00|0:0|None assigned|1|cpu=1|chemprot\n"
 	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(out)}}
-	c := NewClient(r, WithUsername("alice"), WithJournal(path))
+	c := NewClient(r, WithUsername("alice"), WithJournal(path),
+		WithClock(func() time.Time { return time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC) }),
+	)
 	jobs, _, err := c.JobHistory(context.Background(), 7)
 	if err != nil {
 		t.Fatalf("JobHistory: %v", err)
