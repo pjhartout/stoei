@@ -183,10 +183,10 @@ func (c *Client) RunningJobs(ctx context.Context) ([]RunningJob, error) {
 // AllUsersJobs returns every RUNNING and PENDING job across all users via the
 // fixed-width "squeue -O" command with the format
 // "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,
-// NumNodes:6,NodeList:80,tres:80".
+// NumNodes:6,NodeList:80,Reason:40,tres:80".
 func (c *Client) AllUsersJobs(ctx context.Context) ([]AllUsersJob, error) {
 	out, err := c.runner.Run(ctx, "squeue",
-		"-O", "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,tres:80",
+		"-O", "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,Reason:40,tres:80",
 		"-a",
 		"-t", "RUNNING,PENDING",
 		"--noheader",

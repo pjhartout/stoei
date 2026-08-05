@@ -23,6 +23,7 @@ type AllUsersJob struct {
 	Time      string
 	NumNodes  string
 	NodeList  string
+	Reason    string
 	TRES      string
 }
 

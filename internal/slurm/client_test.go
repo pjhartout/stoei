@@ -81,7 +81,7 @@ func TestClientAllUsersJobsCommand(t *testing.T) {
 		t.Errorf("got %d jobs, want 10", len(jobs))
 	}
 	call := lastCall(r)
-	wantFmt := "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,tres:80"
+	wantFmt := "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,Reason:40,tres:80"
 	if !argsContain(call, wantFmt) {
 		t.Errorf("squeue -O format mismatch: %v", call.Args)
 	}

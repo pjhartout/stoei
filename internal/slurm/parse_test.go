@@ -205,8 +205,8 @@ func TestParseAllUsersJobs(t *testing.T) {
 	if jobs[0].ID != "47441" || jobs[0].User != "user1" || jobs[0].State != "PENDING" {
 		t.Errorf("job[0] = %+v", jobs[0])
 	}
-	if jobs[0].NodeList != "(Priority)" || jobs[0].TRES != "cpu=64,mem=512G,node=8,gres/gpu=32" {
-		t.Errorf("job[0] nodelist/tres = %q / %q", jobs[0].NodeList, jobs[0].TRES)
+	if jobs[0].NodeList != "" || jobs[0].Reason != "Priority" || jobs[0].TRES != "cpu=64,mem=512G,node=8,gres/gpu=32" {
+		t.Errorf("job[0] nodelist/reason/tres = %q / %q / %q", jobs[0].NodeList, jobs[0].Reason, jobs[0].TRES)
 	}
 	// A pending array row with throttle notation survives fixed-width parsing.
 	var throttled *AllUsersJob
@@ -221,14 +221,29 @@ func TestParseAllUsersJobs(t *testing.T) {
 	if ParseArraySize(throttled.ID) != 100 {
 		t.Errorf("array size of %q = %d, want 100", throttled.ID, ParseArraySize(throttled.ID))
 	}
+	if throttled.Reason != "Resources" {
+		t.Errorf("throttled reason = %q, want Resources", throttled.Reason)
+	}
 	if got := ParseTRESResources(throttled.TRES); got.CPUs != 4 || CalculateTotalGPUs(got.GPUs, true) != 2 {
 		t.Errorf("throttled TRES parse = %+v", got)
 	}
-	// A multi-node running job's NodeList still expands.
+	// A multi-node running job's NodeList still expands and carries reason None.
 	for _, j := range jobs {
 		if j.ID == "46043" {
 			if got := len(ExpandNodeList(j.NodeList)); got != 4 {
 				t.Errorf("46043 node count = %d, want 4", got)
+			}
+			if j.Reason != "None" {
+				t.Errorf("46043 reason = %q, want None", j.Reason)
+			}
+		}
+		// A reason truncated at the 40-char column edge must not bleed into TRES.
+		if j.ID == "47670" {
+			if j.Reason != "Nodes required for job are DOWN, DRAINED" {
+				t.Errorf("47670 reason = %q", j.Reason)
+			}
+			if j.TRES != "cpu=192,mem=2000G,node=1,gres/gpu=8" {
+				t.Errorf("47670 tres = %q", j.TRES)
 			}
 		}
 	}

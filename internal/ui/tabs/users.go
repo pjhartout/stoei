@@ -35,7 +35,8 @@ var runningUserColumns = []column{
 }
 
 // pendingUserColumns are the Pending sub-tab columns: per-user requested totals
-// for pending jobs (user, pending jobs, CPUs, memory, GPUs, GPU types).
+// for pending jobs (user, pending jobs, CPUs, memory, GPUs, GPU types, and
+// pending-reason counts).
 var pendingUserColumns = []column{
 	{key: "user", title: "User"},
 	{key: "pending_jobs", title: "Pending Jobs", numeric: true},
@@ -43,6 +44,7 @@ var pendingUserColumns = []column{
 	{key: "memory", title: "Memory (GB)", numeric: true},
 	{key: "gpus", title: "GPUs Requested", numeric: true},
 	{key: "gpu_types", title: "GPU Types"},
+	{key: "reasons", title: "Reasons"},
 }
 
 // Users is the user-overview tab. It is a two-level mini-root: it owns two
@@ -185,6 +187,7 @@ func pendingUserRows(users []store.UserPendingStats) [][]string {
 			fmt.Sprintf("%.1f", us.PendingMemoryGB),
 			strconv.Itoa(us.PendingGPUs),
 			naIfEmpty(us.PendingGPUTypes),
+			naIfEmpty(us.PendingReasons),
 		})
 	}
 	return rows

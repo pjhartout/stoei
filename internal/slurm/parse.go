@@ -208,8 +208,8 @@ func ParseRunningJobs(raw string) []RunningJob {
 
 // allUsersColEnds are the cumulative column end offsets for the all-users
 // "squeue -O" layout (JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,
-// TimeUsed:12,NumNodes:6,NodeList:80) with TRES taking the remainder.
-var allUsersColEnds = []int{30, 80, 95, 110, 120, 132, 138, 218}
+// TimeUsed:12,NumNodes:6,NodeList:80,Reason:40) with TRES taking the remainder.
+var allUsersColEnds = []int{30, 80, 95, 110, 120, 132, 138, 218, 258}
 
 // sliceFixedWidth cuts a line into the fields delimited by ends (cumulative end
 // offsets), trimming each, and returns the trailing remainder after the last
@@ -255,7 +255,8 @@ func ParseAllUsersJobs(raw string) []AllUsersJob {
 		}
 		jobs = append(jobs, AllUsersJob{
 			ID: f[0], Name: f[1], User: f[2], Partition: f[3],
-			State: f[4], Time: f[5], NumNodes: f[6], NodeList: f[7], TRES: f[8],
+			State: f[4], Time: f[5], NumNodes: f[6], NodeList: f[7],
+			Reason: f[8], TRES: f[9],
 		})
 	}
 	return jobs
