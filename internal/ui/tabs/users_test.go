@@ -47,7 +47,7 @@ func TestUsersRunningPaneRendersGPUCount(t *testing.T) {
 func TestUsersSwitchToPendingPane(t *testing.T) {
 	all := []store.AllUsersJob{
 		{ID: "1", User: "alice", State: "RUNNING", NumNodes: "1", NodeList: "n01", TRES: "cpu=8,mem=16G"},
-		{ID: "9000_[0-9]", User: "bob", State: "PENDING", TRES: "cpu=2,mem=4G"},
+		{ID: "9000_[0-9]", User: "bob", State: "PENDING", Reason: "Priority", TRES: "cpu=2,mem=4G"},
 	}
 	u := seedUsers(t, all)
 
@@ -67,5 +67,8 @@ func TestUsersSwitchToPendingPane(t *testing.T) {
 	// bob's pending array of 10 tasks → 10 pending jobs.
 	if !strings.Contains(view, "10") {
 		t.Errorf("pending pane should show 10 pending jobs (array expanded); view:\n%s", view)
+	}
+	if !strings.Contains(view, "10x Priority") {
+		t.Errorf("pending pane should show reason counts; view:\n%s", view)
 	}
 }

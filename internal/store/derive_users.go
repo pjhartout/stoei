@@ -2,6 +2,7 @@ package store
 
 import (
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/pjhartout/stoei/internal/slurm"
@@ -35,6 +36,7 @@ type UserPendingStats struct {
 	PendingMemoryGB float64
 	PendingGPUs     int
 	PendingGPUTypes string
+	PendingReasons  string
 }
 
 // pendingAccumulator collects per-user pending data before conversion.
@@ -44,6 +46,7 @@ type pendingAccumulator struct {
 	pendingMemoryGB float64
 	pendingGPUs     int
 	gpuTypes        map[string]int
+	reasons         map[string]int
 }
 
 // AggregatePendingUserStats aggregates pending jobs into per-user statistics,
@@ -63,12 +66,15 @@ func AggregatePendingUserStats(jobs []slurm.AllUsersJob) []UserPendingStats {
 
 		acc := byUser[username]
 		if acc == nil {
-			acc = &pendingAccumulator{gpuTypes: map[string]int{}}
+			acc = &pendingAccumulator{gpuTypes: map[string]int{}, reasons: map[string]int{}}
 			byUser[username] = acc
 		}
 
 		arraySize := slurm.ParseArraySize(strings.TrimSpace(job.ID))
 		acc.pendingJobCount += arraySize
+		if reason := pendingReasonKey(job.Reason); reason != "" {
+			acc.reasons[reason] += arraySize
+		}
 
 		tres := strings.TrimSpace(job.TRES)
 		if tres == "" {
@@ -94,6 +100,7 @@ func AggregatePendingUserStats(jobs []slurm.AllUsersJob) []UserPendingStats {
 			PendingMemoryGB: acc.pendingMemoryGB,
 			PendingGPUs:     acc.pendingGPUs,
 			PendingGPUTypes: slurm.FormatGPUTypes(acc.gpuTypes),
+			PendingReasons:  formatPendingReasons(acc.reasons),
 		})
 	}
 	sort.Slice(out, func(i, j int) bool {
@@ -103,6 +110,40 @@ func AggregatePendingUserStats(jobs []slurm.AllUsersJob) []UserPendingStats {
 		return out[i].Username < out[j].Username
 	})
 	return out
+}
+
+// pendingReasonKey normalizes a raw squeue reason for aggregation: trimmed, cut
+// at the first comma so per-job detail suffixes such as "ReqNodeNotAvail,
+// UnavailableNodes:..." collapse into one bucket.
+func pendingReasonKey(reason string) string {
+	if i := strings.IndexByte(reason, ','); i >= 0 {
+		reason = reason[:i]
+	}
+	return strings.TrimSpace(reason)
+}
+
+// formatPendingReasons renders reason counts as "12x Priority, 3x Resources",
+// most frequent first with ties broken alphabetically. An empty map yields the
+// empty string.
+func formatPendingReasons(counts map[string]int) string {
+	if len(counts) == 0 {
+		return ""
+	}
+	reasons := make([]string, 0, len(counts))
+	for r := range counts {
+		reasons = append(reasons, r)
+	}
+	sort.Slice(reasons, func(i, j int) bool {
+		if counts[reasons[i]] != counts[reasons[j]] {
+			return counts[reasons[i]] > counts[reasons[j]]
+		}
+		return reasons[i] < reasons[j]
+	})
+	parts := make([]string, len(reasons))
+	for i, r := range reasons {
+		parts[i] = strconv.Itoa(counts[r]) + "x " + r
+	}
+	return strings.Join(parts, ", ")
 }
 
 // PendingUserStats returns the per-user pending-job summary derived from the
