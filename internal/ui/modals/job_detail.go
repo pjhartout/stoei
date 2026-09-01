@@ -49,6 +49,10 @@ type JobDetail struct {
 	// state is the job's live state, used as the cache key suffix so a state
 	// change forces a re-fetch.
 	state string
+	// fallback is the journal-sourced record the root supplies for jobs it has
+	// history for; rendered when the controller lookup fails (the controller
+	// retains a finished job only for MinJobAge, but its logs live on).
+	fallback store.JobDetail
 
 	box     scrollBox
 	spin    spinner.Model
@@ -64,19 +68,21 @@ type JobDetail struct {
 
 // NewJobDetail builds a job-detail modal for jobID at live state. The cache is
 // consulted on Init: a fresh entry for the same state shows instantly, otherwise
-// a fetch Cmd runs with a spinner.
-func NewJobDetail(client store.SlurmClient, cache *JobDetailCache, styles theme.Styles, jobID, state string) *JobDetail {
+// a fetch Cmd runs with a spinner. fallback is the journal-sourced record shown
+// when the controller lookup fails (zero value: no fallback, errors render).
+func NewJobDetail(client store.SlurmClient, cache *JobDetailCache, styles theme.Styles, jobID, state string, fallback store.JobDetail) *JobDetail {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
 	d := &JobDetail{
-		styles: styles,
-		client: client,
-		cache:  cache,
-		jobID:  jobID,
-		state:  state,
-		box:    newScrollBox(styles),
-		spin:   sp,
+		styles:   styles,
+		client:   client,
+		cache:    cache,
+		jobID:    jobID,
+		state:    state,
+		fallback: fallback,
+		box:      newScrollBox(styles),
+		spin:     sp,
 	}
 	d.box.SetTitle("Job Details — " + jobID)
 	d.box.SetFooter("o stdout   e stderr   m modify   ↑/↓ scroll   Esc close")
@@ -164,6 +170,10 @@ func (d *JobDetail) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 func (d *JobDetail) applyLoaded(msg jobDetailLoadedMsg) {
 	d.loading = false
 	if msg.err != nil {
+		if len(d.fallback.Fields) > 0 {
+			d.applyFallback()
+			return
+		}
 		d.errMsg = msg.err.Error()
 		d.box.SetContent(d.styles.Error.Render("Error: " + d.errMsg))
 		d.cache.Put(d.jobID, cachedDetail{state: d.state, err: d.errMsg})
@@ -182,6 +192,27 @@ func (d *JobDetail) applyLoaded(msg jobDetailLoadedMsg) {
 		source:  msg.detail.Source,
 		state:   d.state,
 		fields:  msg.detail.Fields,
+	})
+}
+
+// applyFallback renders the journal-sourced record in place of a failed
+// controller lookup and caches it like a fetched detail, so o/e (and the log
+// viewer behind them) keep working for jobs the controller no longer knows.
+func (d *JobDetail) applyFallback() {
+	note := d.styles.Subtle.Render("Controller no longer has this job — showing the journal record.")
+	content := note + "\n\n" + formatJobDetail(d.fallback, d.styles)
+	d.stdout, d.stderr = stdoutStderrPaths(d.fallback.Fields)
+	d.fields = d.fallback.Fields
+	d.errMsg = ""
+	d.box.SetContent(content)
+	d.box.GotoTop()
+	d.cache.Put(d.jobID, cachedDetail{
+		content: content,
+		stdout:  d.stdout,
+		stderr:  d.stderr,
+		source:  d.fallback.Source,
+		state:   d.state,
+		fields:  d.fallback.Fields,
 	})
 }
 

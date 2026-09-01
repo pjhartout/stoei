@@ -1,6 +1,7 @@
 package modals
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -52,7 +53,7 @@ func TestJobDetailRendersFieldsFromFakeClient(t *testing.T) {
 		},
 	}
 	cache := NewJobDetailCache()
-	d := NewJobDetail(fc, cache, testStyles(), "12345", "RUNNING")
+	d := NewJobDetail(fc, cache, testStyles(), "12345", "RUNNING", store.JobDetail{})
 	d.SetSize(80, 24)
 
 	// Init must return a Cmd (the fetch + spinner), proving the read is deferred to
@@ -93,7 +94,7 @@ func TestJobDetailCacheHitSkipsFetch(t *testing.T) {
 	cache := NewJobDetailCache()
 	cache.Put("12345", cachedDetail{content: "CACHED DETAIL", state: "RUNNING"})
 
-	d := NewJobDetail(fc, cache, testStyles(), "12345", "RUNNING")
+	d := NewJobDetail(fc, cache, testStyles(), "12345", "RUNNING", store.JobDetail{})
 	d.SetSize(80, 24)
 	if cmd := d.Init(); cmd != nil {
 		t.Error("cache hit should not issue a fetch Cmd")
@@ -116,7 +117,7 @@ func TestJobDetailRefetchesOnStateChange(t *testing.T) {
 	cache.Put("12345", cachedDetail{content: "OLD RUNNING DETAIL", state: "RUNNING"})
 
 	// Opening the job now in COMPLETED state must miss the RUNNING-state cache.
-	d := NewJobDetail(fc, cache, testStyles(), "12345", "COMPLETED")
+	d := NewJobDetail(fc, cache, testStyles(), "12345", "COMPLETED", store.JobDetail{})
 	d.SetSize(80, 24)
 	cmd := d.Init()
 	if cmd == nil {
@@ -139,7 +140,7 @@ func TestJobDetailOpenLogEmitsMsg(t *testing.T) {
 			Fields: map[string]string{"JobId": "1", "StdOut": "/o.log", "StdErr": "/e.log"},
 		},
 	}
-	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "1", "RUNNING")
+	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "1", "RUNNING", store.JobDetail{})
 	d.Update(firstMsg(d.Init()))
 
 	_, cmd, done := d.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
@@ -158,7 +159,7 @@ func TestJobDetailOpenLogEmitsMsg(t *testing.T) {
 
 // TestJobDetailEscCloses asserts esc reports done.
 func TestJobDetailEscCloses(t *testing.T) {
-	d := NewJobDetail(&store.FakeClient{}, NewJobDetailCache(), testStyles(), "1", "RUNNING")
+	d := NewJobDetail(&store.FakeClient{}, NewJobDetailCache(), testStyles(), "1", "RUNNING", store.JobDetail{})
 	_, _, done := d.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	if !done {
 		t.Error("esc should close the job-detail modal")
@@ -174,7 +175,7 @@ func TestJobDetailMOpensModify(t *testing.T) {
 			Fields: map[string]string{"JobId": "12345", "JobState": "RUNNING", "Partition": "p.hpcl91"},
 		},
 	}
-	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "12345", "RUNNING")
+	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "12345", "RUNNING", store.JobDetail{})
 	d.SetSize(80, 24)
 
 	_, cmd, _ := d.Update(tea.KeyPressMsg{Code: 'm', Text: "m"})
@@ -194,5 +195,40 @@ func TestJobDetailMOpensModify(t *testing.T) {
 	}
 	if msg.JobID != "12345" || msg.Fields["Partition"] != "p.hpcl91" {
 		t.Errorf("OpenModifyMsg = %+v; want job 12345 with loaded fields", msg)
+	}
+}
+
+// TestJobDetailFallbackOnFetchError covers the aged-out completed job: the
+// controller lookup fails, but the journal-sourced fallback must render in its
+// place and keep o/e delivering the recorded log paths — the whole point of
+// keeping paths for jobs whose logs outlive the controller record.
+func TestJobDetailFallbackOnFetchError(t *testing.T) {
+	fc := &store.FakeClient{JobDetailErr: errors.New("job 9 not found")}
+	fb := JournalDetail(store.HistoryJob{
+		ID: "9", Name: "done", State: "COMPLETED",
+		StdOut: "/l/9.out", StdErr: "/l/9.err",
+	})
+	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "9", "COMPLETED", fb)
+	d.SetSize(80, 24)
+	d.Update(firstMsg(d.Init()))
+
+	if d.errMsg != "" {
+		t.Errorf("fallback must replace the error view, got %q", d.errMsg)
+	}
+	_, cmd, _ := d.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
+	if open, ok := firstMsg(cmd).(OpenLogMsg); !ok || open.Path != "/l/9.out" {
+		t.Fatalf("o after fallback produced %v; want OpenLogMsg for /l/9.out", firstMsg(cmd))
+	}
+	_, cmd, _ = d.Update(tea.KeyPressMsg{Code: 'e', Text: "e"})
+	if open, ok := firstMsg(cmd).(OpenLogMsg); !ok || open.Path != "/l/9.err" {
+		t.Fatalf("e after fallback produced %v; want OpenLogMsg for /l/9.err", firstMsg(cmd))
+	}
+
+	// Without a fallback the fetch error still surfaces (the prior contract).
+	bare := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "9", "COMPLETED", store.JobDetail{})
+	bare.SetSize(80, 24)
+	bare.Update(firstMsg(bare.Init()))
+	if bare.errMsg == "" {
+		t.Error("fetch error without a fallback must still surface")
 	}
 }

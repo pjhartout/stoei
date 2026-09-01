@@ -43,19 +43,27 @@ func TestCompletedJobRecordPersistsToJournal(t *testing.T) {
 }
 
 // journalWidths are the per-column widths of JournalSqueueFormat.
-var journalWidths = []int{30, 20, 20, 15, 50, 20, 15, 25, 25, 25, 15, 10, 10, 10, 80}
+var journalWidths = []int{30, 20, 20, 15, 50, 20, 15, 25, 25, 25, 15, 10, 10, 10, 80, 200, 256}
 
-// journalRow renders one fixed-width squeue -O line in JournalSqueueFormat order.
+// journalRow renders one fixed-width squeue -O line in JournalSqueueFormat
+// order. Trailing columns may be omitted and render empty, so tests that do
+// not exercise the log-path columns stay terse.
 func journalRow(t *testing.T, cols ...string) string {
 	t.Helper()
-	if len(cols) != len(journalWidths)+1 {
-		t.Fatalf("journalRow needs %d columns, got %d", len(journalWidths)+1, len(cols))
+	if len(cols) > len(journalWidths)+1 {
+		t.Fatalf("journalRow takes at most %d columns, got %d", len(journalWidths)+1, len(cols))
 	}
 	var b strings.Builder
 	for i, w := range journalWidths {
-		fmt.Fprintf(&b, "%-*s", w, cols[i])
+		col := ""
+		if i < len(cols) {
+			col = cols[i]
+		}
+		fmt.Fprintf(&b, "%-*s", w, col)
 	}
-	b.WriteString(cols[len(journalWidths)])
+	if len(cols) == len(journalWidths)+1 {
+		b.WriteString(cols[len(journalWidths)])
+	}
 	return b.String()
 }
 
@@ -181,5 +189,63 @@ func TestJournalPrunesRecordsBeyondRetention(t *testing.T) {
 	all := j.all()
 	if len(all) != 1 || all[0].ID != "new" {
 		t.Errorf("journal after retention pruning = %+v, want only the new record", all)
+	}
+}
+
+// TestParseJournalJobsCapturesLogPaths asserts the journal query's path
+// columns land on the record with the sbatch patterns expanded from the row's
+// own fields, and that a missing stderr defaults to the stdout file.
+func TestParseJournalJobsCapturesLogPaths(t *testing.T) {
+	raw := journalRow(t,
+		"12350", "12345", "3", "alice", "train", "RUNNING", "gpu",
+		"2024-01-15T10:30:00", "2024-01-15T10:35:00", "N/A",
+		"0:10:00", "0:0", "0", "8", "gpu-node-05", "cpu=8",
+		"/logs/train_%A_%a.err", "/logs/train_%j_%u_%x.out",
+	)
+	jobs := ParseJournalJobs(raw)
+	if len(jobs) != 1 {
+		t.Fatalf("got %d jobs, want 1", len(jobs))
+	}
+	if jobs[0].StdOut != "/logs/train_12350_alice_train.out" {
+		t.Errorf("StdOut = %q (raw id, user, and name must expand)", jobs[0].StdOut)
+	}
+	if jobs[0].StdErr != "/logs/train_12345_3.err" {
+		t.Errorf("StdErr = %q (array master/task must expand)", jobs[0].StdErr)
+	}
+
+	merged := ParseJournalJobs(journalRow(t,
+		"1002", "1002", "N/A", "alice", "eval", "RUNNING", "cpu",
+		"2024-01-15T11:00:00", "2024-01-15T11:05:00", "N/A",
+		"0:30:00", "0:0", "0", "8", "cpu-node-05", "cpu=8",
+		"", "/logs/eval.out",
+	))
+	if len(merged) != 1 || merged[0].StdErr != "/logs/eval.out" {
+		t.Errorf("empty stderr must default to the stdout file, got %+v", merged)
+	}
+}
+
+// TestJournalUpsertPathRules pins the log-path merge rules: a pathless source
+// must never wipe recorded paths, and a terminal record written before stoei
+// captured paths gains them from a later observation without its final state
+// being disturbed.
+func TestJournalUpsertPathRules(t *testing.T) {
+	j := newJobJournal(filepath.Join(t.TempDir(), "jobs.jsonl"))
+	mustUpsert(t, j, ControllerJob{ID: "7", State: "RUNNING", StdOut: "/l/out.log", StdErr: "/l/err.log"})
+	mustUpsert(t, j, ControllerJob{ID: "7", State: "RUNNING"})
+	mustUpsert(t, j, ControllerJob{ID: "8", State: "COMPLETED"})
+	mustUpsert(t, j, ControllerJob{ID: "8", State: "FAILED", StdOut: "/l/8.out", StdErr: "/l/8.err"})
+
+	got := map[string]ControllerJob{}
+	for _, job := range j.all() {
+		got[job.ID] = job
+	}
+	if got["7"].StdOut != "/l/out.log" || got["7"].StdErr != "/l/err.log" {
+		t.Errorf("pathless upsert wiped recorded paths: %+v", got["7"])
+	}
+	if got["8"].State != "COMPLETED" {
+		t.Errorf("path backfill disturbed the final state: %+v", got["8"])
+	}
+	if got["8"].StdOut != "/l/8.out" || got["8"].StdErr != "/l/8.err" {
+		t.Errorf("terminal record did not gain paths: %+v", got["8"])
 	}
 }
