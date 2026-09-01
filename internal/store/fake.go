@@ -20,6 +20,7 @@ type FakeClient struct {
 	PendingPriorityData []slurm.PriorityEntry
 	JobDetailData       slurm.JobDetail
 	NodeDetailData      slurm.JobDetail
+	JobUsageData        slurm.JobUsage
 	CompletedJobData    slurm.HistoryJob
 	CompletedJobFound   bool
 	UsernameStr         string
@@ -33,6 +34,7 @@ type FakeClient struct {
 	PendingPriorityErr error
 	JobDetailErr       error
 	NodeDetailErr      error
+	JobUsageErr        error
 	CancelJobErr       error
 	UpdateJobErr       error
 	HoldJobErr         error
@@ -40,6 +42,9 @@ type FakeClient struct {
 
 	// LastJobDetailID is the job ID passed to the most recent JobDetail call.
 	LastJobDetailID string
+	// LastJobUsageID and LastJobUsageRunning record the most recent JobUsage call.
+	LastJobUsageID      string
+	LastJobUsageRunning bool
 	// LastNodeDetailName is the node name passed to the most recent NodeDetail call.
 	LastNodeDetailName string
 	// LastCancelJobID is the job ID passed to the most recent CancelJob call.
@@ -113,6 +118,13 @@ func (f *FakeClient) PendingPriority(_ context.Context) ([]slurm.PriorityEntry, 
 func (f *FakeClient) JobDetail(_ context.Context, jobID string) (slurm.JobDetail, error) {
 	f.LastJobDetailID = jobID
 	return f.JobDetailData, f.JobDetailErr
+}
+
+// JobUsage implements SlurmClient.
+func (f *FakeClient) JobUsage(_ context.Context, jobID string, running bool) (slurm.JobUsage, error) {
+	f.LastJobUsageID = jobID
+	f.LastJobUsageRunning = running
+	return f.JobUsageData, f.JobUsageErr
 }
 
 // NodeDetail implements SlurmClient.
