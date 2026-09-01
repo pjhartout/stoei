@@ -1,0 +1,3 @@
+5834914|171|4|02:51.306|billing=4,cpu=4,mem=2G,node=1|||||
+5834914.batch|171|4|02:51.306|cpu=4,mem=2G,node=1|2502K|cpu=00:02:29,energy=0,fs/disk=32225772153,mem=2502K,pages=2,vmem=490644K|cpu=00:02:29,energy=0,fs/disk=32225772153,mem=2502K,pages=2,vmem=490644K|cpu=00:02:29,energy=0,fs/disk=32225772153,mem=2502K,pages=2,vmem=490644K|energy=0,fs/disk=1572864182
+5834914.extern|171|4|00:00:00|billing=4,cpu=4,mem=2G,node=1||energy=0|energy=0|energy=0|energy=0
