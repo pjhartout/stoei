@@ -24,6 +24,8 @@ type (
 	PriorityEntry = slurm.PriorityEntry
 	// JobDetail is the parsed key/value detail for a single job.
 	JobDetail = slurm.JobDetail
+	// JobUsage is the measured hardware usage of a single job.
+	JobUsage = slurm.JobUsage
 	// GPUEntry is a single GPU allocation parsed from a TRES or Gres string.
 	GPUEntry = slurm.GPUEntry
 )

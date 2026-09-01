@@ -42,6 +42,10 @@ type SlurmClient interface {
 	JobDetail(ctx context.Context, jobID string) (slurm.JobDetail, error)
 	// NodeDetail returns the parsed Key=Value detail for a single node.
 	NodeDetail(ctx context.Context, nodeName string) (slurm.JobDetail, error)
+	// JobUsage returns the measured hardware usage of one job: live sstat
+	// samples for a running job (own jobs only), slurmdbd accounting for a
+	// finished one.
+	JobUsage(ctx context.Context, jobID string, running bool) (slurm.JobUsage, error)
 	// CancelJob cancels a job via scancel.
 	CancelJob(ctx context.Context, jobID string) error
 	// UpdateJob modifies one field of a job via "scontrol update".
