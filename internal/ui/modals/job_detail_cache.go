@@ -22,6 +22,9 @@ type cachedDetail struct {
 	// fields is the parsed scontrol detail backing the render, kept so the
 	// modify modal can pre-fill current values on a cache hit.
 	fields map[string]string
+	// usage is the rendered Efficiency section appended below content; it
+	// arrives after the detail render and is attached via SetUsage.
+	usage string
 }
 
 // JobDetailCache memoizes rendered job details keyed by normalized job id and
@@ -68,6 +71,19 @@ func (c *JobDetailCache) Get(jobID, wantState string) (cachedDetail, bool) {
 // Put stores a rendered detail for jobID at the given live state.
 func (c *JobDetailCache) Put(jobID string, e cachedDetail) {
 	c.entries[normalizeID(jobID)] = e
+}
+
+// SetUsage attaches a rendered usage section to an existing entry when its
+// cached state still matches; after a state change the entry is stale and
+// about to be evicted, so the write is dropped.
+func (c *JobDetailCache) SetUsage(jobID, state, usage string) {
+	key := normalizeID(jobID)
+	e, ok := c.entries[key]
+	if !ok || e.state != state {
+		return
+	}
+	e.usage = usage
+	c.entries[key] = e
 }
 
 // Evict removes the cached entries for jobID's whole job family — the exact

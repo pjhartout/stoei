@@ -2,6 +2,7 @@ package modals
 
 import (
 	"errors"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -35,6 +36,13 @@ func firstMsg(cmd tea.Cmd) tea.Msg {
 	}
 	return msg
 }
+
+// ansiSeq matches SGR escape sequences so layout assertions can inspect the
+// plain text of a styled render.
+var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*m`)
+
+// stripAnsi removes SGR escape sequences from a rendered view.
+func stripAnsi(s string) string { return ansiSeq.ReplaceAllString(s, "") }
 
 // TestJobDetailRendersFieldsFromFakeClient drives the job-detail modal end to end
 // against a FakeClient: Init issues a fetch Cmd (not a blocking read), and feeding
@@ -88,7 +96,8 @@ func TestJobDetailRendersFieldsFromFakeClient(t *testing.T) {
 }
 
 // TestJobDetailCacheHitSkipsFetch asserts a cached entry for the same live state
-// is shown instantly (Init returns no Cmd, no client call).
+// is shown instantly: no detail fetch reaches the client. A running job still
+// issues the live usage lookup so the Efficiency numbers stay fresh.
 func TestJobDetailCacheHitSkipsFetch(t *testing.T) {
 	fc := &store.FakeClient{}
 	cache := NewJobDetailCache()
@@ -96,14 +105,149 @@ func TestJobDetailCacheHitSkipsFetch(t *testing.T) {
 
 	d := NewJobDetail(fc, cache, testStyles(), "12345", "RUNNING", store.JobDetail{})
 	d.SetSize(80, 24)
-	if cmd := d.Init(); cmd != nil {
-		t.Error("cache hit should not issue a fetch Cmd")
+	cmd := d.Init()
+	if cmd == nil {
+		t.Fatal("running-job cache hit must still issue the live usage Cmd")
+	}
+	if _, ok := firstMsg(cmd).(jobUsageLoadedMsg); !ok {
+		t.Error("cache-hit Cmd is not the usage lookup")
 	}
 	if fc.LastJobDetailID != "" {
-		t.Error("cache hit should not call the client")
+		t.Error("cache hit should not re-fetch the detail")
+	}
+	if fc.LastJobUsageID != "12345" || !fc.LastJobUsageRunning {
+		t.Errorf("usage lookup = %q running=%v; want 12345 running=true", fc.LastJobUsageID, fc.LastJobUsageRunning)
 	}
 	if !strings.Contains(d.View(), "CACHED DETAIL") {
 		t.Errorf("cache hit not rendered, got:\n%s", d.View())
+	}
+}
+
+// TestJobDetailUsageSectionRendersAfterLoad drives the full two-step flow: the
+// detail load starts the usage lookup, and feeding its result appends the
+// Efficiency section with the derived metrics.
+func TestJobDetailUsageSectionRendersAfterLoad(t *testing.T) {
+	fc := &store.FakeClient{
+		UsernameStr: "alice",
+		JobDetailData: store.JobDetail{
+			Source: "scontrol",
+			Fields: map[string]string{
+				"JobId":    "5834914",
+				"JobState": "COMPLETED",
+				"UserId":   "alice(1000)",
+				"TRES":     "cpu=4,mem=2G,node=1",
+			},
+		},
+		JobUsageData: store.JobUsage{
+			Source:         "sacct",
+			Sampled:        true,
+			ElapsedSec:     171,
+			AllocCPUs:      4,
+			CPUTimeSec:     171.3,
+			MaxRSSBytes:    2502 * 1024,
+			DiskReadBytes:  32225772153,
+			DiskWriteBytes: 1572864182,
+		},
+	}
+	cache := NewJobDetailCache()
+	d := NewJobDetail(fc, cache, testStyles(), "5834914", "COMPLETED", store.JobDetail{})
+	d.SetSize(100, 40)
+
+	loaded := firstMsg(d.Init()).(jobDetailLoadedMsg)
+	_, usageCmd, _ := d.Update(loaded)
+	if usageCmd == nil {
+		t.Fatal("detail load did not start the usage lookup")
+	}
+	if fc.LastJobUsageRunning {
+		t.Error("terminal job queried via sstat; want sacct (running=false)")
+	}
+	usageMsg, ok := firstMsg(usageCmd).(jobUsageLoadedMsg)
+	if !ok {
+		t.Fatal("usage Cmd did not produce a jobUsageLoadedMsg")
+	}
+	d.Update(usageMsg)
+
+	view := d.View()
+	for _, want := range []string{"Efficiency", "CPU efficiency", "25%", "Peak RAM", "2.4M", "Disk read", "30.0G"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("Efficiency section missing %q, got:\n%s", want, view)
+		}
+	}
+
+	// A blank separator line precedes the Efficiency title, matching the
+	// spacing formatCategorized puts between every other category.
+	lines := strings.Split(stripAnsi(view), "\n")
+	for i, line := range lines {
+		if strings.Contains(line, "Efficiency") {
+			if i == 0 || strings.Trim(lines[i-1], "│ \t") != "" {
+				t.Errorf("no blank line before Efficiency title; previous line: %q", lines[i-1])
+			}
+			break
+		}
+	}
+
+	// The section is mirrored into the cache: a reopen of the finished job
+	// renders instantly with no further lookups.
+	entry, hit := cache.Get("5834914", "COMPLETED")
+	if !hit || entry.usage == "" {
+		t.Fatal("usage section not cached")
+	}
+	reopened := NewJobDetail(fc, cache, testStyles(), "5834914", "COMPLETED", store.JobDetail{})
+	reopened.SetSize(100, 40)
+	if cmd := reopened.Init(); cmd != nil {
+		t.Error("terminal job with cached usage re-fetched on reopen")
+	}
+	if !strings.Contains(reopened.View(), "CPU efficiency") {
+		t.Error("reopen lost the cached Efficiency section")
+	}
+}
+
+// TestJobDetailForeignRunningJobUsageNote asserts a running job owned by
+// another user gets the ownership note instead of an sstat lookup, which
+// slurmstepd would refuse.
+func TestJobDetailForeignRunningJobUsageNote(t *testing.T) {
+	fc := &store.FakeClient{
+		UsernameStr: "alice",
+		JobDetailData: store.JobDetail{
+			Source: "scontrol",
+			Fields: map[string]string{"JobState": "RUNNING", "UserId": "bob(1001)"},
+		},
+	}
+	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "99", "RUNNING", store.JobDetail{})
+	d.SetSize(100, 40)
+
+	loaded := firstMsg(d.Init()).(jobDetailLoadedMsg)
+	_, usageCmd, _ := d.Update(loaded)
+	if usageCmd != nil {
+		t.Error("foreign running job issued a usage lookup")
+	}
+	if fc.LastJobUsageID != "" {
+		t.Error("client usage lookup called for a foreign running job")
+	}
+	if !strings.Contains(d.View(), "only visible to the job's owner") {
+		t.Errorf("ownership note missing, got:\n%s", d.View())
+	}
+}
+
+// TestJobDetailPendingJobHasNoUsage asserts a pending job triggers no usage
+// lookup: nothing has run, so there is nothing to measure.
+func TestJobDetailPendingJobHasNoUsage(t *testing.T) {
+	fc := &store.FakeClient{
+		JobDetailData: store.JobDetail{
+			Source: "scontrol",
+			Fields: map[string]string{"JobState": "PENDING", "UserId": "alice(1000)"},
+		},
+	}
+	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "7", "PENDING", store.JobDetail{})
+	d.SetSize(100, 40)
+
+	loaded := firstMsg(d.Init()).(jobDetailLoadedMsg)
+	_, usageCmd, _ := d.Update(loaded)
+	if usageCmd != nil {
+		t.Error("pending job issued a usage lookup")
+	}
+	if strings.Contains(d.View(), "Efficiency") {
+		t.Errorf("pending job renders an Efficiency section:\n%s", d.View())
 	}
 }
 
