@@ -12,9 +12,10 @@ import (
 // acctFormat is the sacct --format list of the one-shot reconcile query; its
 // columns map 1:1 onto ControllerJob fields. JobName is last so a legal '|' in
 // a job name cannot shift the delimited columns (the parser lets the final
-// field absorb the remainder).
+// field absorb the remainder); a '|' inside a log path would shift them, but
+// unlike job names such paths do not occur in practice.
 const acctFormat = "JobID,User,State,Partition,Submit,Start,End," +
-	"Elapsed,ExitCode,NodeList,AllocCPUS,AllocTRES,JobName"
+	"Elapsed,ExitCode,NodeList,AllocCPUS,AllocTRES,StdErr,StdOut,JobName"
 
 // acctFieldCount is the number of pipe-delimited columns acctFormat produces.
 var acctFieldCount = strings.Count(acctFormat, ",") + 1
@@ -41,6 +42,15 @@ func ParseAcctJobs(raw string) []ControllerJob {
 		if m := acctSingleTaskID.FindStringSubmatch(id); m != nil {
 			id = m[1] + "_" + m[2]
 		}
+		// Accounting reports log paths with the sbatch patterns unexpanded.
+		// For an array task the raw per-task id is absent from this query, so
+		// %j stays verbatim there (numericOnly rejects the "M_T" form) rather
+		// than expanding to a wrong path.
+		master, task, _ := strings.Cut(id, "_")
+		if task == "" {
+			master = ""
+		}
+		stdOut, stdErr := jobStdIO(f[13], f[12], id, master, task, f[1], f[14])
 		jobs = append(jobs, ControllerJob{
 			ID:        id,
 			User:      f[1],
@@ -54,7 +64,9 @@ func ParseAcctJobs(raw string) []ControllerJob {
 			NodeList:  f[9],
 			NCPUS:     f[10],
 			AllocTRES: f[11],
-			Name:      f[12],
+			StdOut:    stdOut,
+			StdErr:    stdErr,
+			Name:      f[14],
 		})
 	}
 	return jobs
@@ -141,23 +153,32 @@ func (c *Client) reconcileAcct(ctx context.Context) {
 	c.touchAcctStamp()
 }
 
-// mergeAcct filters sacct records down to terminal states and carries the
-// requeue count over from the existing journal record: sacct reports none, and
-// a wholesale replace would silently wipe it from the history stats. The
+// mergeAcct filters sacct records down to terminal states and carries fields
+// the journal knows better over from its existing record: the requeue count
+// (sacct reports none, and a wholesale replace would silently wipe it from the
+// history stats) and the log paths (the squeue journal query stores them fully
+// expanded, while sacct leaves %j verbatim for array tasks). The
 // read-then-upsert pair is not atomic across processes; the window is benign
-// (worst case one Restart merge from a slightly stale record).
+// (worst case one merge from a slightly stale record).
 func (c *Client) mergeAcct(jobs []ControllerJob) []ControllerJob {
-	existing := make(map[string]string)
+	existing := make(map[string]ControllerJob)
 	for _, j := range c.journal.all() {
-		existing[j.ID] = j.Restart
+		existing[j.ID] = j
 	}
 	terminal := jobs[:0]
 	for _, j := range jobs {
 		if !IsTerminalState(j.State) {
 			continue
 		}
+		prior := existing[j.ID]
 		if j.Restart == "" {
-			j.Restart = existing[j.ID]
+			j.Restart = prior.Restart
+		}
+		if prior.StdOut != "" {
+			j.StdOut = prior.StdOut
+		}
+		if prior.StdErr != "" {
+			j.StdErr = prior.StdErr
 		}
 		terminal = append(terminal, j)
 	}

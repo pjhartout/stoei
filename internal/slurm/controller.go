@@ -25,17 +25,25 @@ type ControllerJob struct {
 	NodeList  string
 	NCPUS     string
 	AllocTRES string
+	// StdOut and StdErr are the job's log-file paths with the sbatch filename
+	// patterns expanded where possible; "" when the scheduler reported none
+	// (an interactive job) or the source predates path capture.
+	StdOut string
+	StdErr string
 }
 
 // JournalSqueueFormat is the fixed-width "squeue -O" layout of the journal
-// query; tres-alloc is last so the line remainder absorbs long TRES strings.
+// query. StdOut is last so the parser's line remainder absorbs it; both path
+// columns are capped at 256 by squeue's own field width, which comfortably
+// exceeds real log paths.
 const JournalSqueueFormat = "JobId:30,ArrayJobId:20,ArrayTaskId:20,UserName:15," +
 	"Name:50,State:20,Partition:15,SubmitTime:25,StartTime:25,EndTime:25," +
-	"TimeUsed:15,exit_code:10,RestartCnt:10,NumCPUs:10,NodeList:80,tres-alloc:200"
+	"TimeUsed:15,exit_code:10,RestartCnt:10,NumCPUs:10,NodeList:80,tres-alloc:200," +
+	"StdErr:256,StdOut:256"
 
 // journalColEnds are the cumulative column end offsets of JournalSqueueFormat,
-// with tres-alloc taking the remainder.
-var journalColEnds = []int{30, 50, 70, 85, 135, 155, 170, 195, 220, 245, 260, 270, 280, 290, 370}
+// with StdOut taking the remainder.
+var journalColEnds = []int{30, 50, 70, 85, 135, 155, 170, 195, 220, 245, 260, 270, 280, 290, 370, 570, 826}
 
 // ParseJournalJobs parses fixed-width "squeue -O" journal output into
 // ControllerJob records, normalizing ids to the squeue %i array form.
@@ -49,6 +57,7 @@ func ParseJournalJobs(raw string) []ControllerJob {
 		if f[0] == "" {
 			continue
 		}
+		stdOut, stdErr := jobStdIO(f[17], f[16], f[0], f[1], f[2], f[3], f[4])
 		jobs = append(jobs, ControllerJob{
 			ID:        journalJobID(f[0], f[1], f[2]),
 			User:      f[3],
@@ -64,6 +73,8 @@ func ParseJournalJobs(raw string) []ControllerJob {
 			NCPUS:     f[13],
 			NodeList:  f[14],
 			AllocTRES: f[15],
+			StdOut:    stdOut,
+			StdErr:    stdErr,
 		})
 	}
 	return jobs
@@ -85,6 +96,8 @@ func journalJobID(jobID, arrayJobID, arrayTaskID string) string {
 // state is reduced to its base token, so a single "scontrol show jobid" block and
 // a block from "scontrol show jobs" yield the same shape.
 func controllerJobFromFields(f map[string]string) ControllerJob {
+	stdOut, stdErr := jobStdIO(f["StdOut"], f["StdErr"],
+		f["JobId"], f["ArrayJobId"], f["ArrayTaskId"], userName(f["UserId"]), f["JobName"])
 	return ControllerJob{
 		ID:        controllerJobID(f),
 		User:      userName(f["UserId"]),
@@ -100,6 +113,8 @@ func controllerJobFromFields(f map[string]string) ControllerJob {
 		NodeList:  f["NodeList"],
 		NCPUS:     f["NumCPUs"],
 		AllocTRES: f["TRES"],
+		StdOut:    stdOut,
+		StdErr:    stdErr,
 	}
 }
 
@@ -155,6 +170,7 @@ func HistoryJobsFor(jobs []ControllerJob, username string, cutoff time.Time) ([]
 			ID: j.ID, Name: j.Name, State: j.State, Restart: j.Restart,
 			Elapsed: j.Elapsed, ExitCode: j.ExitCode, NodeList: j.NodeList,
 			Submit: j.Submit, Start: j.Start, End: j.End,
+			StdOut: j.StdOut, StdErr: j.StdErr,
 		})
 		if n, err := strconv.Atoi(j.Restart); err == nil {
 			stats.TotalRequeues += n

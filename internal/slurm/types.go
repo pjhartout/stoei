@@ -55,6 +55,10 @@ type HistoryJob struct {
 	Submit   string
 	Start    string
 	End      string
+	// StdOut and StdErr are the journal-recorded log-file paths; "" when the
+	// scheduler reported none or the record predates path capture.
+	StdOut string
+	StdErr string
 }
 
 // HistoryStats are the aggregate requeue counters derived from journal jobs by

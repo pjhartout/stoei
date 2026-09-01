@@ -9,7 +9,7 @@ import (
 func TestCompletedJobRecordMapsTerminalJob(t *testing.T) {
 	out := "JobId=999 JobName=train JobState=COMPLETED Restarts=1 ExitCode=0:0 " +
 		"RunTime=00:10:00 SubmitTime=2024-01-15T08:00:00 StartTime=2024-01-15T08:01:00 " +
-		"EndTime=2024-01-15T08:11:00 NodeList=node01"
+		"EndTime=2024-01-15T08:11:00 NodeList=node01 StdOut=/l/train_%j.out"
 	c := NewClient(&FakeRunner{Outputs: map[string][]byte{"scontrol": []byte(out)}})
 
 	job, found, err := c.CompletedJobRecord(context.Background(), "999")
@@ -20,6 +20,9 @@ func TestCompletedJobRecordMapsTerminalJob(t *testing.T) {
 		job.Restart != "1" || job.Elapsed != "00:10:00" || job.NodeList != "node01" ||
 		job.Start != "2024-01-15T08:01:00" || job.End != "2024-01-15T08:11:00" {
 		t.Errorf("mapped record = %+v", job)
+	}
+	if job.StdOut != "/l/train_999.out" || job.StdErr != "/l/train_999.out" {
+		t.Errorf("paths = %q / %q, want expanded stdout with stderr defaulting to it", job.StdOut, job.StdErr)
 	}
 }
 

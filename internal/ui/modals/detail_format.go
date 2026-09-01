@@ -206,13 +206,36 @@ func stateStyle(state string, styles theme.Styles) lipgloss.Style {
 	return styles.StateRoleStyle(store.StateRole(state))
 }
 
-// stdoutStderrPaths extracts the stdout and stderr log paths from a job detail's
-// fields, preferring the scontrol keys (StdOut/StdErr) and falling back to the
-// sacct keys (StdOutPath/StdErrPath).
+// stdoutStderrPaths extracts the stdout and stderr log paths from a job
+// detail's scontrol-shaped fields.
 func stdoutStderrPaths(fields map[string]string) (stdout, stderr string) {
-	stdout = firstNonEmpty(fields["StdOut"], fields["StdOutPath"])
-	stderr = firstNonEmpty(fields["StdErr"], fields["StdErrPath"])
-	return stdout, stderr
+	return firstNonEmpty(fields["StdOut"]), firstNonEmpty(fields["StdErr"])
+}
+
+// JournalDetail shapes a journal history row into the scontrol-keyed field map
+// the detail modal renders, so a job the controller has aged out still shows
+// its recorded outcome — and its log paths, which outlive the controller
+// record on disk. Only fields the journal actually knows are set.
+func JournalDetail(j store.HistoryJob) store.JobDetail {
+	fields := make(map[string]string, 12)
+	set := func(key, value string) {
+		if strings.TrimSpace(value) != "" {
+			fields[key] = value
+		}
+	}
+	set("JobId", j.ID)
+	set("JobName", j.Name)
+	set("JobState", j.State)
+	set("ExitCode", j.ExitCode)
+	set("Restarts", j.Restart)
+	set("RunTime", j.Elapsed)
+	set("NodeList", j.NodeList)
+	set("SubmitTime", j.Submit)
+	set("StartTime", j.Start)
+	set("EndTime", j.End)
+	set("StdOut", j.StdOut)
+	set("StdErr", j.StdErr)
+	return store.JobDetail{Fields: fields, Source: "journal"}
 }
 
 // firstNonEmpty returns the first non-empty, non-placeholder value.

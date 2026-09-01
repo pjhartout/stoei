@@ -9,9 +9,9 @@ import (
 	"time"
 )
 
-const acctOut = "4242|alice|COMPLETED|gpu|2026-07-15T10:00:00|2026-07-15T10:05:00|2026-07-15T12:00:00|01:55:00|0:0|node01|8|cpu=8,gres/gpu=2|train\n" +
-	"4243|alice|CANCELLED by 1001|gpu|2026-07-15T10:00:00|2026-07-15T10:05:00|2026-07-15T11:00:00|00:55:00|0:0|node02|4|cpu=4|prep|sweep\n" +
-	"4244|alice|RUNNING|gpu|2026-07-16T10:00:00|2026-07-16T10:05:00|Unknown|01:00:00|0:0|node03|2|cpu=2|live\n"
+const acctOut = "4242|alice|COMPLETED|gpu|2026-07-15T10:00:00|2026-07-15T10:05:00|2026-07-15T12:00:00|01:55:00|0:0|node01|8|cpu=8,gres/gpu=2|/logs/train_%j.err|/logs/train_%j.out|train\n" +
+	"4243|alice|CANCELLED by 1001|gpu|2026-07-15T10:00:00|2026-07-15T10:05:00|2026-07-15T11:00:00|00:55:00|0:0|node02|4|cpu=4|||prep|sweep\n" +
+	"4244|alice|RUNNING|gpu|2026-07-16T10:00:00|2026-07-16T10:05:00|Unknown|01:00:00|0:0|node03|2|cpu=2|||live\n"
 
 func sacctCalls(r *FakeRunner) int {
 	n := 0
@@ -40,14 +40,25 @@ func TestParseAcctJobs(t *testing.T) {
 	if jobs[1].Name != "prep|sweep" {
 		t.Errorf("pipe-bearing job name mangled: %q", jobs[1].Name)
 	}
+	// Accounting reports paths with the sbatch patterns unexpanded; a plain
+	// job's %j is pinned by its own id.
+	if j.StdOut != "/logs/train_4242.out" || j.StdErr != "/logs/train_4242.err" {
+		t.Errorf("paths = %q / %q, want %%j expanded from the job id", j.StdOut, j.StdErr)
+	}
 	// A single-task bracket id (a task cancelled while pending) must normalize
 	// to the squeue "_N" form so the terminal record settles the journal row;
 	// a multi-task range keeps its bracket id.
 	brackets := ParseAcctJobs(
-		"5337331_[90]|alice|CANCELLED by 6427|gpu|2026-07-21T17:13:35|Unknown|2026-07-21T17:24:35|00:00:00|0:0|None assigned|1|cpu=1|chemprot\n" +
-			"5109800_[4-60%2]|alice|CANCELLED by 8255|gpu|2026-06-22T16:22:49|Unknown|2026-06-29T09:29:57|00:00:00|0:0|None assigned|1|cpu=1|binder\n")
+		"5337331_[90]|alice|CANCELLED by 6427|gpu|2026-07-21T17:13:35|Unknown|2026-07-21T17:24:35|00:00:00|0:0|None assigned|1|cpu=1||/l/c_%A_%a_%j.out|chemprot\n" +
+			"5109800_[4-60%2]|alice|CANCELLED by 8255|gpu|2026-06-22T16:22:49|Unknown|2026-06-29T09:29:57|00:00:00|0:0|None assigned|1|cpu=1|||binder\n")
 	if len(brackets) != 2 || brackets[0].ID != "5337331_90" || brackets[1].ID != "5109800_[4-60%2]" {
 		t.Errorf("bracket id normalization: %+v", brackets)
+	}
+	// An array task's %A/%a are pinned by its id, but the raw per-task job id
+	// is absent from this query, so %j must stay verbatim (a visible pattern
+	// beats a plausible wrong path); the empty stderr defaults to stdout.
+	if brackets[0].StdOut != "/l/c_5337331_90_%j.out" || brackets[0].StdErr != brackets[0].StdOut {
+		t.Errorf("array paths = %q / %q", brackets[0].StdOut, brackets[0].StdErr)
 	}
 }
 
@@ -147,8 +158,8 @@ func TestReconcileAcctPrunesStaleOwnedRows(t *testing.T) {
 		t.Fatalf("seed journal: %v", err)
 	}
 
-	arrayOut := "5320952_0|alice|COMPLETED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T17:05:41|01:17:52|0:0|node01|32|cpu=32|submit.sh\n" +
-		"5320952_1|alice|FAILED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T16:49:52|01:02:03|1:0|node02|32|cpu=32|submit.sh\n"
+	arrayOut := "5320952_0|alice|COMPLETED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T17:05:41|01:17:52|0:0|node01|32|cpu=32|||submit.sh\n" +
+		"5320952_1|alice|FAILED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T16:49:52|01:02:03|1:0|node02|32|cpu=32|||submit.sh\n"
 	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(arrayOut)}}
 	c := NewClient(r, WithUsername("alice"), WithJournal(path),
 		WithClock(func() time.Time { return time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC) }),
@@ -193,7 +204,7 @@ func TestReconcileAcctSettlesPendingCancelledTask(t *testing.T) {
 		t.Fatalf("seed journal: %v", err)
 	}
 
-	out := "5337331_[90]|alice|CANCELLED by 6427|gpu|2026-07-21T17:13:35|Unknown|2026-07-21T17:24:35|00:00:00|0:0|None assigned|1|cpu=1|chemprot\n"
+	out := "5337331_[90]|alice|CANCELLED by 6427|gpu|2026-07-21T17:13:35|Unknown|2026-07-21T17:24:35|00:00:00|0:0|None assigned|1|cpu=1|||chemprot\n"
 	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(out)}}
 	c := NewClient(r, WithUsername("alice"), WithJournal(path),
 		WithClock(func() time.Time { return time.Date(2026, 7, 22, 9, 0, 0, 0, time.UTC) }),
@@ -408,4 +419,43 @@ func TestReconcileAcctDailyRearm(t *testing.T) {
 	if c.AcctWarning() == "" {
 		t.Error("expected a warning on a new outage after recovery")
 	}
+}
+
+// TestReconcileAcctPrefersJournalPaths: the squeue journal query stores an
+// array task's paths fully expanded (it knows the raw per-task id); the sacct
+// backfill cannot expand %j there, so the journal's recorded paths must
+// survive the terminal-state merge.
+func TestReconcileAcctPrefersJournalPaths(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "jobs.jsonl")
+	seed := newJobJournal(path)
+	if err := seed.upsert([]ControllerJob{{
+		ID: "77_3", User: "alice", Name: "train", State: "RUNNING",
+		Submit: "2026-07-17T15:47:49",
+		StdOut: "/l/train_100.out", StdErr: "/l/train_100.err",
+	}}); err != nil {
+		t.Fatal(err)
+	}
+
+	out := "77_3|alice|COMPLETED|gpu|2026-07-17T15:47:49|2026-07-17T15:47:49|2026-07-17T17:05:41|01:17:52|0:0|node01|32|cpu=32|/l/train_%j.err|/l/train_%j.out|train\n"
+	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(out)}}
+	c := NewClient(r, WithUsername("alice"), WithJournal(path),
+		WithClock(func() time.Time { return time.Date(2026, 7, 18, 9, 0, 0, 0, time.UTC) }),
+	)
+	jobs, _, err := c.JobHistory(context.Background(), 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, j := range jobs {
+		if j.ID != "77_3" {
+			continue
+		}
+		if j.State != "COMPLETED" {
+			t.Errorf("state = %q, want COMPLETED from the reconcile", j.State)
+		}
+		if j.StdOut != "/l/train_100.out" || j.StdErr != "/l/train_100.err" {
+			t.Errorf("journal paths lost to the sacct merge: %q / %q", j.StdOut, j.StdErr)
+		}
+		return
+	}
+	t.Fatal("job 77_3 missing from history")
 }

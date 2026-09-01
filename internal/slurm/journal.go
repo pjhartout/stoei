@@ -60,10 +60,13 @@ const journalRetention = 90 * 24 * time.Hour
 
 // upsert merges observed jobs into the journal and rewrites it atomically. A job
 // already recorded in a terminal state keeps its final record (only LastSeen is
-// touched); any other job is inserted or updated, preserving FirstSeen; records
-// last seen beyond journalRetention are pruned. The read-merge-write cycle runs
-// under a cross-process file lock so concurrent stoei instances cannot clobber
-// each other's records.
+// touched, plus a path-only backfill: rows written before stoei captured log
+// paths gain them from the daily sacct reconcile without disturbing the final
+// state); any other job is inserted or updated, preserving FirstSeen and any
+// recorded log paths a pathless source would otherwise wipe; records last seen
+// beyond journalRetention are pruned. The read-merge-write cycle runs under a
+// cross-process file lock so concurrent stoei instances cannot clobber each
+// other's records.
 func (j *jobJournal) upsert(jobs []ControllerJob) error {
 	j.mu.Lock()
 	defer j.mu.Unlock()
@@ -80,12 +83,24 @@ func (j *jobJournal) upsert(jobs []ControllerJob) error {
 		}
 		if existing, ok := recs[job.ID]; ok && IsTerminalState(existing.State) {
 			existing.LastSeen = now
+			if existing.StdOut == "" {
+				existing.StdOut = job.StdOut
+			}
+			if existing.StdErr == "" {
+				existing.StdErr = job.StdErr
+			}
 			recs[job.ID] = existing
 			continue
 		}
 		rec := journalRecord{ControllerJob: job, FirstSeen: now, LastSeen: now}
 		if existing, ok := recs[job.ID]; ok {
 			rec.FirstSeen = existing.FirstSeen
+			if rec.StdOut == "" {
+				rec.StdOut = existing.StdOut
+			}
+			if rec.StdErr == "" {
+				rec.StdErr = existing.StdErr
+			}
 		}
 		recs[job.ID] = rec
 	}

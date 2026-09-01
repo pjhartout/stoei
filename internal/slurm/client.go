@@ -348,8 +348,9 @@ func (c *Client) CompletedJobRecord(ctx context.Context, jobID string) (HistoryJ
 	// may never observe this job again once the controller ages it out (MinJobAge),
 	// so without this the journal keeps its last RUNNING snapshot. Best-effort: a
 	// journal write must not fail the lookup.
+	cj := controllerJobFromFields(f)
 	if c.journal != nil {
-		_ = c.journal.upsert([]ControllerJob{controllerJobFromFields(f)})
+		_ = c.journal.upsert([]ControllerJob{cj})
 	}
 	return HistoryJob{
 		ID:       jobID,
@@ -362,6 +363,8 @@ func (c *Client) CompletedJobRecord(ctx context.Context, jobID string) (HistoryJ
 		Submit:   f["SubmitTime"],
 		Start:    f["StartTime"],
 		End:      f["EndTime"],
+		StdOut:   cj.StdOut,
+		StdErr:   cj.StdErr,
 	}, true, nil
 }
 

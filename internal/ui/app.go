@@ -751,9 +751,23 @@ func (a *App) openDetailForActive() tea.Cmd {
 }
 
 // openJobDetail pushes a job-detail modal for jobID at the given live state,
-// consulting the detail cache (cache hit shows instantly, state change re-fetches).
+// consulting the detail cache (cache hit shows instantly, state change
+// re-fetches) and supplying the journal record as a fallback so a job the
+// controller has aged out still shows its outcome and opens its logs.
 func (a *App) openJobDetail(jobID, state string) tea.Cmd {
-	return a.pushModal(modals.NewJobDetail(a.client, a.detailCache, a.styles, jobID, state))
+	return a.pushModal(modals.NewJobDetail(a.client, a.detailCache, a.styles, jobID, state, a.journalFallback(jobID)))
+}
+
+// journalFallback returns the journal-sourced detail for jobID, or a zero
+// JobDetail when the history holds no row for it. The linear scan is bounded
+// by the history window and runs only on modal open.
+func (a *App) journalFallback(jobID string) store.JobDetail {
+	for _, j := range a.store.HistoryJobs {
+		if j.ID == jobID {
+			return modals.JournalDetail(j)
+		}
+	}
+	return store.JobDetail{}
 }
 
 // openCancelConfirm opens a cancel-confirm modal for the selected job, refusing
