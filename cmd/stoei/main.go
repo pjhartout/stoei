@@ -86,7 +86,7 @@ func main() {
 	// builds/parses commands, the Store holds the data, and the root model renders
 	// it. Job history comes from the controller ("scontrol show jobs")
 	// accumulated into a persistent on-disk journal, reconciled against a single
-	// daily sacct query; squeue, scontrol, and the rest run live. The
+	// nightly sacct query; squeue, scontrol, and the rest run live. The
 	// alt-screen is a View
 	// field in Bubble Tea v2, so NewProgram takes just the model.
 	client := slurm.NewClient(slurm.ExecRunner{}, slurm.WithJournal(slurm.JournalPath()))

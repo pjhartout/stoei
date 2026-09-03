@@ -34,7 +34,7 @@ type journalRecord struct {
 }
 
 // jobJournal is a disk-backed record of every job stoei has observed (via the
-// per-user journal query, scontrol completion records, and the daily sacct
+// per-user journal query, scontrol completion records, and the nightly sacct
 // reconcile), keyed by job id.
 // It is the durable job history: it accumulates across runs, and a job already
 // recorded in a terminal state is never overwritten by a later (stale) record, so
@@ -61,7 +61,7 @@ const journalRetention = 90 * 24 * time.Hour
 // upsert merges observed jobs into the journal and rewrites it atomically. A job
 // already recorded in a terminal state keeps its final record (only LastSeen is
 // touched, plus a path-only backfill: rows written before stoei captured log
-// paths gain them from the daily sacct reconcile without disturbing the final
+// paths gain them from the nightly sacct reconcile without disturbing the final
 // state); any other job is inserted or updated, preserving FirstSeen and any
 // recorded log paths a pathless source would otherwise wipe; records last seen
 // beyond journalRetention are pruned. The read-merge-write cycle runs under a

@@ -2,6 +2,7 @@ package slurm
 
 import (
 	"context"
+	"hash/fnv"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -95,38 +96,80 @@ func (c *Client) queryAcctJobs(ctx context.Context) ([]ControllerJob, error) {
 	return ParseAcctJobs(string(out)), nil
 }
 
-// acctReconcileInterval is the sacct reconcile cadence: once at startup, then
-// daily, so a long-lived session self-heals completions missed during a
-// controller outage without leaning on slurmdbd.
-const acctReconcileInterval = 24 * time.Hour
+// The sacct reconcile runs once at launch (when the last success predates the
+// most recent slot) and then once a night, at a per-user minute inside this
+// local-time window. A fixed hour, or a cadence anchored to launch time, has a
+// whole cluster's stoei sessions hit slurmdbd within the same slow-tier refresh;
+// spreading users across the window keeps the nightly load flat. 01:00–05:00
+// is the quiet stretch: after the evening submit burst, before the morning one.
+const (
+	acctWindowStartHour = 1
+	acctWindowMinutes   = 4 * 60
+)
+
+// acctSlotMinuteFor returns the user's fixed minute inside the nightly window,
+// hashed from the username so every session of one user agrees on the slot
+// (they already share the stamp) while different users spread uniformly. A
+// hash beats persisted randomness: no extra state file, and no file IO when
+// AcctDue needs the slot on the UI's Update path.
+func acctSlotMinuteFor(username string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(username))
+	return int(h.Sum32() % acctWindowMinutes)
+}
+
+// nextAcctSlot returns the first nightly slot strictly after t, in t's zone:
+// today's when t is still ahead of it, otherwise tomorrow's. It goes through
+// time.Date so a month end or DST change cannot shift the slot.
+func nextAcctSlot(t time.Time, slotMinute int) time.Time {
+	y, m, d := t.Date()
+	slot := time.Date(y, m, d, acctWindowStartHour, slotMinute, 0, 0, t.Location())
+	if slot.After(t) {
+		return slot
+	}
+	return time.Date(y, m, d+1, acctWindowStartHour, slotMinute, 0, 0, t.Location())
+}
+
+// acctDue reports whether the nightly slot following the last attempt has
+// passed. A zero last (no attempt yet this session) is due at once: the launch
+// reconcile, which the stamp then suppresses when another session already ran
+// it. The night is the clock's zone; last is converted into it because a stamp
+// mtime arrives from the OS in Local regardless of the injected clock.
+func (c *Client) acctDue(last time.Time) bool {
+	if last.IsZero() {
+		return true
+	}
+	now := c.now()
+	return !now.Before(nextAcctSlot(last.In(now.Location()), c.acctSlotMinute))
+}
 
 // reconcileAcct merges sacct's terminal records into the journal, at most once
-// per acctReconcileInterval across sessions (the stamp file). sacct is
-// authoritative for jobs that finished while stoei was not watching (their
-// journal record is stuck in a live state) and for jobs stoei never observed;
-// live jobs are skipped because the squeue journal query owns them and carries
-// richer data. On failure — query or journal write — history degrades to
-// journal-only, a warning is recorded edge-triggered per session (I9), and the
-// stamp is left untouched so a fresh session during the outage still attempts
-// (and warns) once; within a session the in-memory gate retries daily.
+// per nightly slot across sessions (the stamp file). sacct is authoritative
+// for jobs that finished while stoei was not watching (their journal record is
+// stuck in a live state) and for jobs stoei never observed; live jobs are
+// skipped because the squeue journal query owns them and carries richer data.
+// On failure — query or journal write — history degrades to journal-only, a
+// warning is recorded edge-triggered per session (I9), and the stamp is left
+// untouched so a fresh session during the outage still attempts (and warns)
+// once; within a session the in-memory gate retries at the next slot.
 func (c *Client) reconcileAcct(ctx context.Context) {
 	if c.journal == nil {
 		return
 	}
 	c.mu.Lock()
-	if !c.lastAcct.IsZero() && c.now().Sub(c.lastAcct) < acctReconcileInterval {
+	if !c.acctDue(c.lastAcct) {
 		c.mu.Unlock()
 		return
 	}
 	c.lastAcct = c.now()
 	c.mu.Unlock()
 	// The stamp file's mtime records the last success by any stoei instance, so
-	// frequent restarts cost slurmdbd one query per day, not one per launch.
+	// frequent restarts cost slurmdbd one query per night, not one per launch.
 	// The check-then-touch race between concurrent instances is benign (worst
 	// case one extra query), so it is not worth a lock.
-	if fi, err := os.Stat(c.acctStampPath()); err == nil && c.now().Sub(fi.ModTime()) < acctReconcileInterval {
-		// Align the in-memory gate with the stamp so the next attempt fires when
-		// the stamp expires, not a full interval after this session noticed it.
+	if fi, err := os.Stat(c.acctStampPath()); err == nil && !c.acctDue(fi.ModTime()) {
+		// Align the in-memory gate with the stamp so the next attempt fires at
+		// the slot after the stamp, not the slot after this session noticed it.
 		c.mu.Lock()
 		c.lastAcct = fi.ModTime()
 		c.mu.Unlock()
@@ -225,7 +268,7 @@ func (c *Client) AcctDue() bool {
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.lastAcct.IsZero() || c.now().Sub(c.lastAcct) >= acctReconcileInterval
+	return c.acctDue(c.lastAcct)
 }
 
 // AcctStampPath returns the cross-session sacct reconcile stamp, kept next to
