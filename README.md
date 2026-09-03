@@ -72,7 +72,7 @@ go build -o stoei ./cmd/stoei
 stoei
 ```
 
-stoei runs the Slurm CLIs (`squeue`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. It queries `sacct`/slurmdbd at most once per day, to reconcile the job-history journal. Check the version with `stoei --version`.
+stoei runs the Slurm CLIs (`squeue`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. It queries `sacct`/slurmdbd at most once a night to reconcile the job-history journal, at a per-user minute between 01:00 and 05:00 local time so many users' sessions do not hit the accounting database together (or at the next launch, if stoei was not running then). Check the version with `stoei --version`.
 
 > [!WARNING]
 > stoei polls the Slurm controller (headnode) directly on every refresh, since

@@ -26,7 +26,7 @@ var (
 
 // Client builds Slurm commands and parses their output. It wraps a Runner (the
 // only seam to the OS). Job history comes from per-user controller snapshots
-// accumulated into a persistent journal, reconciled at most once per day
+// accumulated into a persistent journal, reconciled at most once a night
 // against sacct when available. A zero Client is not usable; construct one
 // with NewClient.
 type Client struct {
@@ -40,11 +40,14 @@ type Client struct {
 	// journal is the persistent record of observed controller jobs; nil disables
 	// it (history then reflects only the latest journal query).
 	journal *jobJournal
+	// acctSlotMinute is this user's minute inside the nightly sacct reconcile
+	// window, derived from the username by NewClient.
+	acctSlotMinute int
 
 	mu        sync.Mutex
 	lastFetch time.Time // last journal query time, for the throttle
 	// lastAcct is the last sacct reconcile attempt (success or not), for the
-	// daily cadence. acctFailing suppresses repeat warnings during an ongoing
+	// nightly cadence. acctFailing suppresses repeat warnings during an ongoing
 	// sacct outage (I9); acctWarning holds a pending warning until AcctWarning
 	// collects it.
 	lastAcct    time.Time
@@ -91,6 +94,11 @@ func NewClient(r Runner, opts ...Option) *Client {
 			c.username = u.Username
 		}
 	}
+	c.acctSlotMinute = acctSlotMinuteFor(c.username)
+	// Load the clock's zone now: AcctDue computes the nightly slot on the UI's
+	// Update path, and Go initializes time.Local lazily from /etc/localtime on
+	// the first calendar lookup, which must not happen there.
+	_, _ = c.now().Zone()
 	return c
 }
 
@@ -200,7 +208,7 @@ func (c *Client) AllUsersJobs(ctx context.Context) ([]AllUsersJob, error) {
 // JobHistory returns the current user's job history and requeue statistics from
 // the journal, windowed to the last days days: a job whose most recent
 // parseable timestamp is older is excluded. days <= 0 disables the window. It
-// additionally reconciles the journal against sacct at most once per day
+// additionally reconciles the journal against sacct at most once a night
 // (best-effort — see reconcileAcct).
 func (c *Client) JobHistory(ctx context.Context, days int) ([]HistoryJob, HistoryStats, error) {
 	if err := validateUsername(c.username); err != nil {

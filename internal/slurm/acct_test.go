@@ -64,7 +64,7 @@ func TestParseAcctJobs(t *testing.T) {
 
 // TestReconcileAcct is the reconcile happy path: sacct's terminal records land
 // in history, its live record is left to squeue, and the accounting database is
-// queried exactly once across history fetches inside the daily interval.
+// queried exactly once across history fetches before the next nightly slot.
 func TestReconcileAcct(t *testing.T) {
 	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(acctOut)}}
 	c := NewClient(r, WithUsername("alice"),
@@ -249,8 +249,53 @@ func TestReconcileAcctEmptyDumpKeepsLiveRows(t *testing.T) {
 	t.Error("live row pruned on an empty sacct dump")
 }
 
-// TestAcctDue covers the UI progress gate: due before the first attempt of the
-// interval, not after (success or failure), and never without a journal.
+// TestAcctSlotMinuteFor pins the load-spreading contract: a user's slot is
+// stable across sessions (they share one stamp), always inside the window,
+// and different users do not all land on the same minute.
+func TestAcctSlotMinuteFor(t *testing.T) {
+	users := []string{"alice", "bob", "carol", "dave", "erin", "frank", "grace", "heidi"}
+	distinct := map[int]bool{}
+	for _, u := range users {
+		m := acctSlotMinuteFor(u)
+		if m != acctSlotMinuteFor(u) {
+			t.Errorf("%s: slot minute must be deterministic", u)
+		}
+		if m < 0 || m >= acctWindowMinutes {
+			t.Errorf("%s: slot minute %d outside [0, %d)", u, m, acctWindowMinutes)
+		}
+		distinct[m] = true
+	}
+	if len(distinct) < 2 {
+		t.Errorf("all %d users share one slot minute; the load is not spread", len(users))
+	}
+}
+
+// TestNextAcctSlot covers the slot arithmetic: the same night when the slot is
+// still ahead, the next night once it has passed (inclusive: a reconcile at the
+// slot must not re-arm for the same night), and a month end rolls over.
+func TestNextAcctSlot(t *testing.T) {
+	const minute = 97 // 02:37
+	cases := []struct {
+		name  string
+		after time.Time
+		want  time.Time
+	}{
+		{"daytime attempt", time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC), time.Date(2026, 7, 18, 2, 37, 0, 0, time.UTC)},
+		{"just after midnight", time.Date(2026, 7, 18, 0, 30, 0, 0, time.UTC), time.Date(2026, 7, 18, 2, 37, 0, 0, time.UTC)},
+		{"one second before", time.Date(2026, 7, 18, 2, 36, 59, 0, time.UTC), time.Date(2026, 7, 18, 2, 37, 0, 0, time.UTC)},
+		{"exactly at the slot", time.Date(2026, 7, 18, 2, 37, 0, 0, time.UTC), time.Date(2026, 7, 19, 2, 37, 0, 0, time.UTC)},
+		{"month end", time.Date(2026, 7, 31, 3, 0, 0, 0, time.UTC), time.Date(2026, 8, 1, 2, 37, 0, 0, time.UTC)},
+	}
+	for _, c := range cases {
+		if got := nextAcctSlot(c.after, minute); !got.Equal(c.want) {
+			t.Errorf("%s: nextAcctSlot(%v) = %v, want %v", c.name, c.after, got, c.want)
+		}
+	}
+}
+
+// TestAcctDue covers the UI progress gate: due before the first attempt, not
+// after, re-armed by the nightly slot (never before the window opens, always
+// once it has closed), and never without a journal.
 func TestAcctDue(t *testing.T) {
 	cur := time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC)
 	r := &FakeRunner{Outputs: map[string][]byte{"sacct": []byte(acctOut)}}
@@ -267,9 +312,13 @@ func TestAcctDue(t *testing.T) {
 	if c.AcctDue() {
 		t.Error("AcctDue must be false after an attempt")
 	}
-	cur = cur.Add(25 * time.Hour)
+	cur = time.Date(2026, 7, 18, 0, 59, 0, 0, time.UTC)
+	if c.AcctDue() {
+		t.Error("AcctDue must stay false before the nightly window opens")
+	}
+	cur = time.Date(2026, 7, 18, 5, 0, 0, 0, time.UTC)
 	if !c.AcctDue() {
-		t.Error("AcctDue must re-arm after the interval")
+		t.Error("AcctDue must re-arm once the nightly window has closed")
 	}
 	if NewClient(r).AcctDue() {
 		t.Error("AcctDue must be false without a journal")
@@ -278,7 +327,7 @@ func TestAcctDue(t *testing.T) {
 
 // TestReconcileAcctFailure is the failover: history still works from the
 // journal, the warning is delivered exactly once, sacct is not retried before
-// the daily interval elapses, and no stamp is written — so a fresh session
+// the next nightly slot, and no stamp is written — so a fresh session
 // during the outage attempts (and warns) again.
 func TestReconcileAcctFailure(t *testing.T) {
 	dir := t.TempDir()
@@ -339,8 +388,9 @@ func TestReconcileAcctUpsertFailure(t *testing.T) {
 }
 
 // TestReconcileAcctCrossSession is the restart case: the stamp file next to the
-// journal makes a fresh client (a new stoei launch) skip sacct inside the daily
-// interval and query again as soon as the stamp — not the skip — is a day old.
+// journal makes a fresh client (a new stoei launch) skip sacct until the next
+// nightly slot, and query again once that slot has passed — even though the
+// stamp is then less than a day old.
 func TestReconcileAcctCrossSession(t *testing.T) {
 	dir := t.TempDir()
 	cur := time.Date(2026, 7, 17, 9, 0, 0, 0, time.UTC)
@@ -362,22 +412,27 @@ func TestReconcileAcctCrossSession(t *testing.T) {
 	if got := sacctCalls(r1); got != 1 {
 		t.Fatalf("first session: got %d sacct calls, want 1", got)
 	}
-	cur = cur.Add(23 * time.Hour)
-	r2, c2 := newSession() // relaunch within the interval: stamp suppresses sacct
+	cur = time.Date(2026, 7, 17, 23, 0, 0, 0, time.UTC)
+	r2, c2 := newSession() // relaunch the same evening: stamp suppresses sacct
 	fetch(c2)
 	if got := sacctCalls(r2); got != 0 {
-		t.Errorf("relaunch within interval: got %d sacct calls, want 0", got)
+		t.Errorf("relaunch before the slot: got %d sacct calls, want 0", got)
 	}
-	// The next query must fire when the STAMP is a day old (1h from now), not a
-	// full day after the skip — the up-to-48h drift bug.
-	cur = cur.Add(2 * time.Hour)
+	cur = time.Date(2026, 7, 18, 0, 59, 0, 0, time.UTC)
+	fetch(c2)
+	if got := sacctCalls(r2); got != 0 {
+		t.Errorf("before the window opens: got %d sacct calls, want 0", got)
+	}
+	// The window has closed, so the slot has passed whatever minute alice drew;
+	// the stamp is only 20h old, which the old fixed 24h cadence would skip.
+	cur = time.Date(2026, 7, 18, 5, 0, 0, 0, time.UTC)
 	fetch(c2)
 	if got := sacctCalls(r2); got != 1 {
-		t.Errorf("after stamp expiry: got %d sacct calls, want 1", got)
+		t.Errorf("after the slot: got %d sacct calls, want 1", got)
 	}
 }
 
-// TestReconcileAcctDailyRearm drives the clock across the daily interval: the
+// TestReconcileAcctDailyRearm drives the clock across nightly slots: the
 // query re-runs, an ongoing outage stays silent (I9), and a recovery re-arms
 // the warning for the next outage.
 func TestReconcileAcctDailyRearm(t *testing.T) {
