@@ -20,32 +20,36 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 
 ## Installation
 
-stoei is a single static binary with no runtime dependencies.
+stoei is a single static binary with no runtime dependencies. Install it on a
+login node: that is where the Slurm CLIs it drives (`squeue`, `scontrol`, …)
+work. Pick one of the methods below, then check with `stoei --version`.
 
 ### Prebuilt binary (recommended)
 
-Download the archive for your platform from the [latest release](https://github.com/pjhartout/stoei/releases/latest), extract it, and put `stoei` on your `PATH`:
+Releases ship for Linux and macOS (amd64, arm64) as `.tar.gz` and for Windows as
+`.zip`, with a `checksums.txt`. Login nodes rarely allow `sudo`, so this installs
+into `~/.local/bin`:
 
 ```bash
-# Linux x86_64 example — adjust the URL for your OS/arch
-curl -L https://github.com/pjhartout/stoei/releases/latest/download/stoei_<version>_linux_amd64.tar.gz | tar xz
-sudo install stoei /usr/local/bin/
+version=$(curl -fsSL https://api.github.com/repos/pjhartout/stoei/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
+os=$(uname -s | tr '[:upper:]' '[:lower:]')                 # linux or darwin
+arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')  # amd64 or arm64
+archive="stoei_${version}_${os}_${arch}.tar.gz"
+
+curl -fsSLO "https://github.com/pjhartout/stoei/releases/download/v${version}/${archive}"
+curl -fsSL "https://github.com/pjhartout/stoei/releases/download/v${version}/checksums.txt" | grep "${archive}" | sha256sum -c -
+mkdir -p ~/.local/bin && tar -xzf "${archive}" -C ~/.local/bin stoei && rm "${archive}"
 ```
 
-Binaries are published for Linux, macOS, and Windows (amd64 and arm64).
+On macOS use `shasum -a 256 -c -` in place of `sha256sum -c -`. If `stoei` is not
+found afterwards, `~/.local/bin` is not on your `PATH`; add
+`export PATH="$HOME/.local/bin:$PATH"` to your shell rc and open a new shell.
+For a system-wide install, extract into `/usr/local/bin` instead
+(`sudo tar -xzf "${archive}" -C /usr/local/bin stoei`).
 
-### Updating
-
-A stoei installed from a release updates itself:
-
-```bash
-stoei update
-```
-
-It downloads the latest release for your platform, verifies the checksum, and
-atomically replaces the binary in place. The TUI also checks for a newer
-release once a day (silently, cached) and shows a hint in the status bar when
-one exists. Dev builds (`stoei --version` reporting `dev`) never phone home.
+You can also download the archive by hand from the
+[latest release](https://github.com/pjhartout/stoei/releases/latest) and copy
+the `stoei` binary anywhere on your `PATH`.
 
 ### go install
 
@@ -55,15 +59,39 @@ With a Go 1.25+ toolchain:
 go install github.com/pjhartout/stoei/cmd/stoei@latest
 ```
 
-This installs `stoei` into `$(go env GOPATH)/bin`.
+This installs `stoei` into `$(go env GOPATH)/bin` (usually `~/go/bin`); make sure
+that directory is on your `PATH`.
 
 ### From source
 
 ```bash
 git clone https://github.com/pjhartout/stoei.git
 cd stoei
-go build -o stoei ./cmd/stoei
-./stoei
+go build -o ~/.local/bin/stoei ./cmd/stoei
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for a live-reloading dev build.
+
+### Updating
+
+```bash
+stoei update
+```
+
+It downloads the latest release for your platform, verifies the checksum, and
+atomically replaces the running binary in place (so it needs write access to
+wherever `stoei` lives). This also turns a `go install` or source build (which
+reports `dev` from `stoei --version`) into the latest release. The TUI checks
+for a newer release once a day (silently, cached) and shows a hint in the
+status bar when one exists; `dev` builds skip that check and never phone home.
+
+### Uninstalling
+
+Delete the binary plus stoei's config, job journal, and update cache:
+
+```bash
+rm -f ~/.local/bin/stoei
+rm -rf "${XDG_CONFIG_HOME:-$HOME/.config}/stoei" "${XDG_DATA_HOME:-$HOME/.local/share}/stoei" "${XDG_CACHE_HOME:-$HOME/.cache}/stoei"
 ```
 
 ## Usage
