@@ -1,0 +1,27 @@
+Configuration data as of 2026-09-04T18:44:23
+AccountingStorageBackupHost = (null)
+AccountingStorageEnforce = associations,limits,qos
+AccountingStorageHost   = slurmdb
+AccountingStorageType   = accounting_storage/slurmdbd
+ClusterName             = hpcl8
+DefMemPerNode           = UNLIMITED
+MaxJobCount             = 500000
+PriorityParameters      = (null)
+PrioritySiteFactorParameters = (null)
+PrioritySiteFactorPlugin = (null)
+PriorityDecayHalfLife   = 14-00:00:00
+PriorityCalcPeriod      = 00:05:00
+PriorityFavorSmall      = no
+PriorityFlags           = CALCULATE_RUNNING
+PriorityMaxAge          = 7-00:00:00
+PriorityType            = priority/multifactor
+PriorityUsageResetPeriod = NONE
+PriorityWeightAge       = 1000
+PriorityWeightAssoc     = 0
+PriorityWeightFairShare = 10000000
+PriorityWeightJobSize   = 1000
+PriorityWeightPartition = 100
+PriorityWeightQOS       = 0
+PriorityWeightTRES      = (null)
+SchedulerType           = sched/backfill
+SLURM_VERSION           = 25.11.7

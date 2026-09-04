@@ -126,7 +126,7 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `Esc` | Close / clear the filter |
 | `o` | Cycle sort order |
 | `r` / `p` | Users tab: Running / Pending pane |
-| `m` / `u` / `a` / `j` | Priority tab: My / All Users / Accounts / Jobs pane |
+| `m` / `u` / `a` / `j` | Priority tab: My / Active Users / Accounts / Jobs pane |
 | `r` | Refresh now (on the Users tab, `r` switches pane instead) |
 | `L` | Cluster load (scrollable popup) |
 | `s` | Settings |
@@ -134,6 +134,34 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `q` | Quit |
 
 Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refresh interval, history window, keybindings) and can be edited in-app via `s`.
+
+### Reading the Priority tab
+
+Why is my job waiting, and when will that change? The **My Priority** pane
+(`4`, then `m`) answers that from `sshare`, `sprio`, and the cluster's priority
+settings:
+
+- **Fair-share factor** is the number Slurm actually ranks you on, with your
+  rank among the users who used the cluster recently ("147 of 171 active users").
+- **Usage vs share** is recent usage divided by your configured share: `1×`
+  means you used exactly your share, `12.5×` means twelve times it, which is why
+  the factor is low. Usage decays with the cluster's half-life, so the pane
+  estimates how long an idle account needs to get back to `1×`.
+- **How priority is computed here** lists the factor weights the cluster
+  configured and what share of your jobs' priority each factor contributes. On
+  most clusters fair-share dominates and age or job size barely matter.
+- **Your Pending Jobs** is read per partition, because that is how Slurm
+  schedules: each partition is filled from its own queue and the partition
+  factor differs between them, so only jobs in the same partition compete. For
+  every partition you are queued in it shows where your best job sits and how
+  many jobs are ahead of it, then each job's queue position and the weighted
+  breakdown of its priority.
+
+**Active Users** ranks everyone with recent usage (idle users are hidden, since
+the scheduler parks them all at the top with the same factor); **Accounts**
+ranks accounts best-served first; **Jobs** lists every pending job grouped by
+partition in queue order (with the cluster-wide rank as a secondary column).
+`Enter` on a user or account opens the same summary for them.
 
 ## Requirements
 

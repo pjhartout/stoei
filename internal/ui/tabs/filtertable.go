@@ -43,7 +43,10 @@ type filterTable struct {
 
 	// rows is the current plain (undecorated) row set, kept so a re-theme or
 	// re-sort can rebuild the display rows without the owner re-supplying them.
-	rows [][]string
+	// visible is the filtered, sorted subset currently in the table, in display
+	// order, so a caller can move the cursor by row content.
+	rows    [][]string
+	visible [][]string
 
 	width  int
 	height int
@@ -162,6 +165,7 @@ func (ft *filterTable) rebuild() {
 		}
 	}
 	sorted := ft.sortState.sortRows(filtered)
+	ft.visible = sorted
 
 	fitTableColumns(&ft.table, sortedColumns(ft.columns, ft.sortState), sorted, ft.minWidth)
 	ft.syncWidth()
@@ -199,6 +203,25 @@ func (ft *filterTable) SelectedCell(col int) string {
 		return ""
 	}
 	return strings.TrimSpace(row[col])
+}
+
+// SelectRow moves the cursor to the first visible row satisfying match and
+// reports whether one was found. The Priority tab uses it to land on the current
+// user's row when the ranking first arrives. The move goes through the table's
+// own MoveDown/MoveUp because SetCursor re-renders the row window without
+// scrolling the viewport, which would leave a far-away row selected but hidden.
+func (ft *filterTable) SelectRow(match func(row []string) bool) bool {
+	for i, row := range ft.visible {
+		if match(row) {
+			if delta := i - ft.table.Cursor(); delta > 0 {
+				ft.table.MoveDown(delta)
+			} else if delta < 0 {
+				ft.table.MoveUp(-delta)
+			}
+			return true
+		}
+	}
+	return false
 }
 
 // Update handles table-local input: "/" opens the filter, "o" cycles the sort,

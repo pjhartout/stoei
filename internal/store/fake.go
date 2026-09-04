@@ -18,6 +18,7 @@ type FakeClient struct {
 	NodesData           []slurm.Node
 	FairShareData       []slurm.FairShareEntry
 	PendingPriorityData []slurm.PriorityEntry
+	PriorityConfigData  slurm.PriorityConfig
 	JobDetailData       slurm.JobDetail
 	NodeDetailData      slurm.JobDetail
 	JobUsageData        slurm.JobUsage
@@ -32,6 +33,7 @@ type FakeClient struct {
 	ClusterNodesErr    error
 	FairShareErr       error
 	PendingPriorityErr error
+	PriorityConfigErr  error
 	JobDetailErr       error
 	NodeDetailErr      error
 	JobUsageErr        error
@@ -112,6 +114,11 @@ func (f *FakeClient) FairShare(_ context.Context) ([]slurm.FairShareEntry, error
 // PendingPriority implements SlurmClient.
 func (f *FakeClient) PendingPriority(_ context.Context) ([]slurm.PriorityEntry, error) {
 	return f.PendingPriorityData, f.PendingPriorityErr
+}
+
+// PriorityConfig implements SlurmClient.
+func (f *FakeClient) PriorityConfig(_ context.Context) (slurm.PriorityConfig, error) {
+	return f.PriorityConfigData, f.PriorityConfigErr
 }
 
 // JobDetail implements SlurmClient.

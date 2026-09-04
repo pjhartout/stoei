@@ -38,6 +38,9 @@ type SlurmClient interface {
 	FairShare(ctx context.Context) ([]slurm.FairShareEntry, error)
 	// PendingPriority returns the priority breakdown for all pending jobs.
 	PendingPriority(ctx context.Context) ([]slurm.PriorityEntry, error)
+	// PriorityConfig returns the controller's job-priority plugin, weights, and
+	// time constants.
+	PriorityConfig(ctx context.Context) (slurm.PriorityConfig, error)
 	// JobDetail returns the parsed Key=Value detail for a single job.
 	JobDetail(ctx context.Context, jobID string) (slurm.JobDetail, error)
 	// NodeDetail returns the parsed Key=Value detail for a single node.

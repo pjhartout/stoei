@@ -253,17 +253,23 @@ func (c *Client) FairShare(ctx context.Context) ([]FairShareEntry, error) {
 }
 
 // PendingPriority returns the priority breakdown for all pending jobs via
-// "sprio" with the custom format
-// "%.15i|%.15u|%.15a|%.10Y|%.10A|%.10F|%.10J|%.10P|%.10Q".
+// "sprio" in PriorityFormat.
 func (c *Client) PendingPriority(ctx context.Context) ([]PriorityEntry, error) {
-	out, err := c.runner.Run(ctx, "sprio",
-		"-o", "%.15i|%.15u|%.15a|%.10Y|%.10A|%.10F|%.10J|%.10P|%.10Q",
-		"--noheader",
-	)
+	out, err := c.runner.Run(ctx, "sprio", "-o", PriorityFormat, "--noheader")
 	if err != nil {
 		return nil, err
 	}
 	return ParsePriority(string(out)), nil
+}
+
+// PriorityConfig returns the controller's job-priority settings via "scontrol
+// show config".
+func (c *Client) PriorityConfig(ctx context.Context) (PriorityConfig, error) {
+	out, err := c.runner.Run(ctx, "scontrol", "show", "config")
+	if err != nil {
+		return PriorityConfig{}, err
+	}
+	return ParsePriorityConfig(string(out)), nil
 }
 
 // JobDetail returns the parsed Key=Value detail for a single job via "scontrol

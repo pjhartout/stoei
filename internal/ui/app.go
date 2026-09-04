@@ -345,13 +345,14 @@ func (a *App) dispatchHistoryIfIdle() tea.Cmd {
 // Users tab, so a consumer is reachable from any tab. Fair-share and
 // pending-priority are shown only on the Priority tab and the user/account detail
 // modals (reachable from the Priority and Users tabs), so they are polled only
-// while one of those tabs is active. The job-history base (completed jobs) feeds
-// only the Jobs tab, so it is reconciled while that tab is visible — this is the
-// steady-state path that promotes a finished job to its terminal state when the
-// single-shot completion overlay missed it (e.g. the squeue-vs-scontrol COMPLETING
-// race). Each fetch is guarded by its section's StateLoading flag, so a slow tick
-// and a tab-switch fetch never stack a duplicate, and generation tags drop any
-// superseded result.
+// while one of those tabs is active; the priority configuration they are read
+// against is static, so it is fetched once and only retried after a failure.
+// The job-history base (completed jobs) feeds only the Jobs tab, so it is
+// reconciled while that tab is visible — this is the steady-state path that
+// promotes a finished job to its terminal state when the single-shot completion
+// overlay missed it (e.g. the squeue-vs-scontrol COMPLETING race). Each fetch is
+// guarded by its section's StateLoading flag, so a slow tick and a tab-switch
+// fetch never stack a duplicate, and generation tags drop any superseded result.
 func (a *App) dispatchHeavyVisible() tea.Cmd {
 	cmds := []tea.Cmd{
 		a.dispatchSection(store.SectionNodes),
@@ -362,6 +363,9 @@ func (a *App) dispatchHeavyVisible() tea.Cmd {
 	}
 	if a.tabNeedsPriorityData(a.active) {
 		cmds = append(cmds, a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio))
+		if a.store.State(store.SectionPriorityConfig) != store.StateLoaded {
+			cmds = append(cmds, a.dispatchSection(store.SectionPriorityConfig))
+		}
 	}
 	return tea.Batch(cmds...)
 }
@@ -391,6 +395,8 @@ func (a *App) dispatchSection(section store.Section) tea.Cmd {
 		return fetchFairShare(a.client, gen)
 	case store.SectionPendingPrio:
 		return fetchPendingPrio(a.client, gen)
+	case store.SectionPriorityConfig:
+		return fetchPriorityConfig(a.client, gen)
 	default:
 		return nil
 	}
@@ -554,6 +560,13 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case pendingPrioMsg:
 		a.store.SetPendingPrio(msg.entries, msg.gen, msg.err)
 		a.observeGen(store.SectionPendingPrio, msg.gen, msg.err)
+		a.priority.Refresh()
+		a.frame.invalidate()
+		return a, nil, true
+
+	case priorityConfigMsg:
+		a.store.SetPriorityConfig(msg.cfg, msg.gen, msg.err)
+		a.observeGen(store.SectionPriorityConfig, msg.gen, msg.err)
 		a.priority.Refresh()
 		a.frame.invalidate()
 		return a, nil, true

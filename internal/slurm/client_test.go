@@ -168,8 +168,25 @@ func TestClientPendingPriorityCommand(t *testing.T) {
 		t.Errorf("got %d entries, want 7", len(entries))
 	}
 	call := lastCall(r)
-	if !argsContain(call, "%.15i|%.15u|%.15a|%.10Y|%.10A|%.10F|%.10J|%.10P|%.10Q") {
+	if !argsContain(call, PriorityFormat) || !argsContain(call, "--noheader") {
 		t.Errorf("sprio format mismatch: %v", call.Args)
+	}
+}
+
+func TestClientPriorityConfigCommand(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_config.txt")}}
+	c := NewClient(r, WithUsername("alice"))
+
+	cfg, err := c.PriorityConfig(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Weights.FairShare != 10000000 {
+		t.Errorf("FairShare weight = %d, want 10000000", cfg.Weights.FairShare)
+	}
+	call := lastCall(r)
+	if call.Name != "scontrol" || !argsContain(call, "show") || !argsContain(call, "config") {
+		t.Errorf("config command mismatch: %v %v", call.Name, call.Args)
 	}
 }
 

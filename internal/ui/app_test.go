@@ -159,8 +159,8 @@ func TestSlowTickReArmsOwnTierExactlyOnce(t *testing.T) {
 
 // TestDispatchHeavyVisibleByTab pins the visibility predicate: nodes and all-users
 // are always polled (they feed the sidebar / 'L' modal / banners), while
-// fair-share and pending-priority are polled only while the Priority or Users tab
-// is active.
+// fair-share, pending-priority, and the priority config are polled only while
+// the Priority or Users tab is active.
 func TestDispatchHeavyVisibleByTab(t *testing.T) {
 	cases := []struct {
 		name   string
@@ -170,32 +170,61 @@ func TestDispatchHeavyVisibleByTab(t *testing.T) {
 		{"jobs", tabJobs, map[string]bool{"nodes": true, "allusers": true}},
 		{"nodes", tabNodes, map[string]bool{"nodes": true, "allusers": true}},
 		{"logs", tabLogs, map[string]bool{"nodes": true, "allusers": true}},
-		{"priority", tabPriority, map[string]bool{"nodes": true, "allusers": true, "fairshare": true, "pendingprio": true}},
-		{"users", tabUsers, map[string]bool{"nodes": true, "allusers": true, "fairshare": true, "pendingprio": true}},
+		{"priority", tabPriority, map[string]bool{"nodes": true, "allusers": true, "fairshare": true, "pendingprio": true, "prioconfig": true}},
+		{"users", tabUsers, map[string]bool{"nodes": true, "allusers": true, "fairshare": true, "pendingprio": true, "prioconfig": true}},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			a := newTestApp(t, &store.FakeClient{})
 			a.active = tc.active
-			got := map[string]bool{}
-			for _, msg := range drainCmd(a.dispatchHeavyVisible()) {
-				switch msg.(type) {
-				case nodesMsg:
-					got["nodes"] = true
-				case allUsersJobsMsg:
-					got["allusers"] = true
-				case fairShareMsg:
-					got["fairshare"] = true
-				case pendingPrioMsg:
-					got["pendingprio"] = true
-				}
-			}
-			for _, s := range []string{"nodes", "allusers", "fairshare", "pendingprio"} {
+			got := dispatchedSections(a.dispatchHeavyVisible())
+			for _, s := range []string{"nodes", "allusers", "fairshare", "pendingprio", "prioconfig"} {
 				if got[s] != tc.want[s] {
 					t.Errorf("section %q dispatched=%v, want=%v", s, got[s], tc.want[s])
 				}
 			}
 		})
+	}
+}
+
+// dispatchedSections runs a dispatch Cmd and reports which heavy sections it
+// fetched, keyed by short name.
+func dispatchedSections(cmd tea.Cmd) map[string]bool {
+	got := map[string]bool{}
+	for _, msg := range drainCmd(cmd) {
+		switch msg.(type) {
+		case nodesMsg:
+			got["nodes"] = true
+		case allUsersJobsMsg:
+			got["allusers"] = true
+		case fairShareMsg:
+			got["fairshare"] = true
+		case pendingPrioMsg:
+			got["pendingprio"] = true
+		case priorityConfigMsg:
+			got["prioconfig"] = true
+		}
+	}
+	return got
+}
+
+// TestPriorityConfigFetchedOnceUntilFailure asserts the static priority config is
+// not re-polled on every slow tick: once loaded it is never dispatched again,
+// while a failed fetch is retried on the next dispatch.
+func TestPriorityConfigFetchedOnceUntilFailure(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{})
+	a.active = tabPriority
+
+	gen := a.store.NextGen(store.SectionPriorityConfig)
+	a.store.SetPriorityConfig(store.PriorityConfig{Type: "priority/multifactor"}, gen, nil)
+	if dispatchedSections(a.dispatchHeavyVisible())["prioconfig"] {
+		t.Error("loaded priority config was re-dispatched")
+	}
+
+	gen = a.store.NextGen(store.SectionPriorityConfig)
+	a.store.SetPriorityConfig(store.PriorityConfig{}, gen, errors.New("scontrol: boom"))
+	if !dispatchedSections(a.dispatchHeavyVisible())["prioconfig"] {
+		t.Error("failed priority config was not retried")
 	}
 }
 

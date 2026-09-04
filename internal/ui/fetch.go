@@ -119,6 +119,13 @@ type pendingPrioMsg struct {
 	err     error
 }
 
+// priorityConfigMsg carries a priority-config fetch result.
+type priorityConfigMsg struct {
+	gen uint64
+	cfg store.PriorityConfig
+	err error
+}
+
 // runFetch executes fn under a fresh timeout context and recovers from any panic,
 // converting it into an error so a fetch Cmd never crashes the program (I8). All
 // Slurm IO happens here, inside the Cmd closure goroutine (I1).
@@ -231,5 +238,14 @@ func fetchPendingPrio(client store.SlurmClient, gen uint64) tea.Cmd {
 	return func() tea.Msg {
 		entries, err := runFetch(client.PendingPriority)
 		return pendingPrioMsg{gen: gen, entries: entries, err: err}
+	}
+}
+
+// fetchPriorityConfig returns a Cmd that loads the cluster's priority
+// configuration as a priorityConfigMsg.
+func fetchPriorityConfig(client store.SlurmClient, gen uint64) tea.Cmd {
+	return func() tea.Msg {
+		cfg, err := runFetch(client.PriorityConfig)
+		return priorityConfigMsg{gen: gen, cfg: cfg, err: err}
 	}
 }

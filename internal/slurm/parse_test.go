@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"testing"
+	"time"
 )
 
 // readFixture reads a golden fixture from testdata, failing the test on error.
@@ -287,16 +288,74 @@ func TestParsePriority(t *testing.T) {
 	if len(entries) != 7 {
 		t.Fatalf("got %d entries, want 7", len(entries))
 	}
-	// Sorted by numeric Priority descending: first is the 1500 entry.
-	if entries[0].Priority != "1500" || entries[0].JobID != "47441" {
-		t.Errorf("entry[0] = %+v, want highest priority first", entries[0])
+	// Sorted by Priority descending: first is the 1500 entry, with the name
+	// columns (account, partition, QOS) landing in the right fields.
+	e := entries[0]
+	if e.Priority != 1500 || e.JobID != "47441" || e.Account != "physics" || e.Partition != "gpu" || e.QOS != "normal" {
+		t.Errorf("entry[0] = %+v, want highest priority first with real names", e)
 	}
-	prev := priorityValue(entries[0].Priority)
-	for _, e := range entries[1:] {
-		v := priorityValue(e.Priority)
-		if v > prev {
-			t.Errorf("priority not descending: %v after %v", v, prev)
+	want := PriorityFactors{Age: 100, FairShare: 800, JobSize: 200, Partition: 300, QOS: 100}
+	if e.Factors != want {
+		t.Errorf("entry[0].Factors = %+v, want %+v", e.Factors, want)
+	}
+	for i := 1; i < len(entries); i++ {
+		if entries[i].Priority > entries[i-1].Priority {
+			t.Errorf("priority not descending: %d after %d", entries[i].Priority, entries[i-1].Priority)
 		}
-		prev = v
+	}
+}
+
+// TestParsePriorityFactorEdgeCases covers the shapes sprio prints that a naive
+// integer parse would drop: a weighted TRES list, a negative nice, and a float.
+func TestParsePriorityFactorEdgeCases(t *testing.T) {
+	raw := "1|u|acct|gpu|normal|1000|10|500|5|100|0|cpu=120.40,gres/gpu=45.60|0|0|-200\n" +
+		"2|u|acct|gpu|normal|abc|||||||||\n" +
+		"short|row\n"
+	entries := ParsePriority(raw)
+	if len(entries) != 2 {
+		t.Fatalf("got %d entries, want 2 (short row skipped)", len(entries))
+	}
+	if got := entries[0].Factors; got.TRES != 166 || got.Nice != -200 {
+		t.Errorf("factors = %+v, want TRES 166 and Nice -200", got)
+	}
+	if entries[1].Priority != 0 || entries[1].Factors != (PriorityFactors{}) {
+		t.Errorf("blank factors = %+v, want zeros", entries[1])
+	}
+}
+
+func TestPriorityFactorsContributions(t *testing.T) {
+	f := PriorityFactors{Age: 1, FairShare: 658033, JobSize: 5, Partition: 100, Nice: -300}
+	got := f.Contributions()
+	want := []PriorityFactor{{"FairShare", 658033}, {"Nice", -300}, {"Partition", 100}, {"JobSize", 5}, {"Age", 1}}
+	if len(got) != len(want) {
+		t.Fatalf("contributions = %v, want %v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("contribution[%d] = %v, want %v", i, got[i], want[i])
+		}
+	}
+	if (PriorityFactors{}).Contributions() != nil {
+		t.Error("all-zero factors must yield nil")
+	}
+}
+
+func TestParsePriorityConfig(t *testing.T) {
+	cfg := ParsePriorityConfig(readFixture(t, "scontrol_config.txt"))
+	if !cfg.Multifactor() {
+		t.Errorf("Type = %q, want multifactor", cfg.Type)
+	}
+	want := PriorityWeights{Age: 1000, FairShare: 10000000, JobSize: 1000, Partition: 100}
+	if cfg.Weights != want {
+		t.Errorf("Weights = %+v, want %+v ((null) TRES must read as empty)", cfg.Weights, want)
+	}
+	if cfg.MaxAge != 7*24*time.Hour || cfg.DecayHalfLife != 14*24*time.Hour {
+		t.Errorf("MaxAge/DecayHalfLife = %v/%v, want 7d/14d", cfg.MaxAge, cfg.DecayHalfLife)
+	}
+	if cfg.FavorSmall {
+		t.Error("FavorSmall = true, want false")
+	}
+	if got := ParsePriorityConfig("PriorityType = priority/basic\n"); got.Multifactor() || got.Weights != (PriorityWeights{}) {
+		t.Errorf("basic config = %+v, want non-multifactor with zero weights", got)
 	}
 }

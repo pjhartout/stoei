@@ -144,6 +144,30 @@ func TestSetLoadingStaleIgnored(t *testing.T) {
 	}
 }
 
+// TestSettledTracksFirstCompletion asserts Settled flips only when a fetch
+// completes — success or failure — and stays set through later refreshes, so a
+// view waiting on several sections is not thrown back to a spinner by a refresh.
+func TestSettledTracksFirstCompletion(t *testing.T) {
+	s := New()
+	if s.Settled(SectionPriorityConfig) {
+		t.Fatal("never-fetched section reports settled")
+	}
+	gen := s.NextGen(SectionPriorityConfig)
+	s.SetLoading(SectionPriorityConfig, gen)
+	if s.Settled(SectionPriorityConfig) {
+		t.Error("first fetch in flight reports settled")
+	}
+	s.SetPriorityConfig(slurm.PriorityConfig{}, gen, errors.New("boom"))
+	if !s.Settled(SectionPriorityConfig) {
+		t.Error("failed first fetch must settle the section")
+	}
+	gen = s.NextGen(SectionPriorityConfig)
+	s.SetLoading(SectionPriorityConfig, gen)
+	if !s.Settled(SectionPriorityConfig) {
+		t.Error("retry in flight must keep the section settled")
+	}
+}
+
 func TestDerivedAccessors(t *testing.T) {
 	s := New()
 	genA := s.NextGen(SectionAllUsersJobs)

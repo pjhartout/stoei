@@ -54,6 +54,9 @@ const (
 	SectionFairShare
 	// SectionPendingPrio is the sprio pending-priority data.
 	SectionPendingPrio
+	// SectionPriorityConfig is the controller's priority plugin/weights, fetched
+	// once per session.
+	SectionPriorityConfig
 	// numSections is the count of sections; keep last.
 	numSections
 )
@@ -74,6 +77,8 @@ func (s Section) String() string {
 		return "fair_share"
 	case SectionPendingPrio:
 		return "pending_priority"
+	case SectionPriorityConfig:
+		return "priority_config"
 	default:
 		return "unknown"
 	}
@@ -128,6 +133,9 @@ type Store struct {
 
 	PendingPrio     []slurm.PriorityEntry
 	PendingPrioMeta Meta
+
+	PriorityConfig     slurm.PriorityConfig
+	PriorityConfigMeta Meta
 
 	// ClusterStats is recomputed from Nodes and AllUsersJobs whenever either
 	// section is applied.
@@ -186,6 +194,8 @@ func (s *Store) meta(section Section) *Meta {
 		return &s.FairShareMeta
 	case SectionPendingPrio:
 		return &s.PendingPrioMeta
+	case SectionPriorityConfig:
+		return &s.PriorityConfigMeta
 	default:
 		return nil
 	}
@@ -197,6 +207,17 @@ func (s *Store) State(section Section) State {
 		return m.State
 	}
 	return StateIdle
+}
+
+// Settled reports whether a section has completed at least one fetch, whether
+// it succeeded or failed. A view that needs several sections at once can wait
+// on this rather than rendering piecemeal as each one lands; a later refresh of
+// a settled section keeps its previous result visible.
+func (s *Store) Settled(section Section) bool {
+	if m := s.meta(section); m != nil {
+		return !m.LastUpdated.IsZero()
+	}
+	return false
 }
 
 // AnyLoading reports whether any section currently has a fetch in flight. The UI
@@ -393,6 +414,18 @@ func (s *Store) SetPendingPrio(data []slurm.PriorityEntry, gen uint64, err error
 		s.PendingPrio = data
 	}
 	s.applyMeta(&s.PendingPrioMeta, err)
+}
+
+// SetPriorityConfig applies a priority-config fetch result, dropping stale
+// generations.
+func (s *Store) SetPriorityConfig(data slurm.PriorityConfig, gen uint64, err error) {
+	if s.stale(SectionPriorityConfig, gen) {
+		return
+	}
+	if err == nil {
+		s.PriorityConfig = data
+	}
+	s.applyMeta(&s.PriorityConfigMeta, err)
 }
 
 // recomputeClusterStats refreshes the derived ClusterStats from the current

@@ -1,10 +1,12 @@
 package slurm
 
 import (
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // minSqueueParts is the minimum pipe-separated field count a pipe-delimited
@@ -286,12 +288,18 @@ func ParseFairShare(raw string) []FairShareEntry {
 	return entries
 }
 
-// priorityFieldCount is the column count of sprio output.
-const priorityFieldCount = 9
+// PriorityFormat is the sprio -o format: identity columns, the total priority,
+// then every weighted factor. %o (account), %r (partition name), and %n (QOS
+// name) are the name columns; the capital letters are the weighted factors.
+const PriorityFormat = "%i|%u|%o|%r|%n|%Y|%A|%F|%J|%P|%Q|%T|%B|%S|%N"
 
-// ParsePriority parses pipe-delimited "sprio" output into PriorityEntry records,
-// sorted by numeric Priority descending (non-numeric priorities sort as zero).
-// Rows with fewer than nine fields are skipped and every field is trimmed.
+// priorityFieldCount is the column count of PriorityFormat.
+const priorityFieldCount = 15
+
+// ParsePriority parses pipe-delimited "sprio" output in PriorityFormat into
+// PriorityEntry records, sorted by Priority descending. Rows with fewer than
+// fifteen fields are skipped, every field is trimmed, and a non-numeric factor
+// reads as zero.
 func ParsePriority(raw string) []PriorityEntry {
 	var entries []PriorityEntry
 	for _, parts := range iterPipeRows(raw, priorityFieldCount) {
@@ -299,28 +307,87 @@ func ParsePriority(raw string) []PriorityEntry {
 			JobID:     parts[0],
 			User:      parts[1],
 			Account:   parts[2],
-			Priority:  parts[3],
-			Age:       parts[4],
-			FairShare: parts[5],
-			JobSize:   parts[6],
-			Partition: parts[7],
-			QOS:       parts[8],
+			Partition: parts[3],
+			QOS:       parts[4],
+			Priority:  parseInt64(parts[5]),
+			Factors: PriorityFactors{
+				Age:       parseInt64(parts[6]),
+				FairShare: parseInt64(parts[7]),
+				JobSize:   parseInt64(parts[8]),
+				Partition: parseInt64(parts[9]),
+				QOS:       parseInt64(parts[10]),
+				TRES:      sumTRESWeights(parts[11]),
+				Assoc:     parseInt64(parts[12]),
+				Site:      parseInt64(parts[13]),
+				Nice:      parseInt64(parts[14]),
+			},
 		})
 	}
 	sort.SliceStable(entries, func(i, j int) bool {
-		return priorityValue(entries[i].Priority) > priorityValue(entries[j].Priority)
+		return entries[i].Priority > entries[j].Priority
 	})
 	return entries
 }
 
-// priorityValue parses a priority string to a float, returning 0 on failure so a
-// malformed priority sorts last.
-func priorityValue(s string) float64 {
-	v, err := strconv.ParseFloat(s, 64)
-	if err != nil {
-		return 0
+// parseInt64 parses a whole number, accepting a float form and rounding it, and
+// returns 0 for anything else so an absent or malformed factor contributes
+// nothing.
+func parseInt64(s string) int64 {
+	s = strings.TrimSpace(s)
+	if v, err := strconv.ParseInt(s, 10, 64); err == nil {
+		return v
 	}
-	return v
+	if v, err := strconv.ParseFloat(s, 64); err == nil {
+		return int64(math.Round(v))
+	}
+	return 0
+}
+
+// sumTRESWeights sums the values of a weighted-TRES list such as
+// "cpu=120,gres/gpu=45", which is what sprio prints for %T. Entries without a
+// numeric value are skipped; an empty list sums to 0.
+func sumTRESWeights(s string) int64 {
+	var total int64
+	for _, part := range strings.Split(s, ",") {
+		if _, v, ok := strings.Cut(part, "="); ok {
+			total += parseInt64(v)
+		}
+	}
+	return total
+}
+
+// ParsePriorityConfig extracts the Priority* settings from "scontrol show
+// config" output, whose lines read "Key = Value". Unset values print as "(null)"
+// and read as zero/empty; a missing key does the same, so an unparseable or
+// truncated config yields a zero PriorityConfig rather than an error.
+func ParsePriorityConfig(raw string) PriorityConfig {
+	kv := map[string]string{}
+	for _, line := range strings.Split(raw, "\n") {
+		k, v, ok := strings.Cut(line, "=")
+		if !ok {
+			continue
+		}
+		v = strings.TrimSpace(v)
+		if v == "(null)" {
+			v = ""
+		}
+		kv[strings.TrimSpace(k)] = v
+	}
+	return PriorityConfig{
+		Type: kv["PriorityType"],
+		Weights: PriorityWeights{
+			Age:       parseInt64(kv["PriorityWeightAge"]),
+			Assoc:     parseInt64(kv["PriorityWeightAssoc"]),
+			FairShare: parseInt64(kv["PriorityWeightFairShare"]),
+			JobSize:   parseInt64(kv["PriorityWeightJobSize"]),
+			Partition: parseInt64(kv["PriorityWeightPartition"]),
+			QOS:       parseInt64(kv["PriorityWeightQOS"]),
+			TRES:      kv["PriorityWeightTRES"],
+		},
+		MaxAge:        time.Duration(ParseElapsedToSeconds(kv["PriorityMaxAge"]) * float64(time.Second)),
+		DecayHalfLife: time.Duration(ParseElapsedToSeconds(kv["PriorityDecayHalfLife"]) * float64(time.Second)),
+		FavorSmall:    strings.EqualFold(kv["PriorityFavorSmall"], "yes"),
+	}
 }
 
 // iterPipeRows yields the trimmed pipe-separated fields of each non-blank line

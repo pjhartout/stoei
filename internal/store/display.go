@@ -1,8 +1,10 @@
 package store
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/pjhartout/stoei/internal/slurm"
 )
@@ -20,35 +22,91 @@ func IsMIGType(typ string) bool {
 	return slurm.IsMIGType(typ)
 }
 
-// Fair-share color thresholds shared by the Priority tab and the user/account
-// detail modals so the two views never drift.
-const (
-	// FairShareSuccessThreshold is the fair-share factor at or above which the
-	// value is colored as healthy ("success").
-	FairShareSuccessThreshold = 0.5
-	// FairShareWarningThreshold is the fair-share factor at or above which the
-	// value is colored as a warning; below it the value is colored as an error.
-	FairShareWarningThreshold = 0.2
-)
-
-// FairShareRole classifies a fair-share value into a semantic color role:
-// "success" at/above FairShareSuccessThreshold, "warning" at/above
-// FairShareWarningThreshold, "error" below, and "" when the value does not
-// parse. Sharing the classification keeps the Priority tab and the detail
-// modals colored identically.
-func FairShareRole(fairShare string) string {
-	v, err := strconv.ParseFloat(strings.TrimSpace(fairShare), 64)
+// FormatPercent renders an sshare 0..1 fraction as a percentage of the cluster
+// ("2.08%", "26.1%"), with two decimals below 10% so small shares stay
+// distinguishable. Unparseable input yields "".
+func FormatPercent(fraction string) string {
+	v, err := strconv.ParseFloat(strings.TrimSpace(fraction), 64)
 	if err != nil {
 		return ""
 	}
-	switch {
-	case v >= FairShareSuccessThreshold:
-		return "success"
-	case v >= FairShareWarningThreshold:
-		return "warning"
-	default:
-		return "error"
+	pct := 100 * v
+	if pct < 10 {
+		return fmt.Sprintf("%.2f%%", pct)
 	}
+	return fmt.Sprintf("%.1f%%", pct)
+}
+
+// FormatRatio renders a usage/share ratio as a multiplier ("12.5×", "0.81×"),
+// with an extra decimal below 1 where the difference matters. An undefined or
+// zero ratio renders empty: the status beside it already says "Unused".
+func FormatRatio(ratio float64, ok bool) string {
+	switch {
+	case !ok || ratio == 0:
+		return ""
+	case ratio < 1:
+		return fmt.Sprintf("%.2f×", ratio)
+	default:
+		return fmt.Sprintf("%.1f×", ratio)
+	}
+}
+
+// FormatRank renders "147 of 171 active users (bottom 15%)": the dense rank plus
+// a percentile, counted from the top for the better half and from the bottom
+// otherwise, never smaller than 1%.
+func FormatRank(rank, total int, noun string) string {
+	pct := 100 * rank / total
+	var where string
+	if pct <= 50 {
+		where = fmt.Sprintf("top %d%%", max(pct, 1))
+	} else {
+		where = fmt.Sprintf("bottom %d%%", max(100-pct, 1))
+	}
+	return fmt.Sprintf("%d of %d %s (%s)", rank, total, noun, where)
+}
+
+// FormatDays renders a duration in whole days ("51d"), whole hours below a day
+// ("18h"), and "<1h" below an hour, rounding to the nearest unit.
+func FormatDays(d time.Duration) string {
+	if d >= 24*time.Hour {
+		return fmt.Sprintf("%dd", int64((d+12*time.Hour)/(24*time.Hour)))
+	}
+	if d < time.Hour {
+		return "<1h"
+	}
+	return fmt.Sprintf("%dh", int64((d+30*time.Minute)/time.Hour))
+}
+
+// FormatQueue renders a 1-based queue position as "#142/176".
+func FormatQueue(pos, total int) string {
+	return fmt.Sprintf("#%d/%d", pos, total)
+}
+
+// FormatBreakdown lists a job's non-zero weighted factors largest first, as
+// "FairShare 658033 · Partition 100 · JobSize 5 · Age 1", so a row explains
+// where its priority comes from.
+func FormatBreakdown(f PriorityFactors) string {
+	contributions := f.Contributions()
+	parts := make([]string, len(contributions))
+	for i, c := range contributions {
+		parts[i] = fmt.Sprintf("%s %d", c.Name, c.Value)
+	}
+	return strings.Join(parts, " · ")
+}
+
+// FormatStanding phrases a user's standing in one partition's queue: "best at
+// #3 of 4 · 2 ahead of you · 2 jobs", or "first in line" when nothing is ahead.
+// The job count is only mentioned when it is more than one.
+func FormatStanding(s PartitionStanding) string {
+	ahead := fmt.Sprintf("%d ahead of you", s.Best.Partition-1)
+	if s.Best.Partition == 1 {
+		ahead = "first in line"
+	}
+	text := fmt.Sprintf("best at #%d of %d · %s", s.Best.Partition, s.Best.PartitionTotal, ahead)
+	if s.Jobs > 1 {
+		text += fmt.Sprintf(" · %d jobs", s.Jobs)
+	}
+	return text
 }
 
 // StateRole classifies a Slurm job or node state into a semantic color role —

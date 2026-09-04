@@ -22,6 +22,14 @@ type (
 	FairShareEntry = slurm.FairShareEntry
 	// PriorityEntry is one pending job's priority breakdown from sprio.
 	PriorityEntry = slurm.PriorityEntry
+	// PriorityFactors are a pending job's weighted priority components.
+	PriorityFactors = slurm.PriorityFactors
+	// PriorityFactor is one named, weighted priority component.
+	PriorityFactor = slurm.PriorityFactor
+	// PriorityConfig is the controller's job-priority configuration.
+	PriorityConfig = slurm.PriorityConfig
+	// PriorityWeights are the per-factor priority multipliers.
+	PriorityWeights = slurm.PriorityWeights
 	// JobDetail is the parsed key/value detail for a single job.
 	JobDetail = slurm.JobDetail
 	// JobUsage is the measured hardware usage of a single job.

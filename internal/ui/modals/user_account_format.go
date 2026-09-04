@@ -3,7 +3,6 @@ package modals
 import (
 	"fmt"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/x/ansi"
@@ -37,8 +36,10 @@ func formatUserInfo(username string, st *store.Store, styles theme.Styles) strin
 		userStats = store.UserStats{Username: username}
 	}
 	pending := findPendingStats(st.PendingUserStats(), username)
-	fair := findFairShare(st.FairShare, username)
-	prios := userPriorities(st.PendingPrio, username)
+	ranked := store.RankActiveUsers(st.FairShare)
+	me := store.FindRankedUser(ranked, username)
+	assocs := store.UserAssociations(st.FairShare, username)
+	prios := store.UserPending(store.RankPending(st.PendingPrio), username)
 
 	var lines []string
 
@@ -69,28 +70,26 @@ func formatUserInfo(username string, st *store.Store, styles theme.Styles) strin
 		}
 	}
 
-	if fair != nil {
+	if len(assocs) > 0 {
 		lines = append(lines, "", styles.Title.Render(" Fair-Share Priority "))
-		lines = append(lines, summaryLine("Account", fair.Account, styles))
-		lines = append(lines, summaryLine("Raw Shares", fair.RawShares, styles))
-		lines = append(lines, summaryLine("Norm Shares", fair.NormShares, styles))
-		lines = append(lines, summaryLine("Raw Usage", fair.RawUsage, styles))
-		lines = append(lines, summaryLine("Effective Usage", fair.EffectvUsage, styles))
-		lines = append(lines, summaryLine("Fair-Share Factor", fairShareColored(fair.FairShare, styles), styles))
+		lines = append(lines, userFairShareLines(me, assocs, st, styles)...)
 	}
 
 	if len(prios) > 0 {
-		lines = append(lines, "", styles.Title.Render(" Pending Job Priorities "), "")
-		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-12s %-10s %-8s %-10s %-10s %-12s",
-			"JobID", "Priority", "Age", "FairShare", "JobSize", "Partition")))
-		for i, p := range prios {
+		lines = append(lines, "", styles.Title.Render(" Pending Job Priorities "))
+		for _, s := range store.PartitionStandings(prios) {
+			lines = append(lines, summaryLine(s.Partition, store.FormatStanding(s), styles))
+		}
+		lines = append(lines, "", styles.Subtle.Render(fmt.Sprintf("  %-12s %-9s %-12s %-9s %s",
+			"Partition", "Queue", "JobID", "Priority", "Breakdown")))
+		for i, p := range store.ByPartition(prios) {
 			if i >= maxUserPriorityJobs {
 				lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  ... and %d more pending jobs", len(prios)-maxUserPriorityJobs)))
 				break
 			}
-			lines = append(lines, fmt.Sprintf("  %-12s %-10s %-8s %-10s %-10s %-12s",
-				trunc(p.JobID, 12), trunc(p.Priority, 10), trunc(p.Age, 8),
-				trunc(p.FairShare, 10), trunc(p.JobSize, 10), trunc(p.Partition, 12)))
+			lines = append(lines, fmt.Sprintf("  %-12s %-9s %-12s %-9d %s",
+				trunc(p.Entry.Partition, 12), store.FormatQueue(p.Pos.Partition, p.Pos.PartitionTotal),
+				trunc(p.Entry.JobID, 12), p.Entry.Priority, store.FormatBreakdown(p.Entry.Factors)))
 		}
 	}
 
@@ -157,11 +156,8 @@ func formatAccountInfo(account string, st *store.Store, styles theme.Styles) str
 
 	if accountEntry != nil {
 		lines = append(lines, "", styles.Title.Render(" Account Fair-Share Priority "))
-		lines = append(lines, summaryLine("Raw Shares", accountEntry.RawShares, styles))
-		lines = append(lines, summaryLine("Norm Shares", accountEntry.NormShares, styles))
-		lines = append(lines, summaryLine("Raw Usage", accountEntry.RawUsage, styles))
-		lines = append(lines, summaryLine("Effective Usage", accountEntry.EffectvUsage, styles))
-		lines = append(lines, summaryLine("Fair-Share Factor", fairShareColored(accountEntry.FairShare, styles), styles))
+		acct := store.FindRankedAccount(store.RankAccounts(st.FairShare), account)
+		lines = append(lines, accountFairShareLines(*accountEntry, acct, styles)...)
 	}
 
 	// Current Resource Usage: aggregate CPUs/memory/GPUs and unique nodes over the
@@ -175,38 +171,48 @@ func formatAccountInfo(account string, st *store.Store, styles theme.Styles) str
 
 	if len(users) > 0 {
 		sort.SliceStable(users, func(i, j int) bool {
-			return parseF(users[i].FairShare) > parseF(users[j].FairShare)
+			return store.FairShareValue(users[i]) > store.FairShareValue(users[j])
 		})
 		lines = append(lines, "", styles.Title.Render(" Users in Account "), "")
-		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-15s %-12s %-12s %-12s %-10s",
-			"User", "RawShares", "NormShares", "EffectvUsage", "FairShare")))
+		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-15s %-8s %-8s %-12s %-10s %s",
+			"User", "Share", "Usage", "Usage/Share", "FairShare", "Status")))
 		for i, u := range users {
 			if i >= maxAccountUsers {
 				lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  ... and %d more users", len(users)-maxAccountUsers)))
 				break
 			}
-			lines = append(lines, fmt.Sprintf("  %-15s %-12s %-12s %-12s %s",
-				trunc(u.User, 15), trunc(u.RawShares, 12), trunc(u.NormShares, 12),
-				trunc(u.EffectvUsage, 12), fairShareColored(u.FairShare, styles)))
+			ratio, ok := store.UsageRatio(u)
+			band := store.ClassifyUsage(ratio, ok)
+			role := styles.StateRoleStyle(band.Role())
+			lines = append(lines, fmt.Sprintf("  %-15s %-8s %-8s %-12s %s %s",
+				trunc(u.User, 15), store.FormatPercent(u.NormShares), store.FormatPercent(u.EffectvUsage),
+				store.FormatRatio(ratio, ok), role.Render(fmt.Sprintf("%-10s", trunc(strings.TrimSpace(u.FairShare), 10))),
+				role.Render(band.Label())))
 		}
 	}
 
-	// Pending Job Priorities: the account's pending sprio rows, sorted by priority
-	// descending and capped at maxAccountPriorityJobs, shown between the users and
-	// running-jobs sections.
-	prios := accountPriorities(st.PendingPrio, usernames)
+	// Pending Job Priorities: the account's pending sprio rows grouped by
+	// partition in queue order, capped at maxAccountPriorityJobs, shown between
+	// the users and running-jobs sections.
+	var prios []store.RankedPriority
+	for _, p := range store.RankPending(st.PendingPrio) {
+		if p.Entry.Account == account {
+			prios = append(prios, p)
+		}
+	}
 	if len(prios) > 0 {
 		lines = append(lines, "", styles.Title.Render(" Pending Job Priorities "), "")
-		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-12s %-12s %-10s %-8s %-10s %-12s",
-			"JobID", "User", "Priority", "Age", "FairShare", "Partition")))
-		for i, p := range prios {
+		lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  %-12s %-9s %-12s %-12s %-9s %s",
+			"Partition", "Queue", "JobID", "User", "Priority", "Breakdown")))
+		for i, p := range store.ByPartition(prios) {
 			if i >= maxAccountPriorityJobs {
 				lines = append(lines, styles.Subtle.Render(fmt.Sprintf("  ... and %d more pending jobs", len(prios)-maxAccountPriorityJobs)))
 				break
 			}
-			lines = append(lines, fmt.Sprintf("  %-12s %-12s %-10s %-8s %-10s %-12s",
-				trunc(p.JobID, 12), trunc(p.User, 12), trunc(p.Priority, 10),
-				trunc(p.Age, 8), trunc(p.FairShare, 10), trunc(p.Partition, 12)))
+			lines = append(lines, fmt.Sprintf("  %-12s %-9s %-12s %-12s %-9d %s",
+				trunc(p.Entry.Partition, 12), store.FormatQueue(p.Pos.Partition, p.Pos.PartitionTotal),
+				trunc(p.Entry.JobID, 12), trunc(p.Entry.User, 12), p.Entry.Priority,
+				store.FormatBreakdown(p.Entry.Factors)))
 		}
 	}
 
@@ -276,60 +282,71 @@ func findPendingStats(stats []store.UserPendingStats, username string) *store.Us
 	return nil
 }
 
-// findFairShare returns the fair-share entry for username, or nil when the user
-// has none.
-func findFairShare(entries []store.FairShareEntry, username string) *store.FairShareEntry {
-	for i := range entries {
-		if entries[i].User == username {
-			return &entries[i]
+// userFairShareLines renders the fair-share summary rows for a user. me is the
+// user's row in the active-user ranking (nil when the user has no recent usage);
+// assocs are all of the user's associations, so a user in several accounts sees
+// the others under "Also in".
+func userFairShareLines(me *store.RankedShare, assocs []store.FairShareEntry, st *store.Store, styles theme.Styles) []string {
+	entry := assocs[0]
+	ratio, ratioOK := store.UsageRatio(entry)
+	band := store.ClassifyUsage(ratio, ratioOK)
+	if me != nil {
+		entry, ratio, ratioOK, band = me.Entry, me.Ratio, me.RatioOK, me.Band
+	}
+	role := styles.StateRoleStyle(band.Role())
+
+	var lines []string
+	lines = append(lines, summaryLine("Account", entry.Account, styles))
+	lines = append(lines, summaryLine("Fair-Share Factor", role.Bold(true).Render(strings.TrimSpace(entry.FairShare)), styles))
+	if me != nil {
+		lines = append(lines, summaryLine("Rank", store.FormatRank(me.Rank, me.Total, "active users"), styles))
+	}
+	lines = append(lines, summaryLine("Status", role.Render(band.Label()), styles))
+	lines = append(lines, summaryLine("Share", fmt.Sprintf("%s of cluster (%s raw shares)", store.FormatPercent(entry.NormShares), strings.TrimSpace(entry.RawShares)), styles))
+	lines = append(lines, summaryLine("Usage", store.FormatPercent(entry.EffectvUsage)+" of recent cluster usage", styles))
+	if ratioOK && ratio > 0 {
+		lines = append(lines, summaryLine("Usage vs share", store.FormatRatio(ratio, true), styles))
+	}
+	if (band == store.UsageOver || band == store.UsageHeavy) && st.State(store.SectionPriorityConfig) == store.StateLoaded {
+		halfLife := st.PriorityConfig.DecayHalfLife
+		if recovery, ok := store.RecoveryTime(ratio, halfLife); ok {
+			lines = append(lines, summaryLine("Recovery",
+				fmt.Sprintf("≈%s idle to reach 1× (usage halves every %s)", store.FormatDays(recovery), store.FormatDays(halfLife)), styles))
 		}
 	}
-	return nil
-}
-
-// userPriorities returns the user's pending priorities, sorted by priority desc.
-func userPriorities(entries []store.PriorityEntry, username string) []store.PriorityEntry {
-	var out []store.PriorityEntry
-	for _, e := range entries {
-		if e.User == username {
-			out = append(out, e)
+	if len(assocs) > 1 {
+		others := make([]string, 0, len(assocs)-1)
+		for _, a := range assocs {
+			if a.Account == entry.Account {
+				continue
+			}
+			others = append(others, fmt.Sprintf("%s (%s)", a.Account, strings.TrimSpace(a.FairShare)))
 		}
+		lines = append(lines, summaryLine("Also in", strings.Join(others, ", "), styles))
 	}
-	sort.SliceStable(out, func(i, j int) bool { return parseF(out[i].Priority) > parseF(out[j].Priority) })
-	return out
+	return lines
 }
 
-// accountPriorities returns the pending priorities whose user belongs to the
-// account (the given username set), sorted by priority descending.
-func accountPriorities(entries []store.PriorityEntry, usernames map[string]struct{}) []store.PriorityEntry {
-	var out []store.PriorityEntry
-	for _, e := range entries {
-		if _, ok := usernames[strings.TrimSpace(e.User)]; ok {
-			out = append(out, e)
-		}
+// accountFairShareLines renders the fair-share summary rows for an account.
+// acct is the account's row in the account ranking; it is nil for root, which
+// has no share to compare usage against, so only the raw fields are shown then.
+func accountFairShareLines(entry store.FairShareEntry, acct *store.RankedShare, styles theme.Styles) []string {
+	var lines []string
+	if acct != nil {
+		role := styles.StateRoleStyle(acct.Band.Role())
+		lines = append(lines, summaryLine("Rank", fmt.Sprintf("%d of %d accounts (best-served first)", acct.Rank, acct.Total), styles))
+		lines = append(lines, summaryLine("Status", role.Render(acct.Band.Label()), styles))
 	}
-	sort.SliceStable(out, func(i, j int) bool { return parseF(out[i].Priority) > parseF(out[j].Priority) })
-	return out
-}
-
-// fairShareColored renders a fair-share value colored by the shared
-// store.FairShareRole classification. A non-numeric value is returned uncolored.
-func fairShareColored(fairShare string, styles theme.Styles) string {
-	raw := strings.TrimSpace(fairShare)
-	role := store.FairShareRole(raw)
-	if role == "" {
-		return raw
+	lines = append(lines, summaryLine("Share", fmt.Sprintf("%s of cluster (%s raw shares)", store.FormatPercent(entry.NormShares), strings.TrimSpace(entry.RawShares)), styles))
+	lines = append(lines, summaryLine("Usage", store.FormatPercent(entry.EffectvUsage)+" of recent cluster usage", styles))
+	if acct != nil && acct.RatioOK && acct.Ratio > 0 {
+		lines = append(lines, summaryLine("Usage vs share", store.FormatRatio(acct.Ratio, true), styles))
 	}
-	return styles.StateRoleStyle(role).Bold(true).Render(raw)
-}
-
-// parseF parses a float, returning 0 on failure (sort key only).
-func parseF(s string) float64 {
-	v, err := strconv.ParseFloat(strings.TrimSpace(s), 64)
-	if err != nil {
-		return 0
+	// Account rows have no FairShare under Fair Tree; only show one when present.
+	if fs := strings.TrimSpace(entry.FairShare); fs != "" {
+		lines = append(lines, summaryLine("Fair-Share Factor", styles.Text.Bold(true).Render(fs), styles))
 	}
-	return v
+	return lines
 }
 
 // trunc truncates s to width display cells, never splitting a rune — a
