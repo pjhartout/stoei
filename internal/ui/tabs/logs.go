@@ -40,12 +40,15 @@ func (l *Logs) SetStyles(styles theme.Styles) {
 	l.Refresh()
 }
 
-// SetSize resizes the viewport.
+// SetSize resizes the viewport and re-renders the lines into it: content laid
+// out at a previous width (or before any width was known) renders blank until
+// it is set again.
 func (l *Logs) SetSize(width, height int) {
 	l.width = width
 	l.height = height
 	l.vp.SetWidth(width)
 	l.vp.SetHeight(max(height, 1))
+	l.Refresh()
 }
 
 // Update forwards scroll keys to the viewport.

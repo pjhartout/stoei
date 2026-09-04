@@ -36,6 +36,28 @@ func TestRecoveredToastIsSuccessStyled(t *testing.T) {
 	}
 }
 
+// TestToastsPersistInLog asserts every toast is also written to the log ring at
+// the matching level, so a notice that expired off-screen can still be found on
+// the Logs tab.
+func TestToastsPersistInLog(t *testing.T) {
+	a := newTestApp(t, &store.FakeClient{UsernameStr: "alice"})
+	a.observe(store.SectionNodes, errBoom)
+	a.observe(store.SectionNodes, nil)
+	a.pushToast("Job 42 cancelled")
+
+	entries := a.logRing.Last(0)
+	if len(entries) != 3 {
+		t.Fatalf("log ring has %d entries, want 3: %+v", len(entries), entries)
+	}
+	for i, want := range []struct{ level, text string }{
+		{"ERROR", "refresh failed"}, {"SUCCESS", "nodes"}, {"INFO", "Job 42 cancelled"},
+	} {
+		if entries[i].Level != want.level || !strings.Contains(entries[i].Message, want.text) {
+			t.Errorf("entry[%d] = %s %q; want %s containing %q", i, entries[i].Level, entries[i].Message, want.level, want.text)
+		}
+	}
+}
+
 // TestToastsExpire asserts toasts auto-dismiss after toastTTL toast ticks.
 func TestToastsExpire(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{UsernameStr: "alice"})

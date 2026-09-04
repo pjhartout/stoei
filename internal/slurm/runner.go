@@ -103,6 +103,70 @@ func (r ExecRunner) Run(ctx context.Context, name string, args ...string) ([]byt
 	return out, nil
 }
 
+// LogFunc receives one application log line: a level ("DEBUG", "INFO",
+// "WARNING", "ERROR") and a message. It is the slurm package's only view of the
+// application log, so the package stays free of UI types.
+type LogFunc func(level, message string)
+
+// LoggedRunner wraps a Runner and reports every command it runs: the command
+// line, output size, and duration at DEBUG on success, and the failure with its
+// cause at ERROR. It is what makes the Logs tab show what the tool is doing to
+// the scheduler. Now overrides the clock for tests; nil means time.Now.
+type LoggedRunner struct {
+	Inner Runner
+	Log   LogFunc
+	Now   func() time.Time
+}
+
+// logArgWidth caps how much of each argument a log line shows: format strings
+// passed to squeue/sacct run to hundreds of characters and would bury the
+// command they belong to.
+const logArgWidth = 40
+
+// Run executes the command through Inner and logs the outcome.
+func (r LoggedRunner) Run(ctx context.Context, name string, args ...string) ([]byte, error) {
+	now := r.Now
+	if now == nil {
+		now = time.Now
+	}
+	start := now()
+	out, err := r.Inner.Run(ctx, name, args...)
+	elapsed := now().Sub(start).Round(time.Millisecond)
+	line := commandLine(name, args)
+	if err != nil {
+		r.Log("ERROR", fmt.Sprintf("%s failed after %s: %v", line, elapsed, err))
+		return out, err
+	}
+	r.Log("DEBUG", fmt.Sprintf("%s → %s in %s", line, byteCount(len(out)), elapsed))
+	return out, nil
+}
+
+// commandLine renders a command and its arguments on one line, eliding the
+// middle of any argument longer than logArgWidth.
+func commandLine(name string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, name)
+	for _, a := range args {
+		if len(a) > logArgWidth {
+			a = a[:logArgWidth/2] + "…" + a[len(a)-logArgWidth/2+1:]
+		}
+		parts = append(parts, a)
+	}
+	return strings.Join(parts, " ")
+}
+
+// byteCount renders an output size as "512 B", "4.1 KB", or "2.3 MB".
+func byteCount(n int) string {
+	switch {
+	case n >= 1<<20:
+		return fmt.Sprintf("%.1f MB", float64(n)/(1<<20))
+	case n >= 1<<10:
+		return fmt.Sprintf("%.1f KB", float64(n)/(1<<10))
+	default:
+		return fmt.Sprintf("%d B", n)
+	}
+}
+
 // FakeRunner is a test Runner that returns pre-seeded output keyed by command
 // name. It records every invocation so tests can assert on the commands issued.
 type FakeRunner struct {
@@ -127,8 +191,9 @@ func (f *FakeRunner) Run(_ context.Context, name string, args ...string) ([]byte
 	return f.Outputs[name], f.Errs[name]
 }
 
-// Compile-time assertions that both runners satisfy Runner.
+// Compile-time assertions that every runner satisfies Runner.
 var (
 	_ Runner = ExecRunner{}
 	_ Runner = (*FakeRunner)(nil)
+	_ Runner = LoggedRunner{}
 )

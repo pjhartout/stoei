@@ -11,7 +11,9 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 - Auto-refreshing job list with running/pending/requeue stats
 - Completed-job history merged into the Jobs tab
 - Job detail view (`Enter` or `i`) and a log viewer with search and `$EDITOR`
-- Tabs for Jobs, Nodes, Users, Priority, and Logs
+- Tabs for Jobs, Nodes, Users, Priority, and Logs — the Logs tab records every
+  Slurm command stoei runs (with size and timing), fetch failures and
+  recoveries, and the feedback from your own actions
 - Cluster-load sidebar: free vs. allocated nodes/CPU/memory/GPU, and the pending queue
 - Quick filtering (`/`), sorting (`o`), and job cancellation (`c`)
 - Job modification from the detail view (`m`): array throttle, partition, time

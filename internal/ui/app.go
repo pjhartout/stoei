@@ -9,6 +9,7 @@
 package ui
 
 import (
+	"cmp"
 	"fmt"
 	"strings"
 	"time"
@@ -251,6 +252,8 @@ func intervalsFromConfig(cfg config.Config) Intervals {
 // history), then a batched dispatch of the heavy sections, and starts both
 // tickers. Each fetch bumps its section generation and marks it loading (I4).
 func (a App) Init() tea.Cmd {
+	a.log("INFO", fmt.Sprintf("stoei %s started as %s · refresh every %s, heavy sections every %s · config %s",
+		a.version, a.client.Username(), a.intervals.Fast, a.intervals.Slow, cmp.Or(a.configPath, "(defaults)")))
 	critical := tea.Batch(
 		checkAvailability(a.client),
 		a.dispatchRunning(),
@@ -1080,6 +1083,8 @@ func (a *App) pushToastLevel(msg string, level toastLevel) {
 // pushToastTagged appends a toast carrying a tag so a completion event can drop
 // it early (see dropToasts). An existing toast with the same non-empty tag is
 // replaced rather than stacked, so repeated refreshes never pile up notices.
+// Every toast is also written to the log ring: a notice vanishes after a few
+// seconds, and the Logs tab is where the user goes to find out what it said.
 func (a *App) pushToastTagged(msg string, level toastLevel, tag string) {
 	if tag != "" {
 		a.dropToasts(tag)
@@ -1088,7 +1093,15 @@ func (a *App) pushToastTagged(msg string, level toastLevel, tag string) {
 	if len(a.toasts) > maxToasts {
 		a.toasts = a.toasts[len(a.toasts)-maxToasts:]
 	}
+	a.log(level.logLevel(), msg)
 	a.frame.invalidate()
+}
+
+// log appends a line to the application log ring and refreshes the Logs tab so
+// the line is visible at once when that tab is showing.
+func (a *App) log(level, msg string) {
+	a.logRing.Append(level, msg, time.Now())
+	a.logsTab.Refresh()
 }
 
 // dropToasts removes every toast with the given tag, marking the frame dirty

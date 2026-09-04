@@ -516,7 +516,7 @@ func TestTeatestTabNavigation(t *testing.T) {
 		{'2', "Node"},          // Nodes tab header/columns
 		{'3', "User Overview"}, // Users tab sub-tab header
 		{'4', "Priority"},      // Priority tab header
-		{'5', "log"},           // Logs tab placeholder ("No log entries yet.")
+		{'5', "started as"},    // Logs tab: the startup line Init logged
 		{'1', "0A·1J"},         // back to Jobs (usage banner segments)
 	}
 	for _, s := range steps {

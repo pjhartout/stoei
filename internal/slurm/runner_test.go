@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os/exec"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,5 +118,46 @@ func TestExecRunnerCleanSuccessHasNoError(t *testing.T) {
 	}
 	if string(out) != "ok\n" {
 		t.Errorf("stdout = %q, want %q", out, "ok\n")
+	}
+}
+
+// TestLoggedRunnerReportsEachCommand asserts the decorator passes output and
+// errors through untouched while logging a readable line per call: DEBUG with
+// size and duration on success, ERROR with the cause on failure, and long
+// format arguments elided so the command stays legible.
+func TestLoggedRunnerReportsEachCommand(t *testing.T) {
+	longFmt := strings.Repeat("%i|", 40)
+	inner := &FakeRunner{
+		Outputs: map[string][]byte{"squeue": []byte(strings.Repeat("x", 2048))},
+		Errs:    map[string]error{"sacct": errors.New("connection refused")},
+	}
+	var lines []string
+	clock := time.Unix(0, 0)
+	r := LoggedRunner{
+		Inner: inner,
+		Log:   func(level, msg string) { lines = append(lines, level+" "+msg) },
+		Now: func() time.Time {
+			clock = clock.Add(250 * time.Millisecond)
+			return clock
+		},
+	}
+
+	out, err := r.Run(context.Background(), "squeue", "-u", "alice", "-o", longFmt)
+	if err != nil || len(out) != 2048 {
+		t.Fatalf("Run = %d bytes, %v; want passthrough of 2048 bytes", len(out), err)
+	}
+	if _, err := r.Run(context.Background(), "sacct", "-n"); err == nil || err.Error() != "connection refused" {
+		t.Fatalf("failure not passed through: %v", err)
+	}
+	if len(lines) != 2 {
+		t.Fatalf("logged %d lines, want 2: %q", len(lines), lines)
+	}
+	success := lines[0]
+	if !strings.HasPrefix(success, "DEBUG squeue -u alice -o ") || !strings.HasSuffix(success, " → 2.0 KB in 250ms") ||
+		strings.Contains(success, longFmt) || !strings.Contains(success, "…") || len(success) > 100 {
+		t.Errorf("success line = %q; want DEBUG line with the long format elided, size and duration", success)
+	}
+	if want := "ERROR sacct -n failed after 250ms: connection refused"; lines[1] != want {
+		t.Errorf("failure line = %q, want %q", lines[1], want)
 	}
 }

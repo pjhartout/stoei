@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"time"
 
 	tea "charm.land/bubbletea/v2"
 
@@ -86,12 +87,17 @@ func main() {
 	// builds/parses commands, the Store holds the data, and the root model renders
 	// it. Job history comes from the controller ("scontrol show jobs")
 	// accumulated into a persistent on-disk journal, reconciled against a single
-	// nightly sacct query; squeue, scontrol, and the rest run live. The
-	// alt-screen is a View
-	// field in Bubble Tea v2, so NewProgram takes just the model.
-	client := slurm.NewClient(slurm.ExecRunner{}, slurm.WithJournal(slurm.JournalPath()))
-
+	// nightly sacct query; squeue, scontrol, and the rest run live. Every command
+	// the runner executes is reported to the in-memory log ring the Logs tab
+	// renders. The alt-screen is a View field in Bubble Tea v2, so NewProgram
+	// takes just the model.
 	ring := components.NewLogRing(components.DefaultMaxLogLines)
+	runner := slurm.LoggedRunner{
+		Inner: slurm.ExecRunner{},
+		Log:   func(level, msg string) { ring.Append(level, msg, time.Now()) },
+	}
+	client := slurm.NewClient(runner, slurm.WithJournal(slurm.JournalPath()))
+
 	p := tea.NewProgram(ui.NewWithConfig(st, client, ring, cfg, cfgPath).WithVersion(version))
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "stoei:", err)
