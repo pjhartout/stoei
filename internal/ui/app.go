@@ -365,10 +365,7 @@ func (a *App) dispatchHeavyVisible() tea.Cmd {
 		cmds = append(cmds, a.dispatchHistoryIfIdle())
 	}
 	if a.tabNeedsPriorityData(a.active) {
-		cmds = append(cmds, a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio))
-		if a.store.State(store.SectionPriorityConfig) != store.StateLoaded {
-			cmds = append(cmds, a.dispatchSection(store.SectionPriorityConfig))
-		}
+		cmds = append(cmds, a.priorityDataCmds()...)
 	}
 	return tea.Batch(cmds...)
 }
@@ -378,6 +375,21 @@ func (a *App) dispatchHeavyVisible() tea.Cmd {
 // detail modal.
 func (a *App) tabNeedsPriorityData(t tabIndex) bool {
 	return t == tabPriority || t == tabUsers
+}
+
+// priorityDataCmds starts every fetch the Priority/Users surface. Keeping this
+// list in one place is important: both the slow-tick path and tab-switch path
+// must dispatch the static config alongside fair-share and sprio, otherwise the
+// My pane waits forever for a section nobody started.
+func (a *App) priorityDataCmds() []tea.Cmd {
+	cmds := []tea.Cmd{
+		a.dispatchSection(store.SectionFairShare),
+		a.dispatchSection(store.SectionPendingPrio),
+	}
+	if a.store.State(store.SectionPriorityConfig) != store.StateLoaded {
+		cmds = append(cmds, a.dispatchSection(store.SectionPriorityConfig))
+	}
+	return cmds
 }
 
 // dispatchSection bumps a heavy section's generation, marks it loading, and
@@ -820,14 +832,15 @@ func tabForKey(msg tea.KeyPressMsg) (tabIndex, bool) {
 	return 0, false
 }
 
-// setActive switches the active tab to idx (a no-op when it is already active) and
-// fetches any heavy data the new tab needs but that went unpolled while it was
-// hidden, so the tab shows fresh data on arrival rather than waiting for the next
-// slow tick. Nodes and all-users are polled every tick regardless, so only the
-// Priority/Users fair-share + pending-priority become newly needed; they are
-// fetched when entering one of those tabs from outside, and the job history is
-// reconciled when returning to the Jobs tab. The dispatch self-skips while its
-// section is already loading, bounding the cost of rapid tab cycling.
+// setActive switches the active tab to idx (a no-op when it is already active)
+// and fetches any heavy data the new tab needs but that went unpolled while it
+// was hidden, so the tab shows fresh data on arrival rather than waiting for the
+// next slow tick. Nodes and all-users are polled every tick regardless, so only
+// the Priority/Users datasets become newly needed; all three (fair-share,
+// pending-priority, and the once-per-session config) are dispatched together
+// when entering one of those tabs from outside. The job history is reconciled
+// when returning to the Jobs tab. Each section self-skips while already loading,
+// bounding the cost of rapid tab cycling.
 func (a *App) setActive(idx tabIndex) tea.Cmd {
 	if idx == a.active {
 		return nil
@@ -841,7 +854,7 @@ func (a *App) setActive(idx tabIndex) tea.Cmd {
 		cmds = append(cmds, a.dispatchHistoryIfIdle())
 	}
 	if a.tabNeedsPriorityData(idx) && !a.tabNeedsPriorityData(prev) {
-		cmds = append(cmds, a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio))
+		cmds = append(cmds, a.priorityDataCmds()...)
 	}
 	if len(cmds) == 0 {
 		return nil

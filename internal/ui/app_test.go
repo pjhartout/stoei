@@ -256,10 +256,11 @@ func TestHeavySectionGuardSkipsWhileLoading(t *testing.T) {
 	}
 }
 
-// TestSetActiveSwitchesAndNoOps asserts a tab switch updates the active tab and
-// returns a fetch for the newly-visible data, while re-selecting the active tab is
-// a no-op.
-func TestSetActiveSwitchesAndNoOps(t *testing.T) {
+// TestSetActiveDispatchesEveryPriorityDependency asserts the real tab-switch
+// path starts all three sections the My pane awaits. The config is easy to miss
+// because it is static and fetched once, but omitting it leaves the pane loading
+// forever. Re-selecting the active tab remains a no-op.
+func TestSetActiveDispatchesEveryPriorityDependency(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{})
 	a.active = tabJobs
 
@@ -267,8 +268,11 @@ func TestSetActiveSwitchesAndNoOps(t *testing.T) {
 	if a.active != tabPriority {
 		t.Fatalf("active = %v, want tabPriority", a.active)
 	}
-	if cmd == nil {
-		t.Error("switching tabs returned nil; want a fetch for the newly-visible data")
+	got := dispatchedSections(cmd)
+	for _, section := range []string{"fairshare", "pendingprio", "prioconfig"} {
+		if !got[section] {
+			t.Errorf("tab switch did not dispatch %s; got %v", section, got)
+		}
 	}
 	if cmd := a.setActive(tabPriority); cmd != nil {
 		t.Error("setActive to the already-active tab returned a non-nil Cmd")
