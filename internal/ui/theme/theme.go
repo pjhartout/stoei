@@ -187,6 +187,10 @@ var palettes, themeOrder = func() (map[string]Theme, []string) {
 		opencode("nightowl", "#82aaff", "#82aaff", "#d6deeb", "#5f7e97", "#3a5a75", "#ef5350", "#c5e478", "#ecc48d", "#011627"),
 		opencode("vesper", "#ffc799", "#ffc799", "#ffffff", "#a0a0a0", "#282828", "#ff8080", "#99ffe4", "#ffc799", "#101010"),
 		opencode("gruvbox", "#fabd2f", "#83a598", "#ebdbb2", "#a89984", "#504945", "#fb4934", "#b8bb26", "#fe8019", "#928374"),
+		// tigerstyle is a monochrome black/white scheme with a single coral accent
+		// (tigerstyle.dev). Its source defines "green" as pure white on purpose:
+		// emphasis comes from brightness, not hue, so Success is white.
+		opencode("tigerstyle", "#f16053", "#ff8e73", "#eeeeee", "#b4b4b4", "#333333", "#ff4c4f", "#ffffff", "#ff8e73", "#000000"),
 		Charm(),
 	}
 	m := make(map[string]Theme, len(ts))

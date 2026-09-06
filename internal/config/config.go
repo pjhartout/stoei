@@ -71,6 +71,7 @@ var ValidThemes = []string{
 	"nightowl",
 	"vesper",
 	"gruvbox",
+	"tigerstyle",
 	"charm",
 }
 
