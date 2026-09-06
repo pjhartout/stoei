@@ -108,33 +108,67 @@ func TestJobDetailRendersFieldsFromFakeClient(t *testing.T) {
 	}
 }
 
-// TestJobDetailCacheHitSkipsFetch asserts a cached entry for the same live state
-// is shown instantly: no detail fetch reaches the client. A running job still
-// issues the live usage lookup so the Efficiency numbers stay fresh.
-func TestJobDetailCacheHitSkipsFetch(t *testing.T) {
-	fc := &store.FakeClient{}
+func TestJobDetailCacheRefreshUsesCurrentRuntime(t *testing.T) {
+	fc := &store.FakeClient{
+		UsernameStr: "alice",
+		JobDetailData: store.JobDetail{
+			Source: "scontrol",
+			Fields: map[string]string{
+				"JobId":    "12345",
+				"JobState": "RUNNING",
+				"UserId":   "alice(1000)",
+				"RunTime":  "00:01:40",
+				"NumCPUs":  "4",
+			},
+		},
+		JobUsageData: store.JobUsage{
+			Source:         "sstat",
+			Sampled:        true,
+			CPUTimeSec:     320,
+			DiskReadBytes:  100 << 10,
+			DiskWriteBytes: 200 << 10,
+		},
+	}
 	cache := NewJobDetailCache()
-	cache.Put("12345", cachedDetail{content: "CACHED DETAIL", state: "RUNNING"})
-
 	d := NewJobDetail(fc, cache, testStyles(), "12345", "RUNNING", store.JobDetail{})
-	d.SetSize(80, 24)
-	cmd := d.Init()
-	if cmd == nil {
-		t.Fatal("running-job cache hit must still issue the live usage Cmd")
+	d.SetSize(120, 40)
+	for cmd := d.Init(); cmd != nil; {
+		_, cmd, _ = d.Update(firstMsg(cmd))
 	}
-	if _, ok := firstMsg(cmd).(jobUsageLoadedMsg); !ok {
-		t.Error("cache-hit Cmd is not the usage lookup")
+	if !strings.Contains(d.View(), "80%") {
+		t.Fatalf("initial CPU efficiency missing, got:\n%s", d.View())
 	}
-	if fc.LastJobDetailID != "" {
-		t.Error("cache hit should not re-fetch the detail")
+
+	// Replace the response map: the cached snapshot must keep its old runtime.
+	fc.JobDetailData.Fields = map[string]string{
+		"JobId":    "12345",
+		"JobState": "RUNNING",
+		"UserId":   "alice(1000)",
+		"RunTime":  "00:06:40",
+		"NumCPUs":  "4",
 	}
-	if fc.LastJobUsageID != "12345" || !fc.LastJobUsageRunning {
-		t.Errorf("usage lookup = %q running=%v; want 12345 running=true", fc.LastJobUsageID, fc.LastJobUsageRunning)
+	fc.JobUsageData.CPUTimeSec = 1388
+	fc.JobUsageData.DiskReadBytes = 800 << 10
+	fc.JobUsageData.DiskWriteBytes = 1600 << 10
+
+	reopened := NewJobDetail(fc, cache, testStyles(), "12345", "RUNNING", store.JobDetail{})
+	reopened.SetSize(120, 40)
+	cmd := reopened.Init()
+	if !strings.Contains(reopened.View(), "80%") {
+		t.Fatal("cached detail disappeared while the refresh was pending")
 	}
-	if !strings.Contains(d.View(), "CACHED DETAIL") {
-		t.Errorf("cache hit not rendered, got:\n%s", d.View())
+	for cmd != nil {
+		_, cmd, _ = reopened.Update(firstMsg(cmd))
+	}
+
+	view := stripAnsi(reopened.View())
+	for _, want := range []string{"87%", "(2.0K/s avg)", "(4.0K/s avg)"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("refreshed efficiency missing %q, got:\n%s", want, view)
+		}
 	}
 }
+
 func TestJobDetailRunningArrayUsesControllerIDForLiveUsage(t *testing.T) {
 	fc := &translatedUsageClient{
 		FakeClient: &store.FakeClient{
@@ -182,7 +216,7 @@ func TestJobDetailUsageSectionRendersAfterLoad(t *testing.T) {
 	fc := &store.FakeClient{
 		UsernameStr: "alice",
 		JobDetailData: store.JobDetail{
-			Source: "scontrol",
+			Source: "sacct",
 			Fields: map[string]string{
 				"JobId":    "5834914",
 				"JobState": "COMPLETED",
@@ -220,7 +254,7 @@ func TestJobDetailUsageSectionRendersAfterLoad(t *testing.T) {
 	d.Update(usageMsg)
 
 	view := d.View()
-	for _, want := range []string{"Efficiency", "CPU efficiency", "25%", "Peak RAM", "2.4M", "Disk read", "30.0G"} {
+	for _, want := range []string{"showing the accounting record", "Efficiency", "CPU efficiency", "25%", "Peak RAM", "2.4M", "Disk read", "30.0G"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("Efficiency section missing %q, got:\n%s", want, view)
 		}

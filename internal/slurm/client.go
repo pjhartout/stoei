@@ -272,11 +272,10 @@ func (c *Client) PriorityConfig(ctx context.Context) (PriorityConfig, error) {
 	return ParsePriorityConfig(string(out)), nil
 }
 
-// JobDetail returns the parsed Key=Value detail for a single job via "scontrol
-// show jobid". The controller retains a finished job only briefly, so a job that
-// has aged out is reported as not found (there is no sacct fallback). The job ID
-// is validated and array-range notation is normalized away before it reaches a
-// command.
+// JobDetail returns parsed Key=Value detail for a single job. It prefers
+// "scontrol show jobid"; when the controller has purged the job, it falls back
+// to a single indexed sacct lookup. The job ID is validated and array-range
+// notation is normalized away before it reaches either command.
 func (c *Client) JobDetail(ctx context.Context, jobID string) (JobDetail, error) {
 	normalized := NormalizeArrayJobID(jobID)
 	if err := validateJobID(normalized); err != nil {
@@ -285,13 +284,20 @@ func (c *Client) JobDetail(ctx context.Context, jobID string) (JobDetail, error)
 
 	out, err := c.runner.Run(ctx, "scontrol", "show", "jobid", normalized)
 	if err != nil {
-		// Only scontrol's own "Invalid job id" reads as not-found; a timeout or
-		// unreachable controller must not masquerade as the job not existing.
+		// Only scontrol's own "Invalid job id" means the record may have aged
+		// out. Timeouts and controller failures must retain their real cause.
 		var ce *CommandError
-		if errors.As(err, &ce) && strings.Contains(strings.ToLower(ce.Stderr), "invalid job id") {
-			return JobDetail{}, fmt.Errorf("job %s not found: %w", jobID, err)
+		if !errors.As(err, &ce) || !strings.Contains(strings.ToLower(ce.Stderr), "invalid job id") {
+			return JobDetail{}, fmt.Errorf("job %s: %w", jobID, err)
 		}
-		return JobDetail{}, fmt.Errorf("job %s: %w", jobID, err)
+		detail, found, acctErr := c.accountingJobDetail(ctx, normalized)
+		if acctErr != nil {
+			return JobDetail{}, fmt.Errorf("job %s accounting detail: %w", jobID, acctErr)
+		}
+		if found {
+			return detail, nil
+		}
+		return JobDetail{}, fmt.Errorf("job %s not found: %w", jobID, err)
 	}
 	records := ParseScontrolJobRecords(strings.TrimSpace(string(out)))
 	if len(records) == 0 {

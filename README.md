@@ -10,7 +10,8 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 
 - Auto-refreshing job list with running/pending/requeue stats
 - Completed-job history merged into the Jobs tab
-- Job detail view (`Enter` or `i`) and a log viewer with search and `$EDITOR`
+- Job detail view (`Enter` or `i`) with live/final CPU, RAM, GPU, and disk
+  efficiency, plus a log viewer with search and `$EDITOR`
 - Tabs for Jobs, Nodes, Users, Priority, and Logs — the Logs tab records every
   Slurm command stoei runs (with size and timing), fetch failures and
   recoveries, and the feedback from your own actions
@@ -103,6 +104,16 @@ stoei
 ```
 
 stoei runs the Slurm CLIs (`squeue`, `scontrol`, `sshare`, `sprio`, `scancel`) as the current user, so run it from a login node where those commands work. It queries `sacct`/slurmdbd at most once a night to reconcile the job-history journal, at a per-user minute between 01:00 and 05:00 local time so many users' sessions do not hit the accounting database together (or at the next launch, if stoei was not running then). Check the version with `stoei --version`.
+
+Opening a completed job performs an indexed, single-job `sacct` lookup. If the
+controller has already purged the job, entering its ID with `i` falls back to
+that accounting record, including for other users when cluster privacy policy
+allows it. Live efficiency remains visible only to the job's owner because
+Slurm restricts non-root `sstat` queries.
+
+Reopening your running job refreshes its runtime and allocation before sampling
+usage again. CPU efficiency is relative to all allocated CPUs, not a single core;
+disk throughput is averaged over the refreshed runtime.
 
 > [!WARNING]
 > stoei polls the Slurm controller (headnode) directly on every refresh, since

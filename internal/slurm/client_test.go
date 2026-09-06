@@ -232,6 +232,50 @@ func TestClientJobDetailScontrol(t *testing.T) {
 	}
 }
 
+func TestClientJobDetailFallsBackToAccounting(t *testing.T) {
+	const acctOut = "5824050|bob|COMPLETED|gpu|2026-09-05T10:00:00|2026-09-05T10:01:00|" +
+		"2026-09-05T11:03:03|01:02:03|0:0|node01|36|cpu=36,mem=1110G|" +
+		"/logs/train_%j.err|/logs/train_%j.out|train\n"
+	r := &FakeRunner{
+		Outputs: map[string][]byte{"sacct": []byte(acctOut)},
+		Errs: map[string]error{"scontrol": &CommandError{
+			Name:   "scontrol",
+			Stderr: "slurm_load_jobs error: Invalid job id specified",
+			Err:    errors.New("exit status 1"),
+		}},
+	}
+
+	detail, err := NewClient(r).JobDetail(context.Background(), "5824050")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Source != "sacct" {
+		t.Errorf("Source = %q, want sacct", detail.Source)
+	}
+	for field, want := range map[string]string{
+		"JobId":     "5824050",
+		"JobName":   "train",
+		"UserId":    "bob",
+		"JobState":  "COMPLETED",
+		"NumCPUs":   "36",
+		"AllocTRES": "cpu=36,mem=1110G",
+		"StdOut":    "/logs/train_5824050.out",
+	} {
+		if got := detail.Fields[field]; got != want {
+			t.Errorf("%s = %q, want %q", field, got, want)
+		}
+	}
+	if len(r.Calls) != 2 || r.Calls[0].Name != "scontrol" || r.Calls[1].Name != "sacct" {
+		t.Fatalf("calls = %+v, want scontrol then sacct", r.Calls)
+	}
+	acctCall := r.Calls[1]
+	for _, want := range []string{"--allusers", "-X", "-j", "5824050", "--format=" + acctFormat} {
+		if !argsContain(acctCall, want) {
+			t.Errorf("sacct args missing %q: %v", want, acctCall.Args)
+		}
+	}
+}
+
 // TestClientJobDetailNormalizesArrayID verifies the array range is stripped
 // before the job ID reaches scontrol, which cannot accept bracket notation.
 func TestClientJobDetailNormalizesArrayID(t *testing.T) {

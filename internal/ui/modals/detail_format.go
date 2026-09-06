@@ -46,13 +46,18 @@ var nodeCategories = []fieldCategory{
 // values align in a column.
 const labelWidth = 24
 
-// formatJobDetail renders a JobDetail's "scontrol show jobid" fields grouped by
-// category.
+// formatJobDetail renders a JobDetail's scontrol-shaped fields grouped by
+// category and identifies accounting records returned after controller expiry.
 func formatJobDetail(detail store.JobDetail, styles theme.Styles) string {
 	if len(detail.Fields) == 0 {
 		return styles.Subtle.Render("No job information could be parsed.")
 	}
-	return formatCategorized(detail.Fields, scontrolJobCategories, nil, styles)
+	content := formatCategorized(detail.Fields, scontrolJobCategories, nil, styles)
+	if detail.Source == "sacct" {
+		note := styles.Subtle.Render("Controller no longer has this job — showing the accounting record.")
+		return note + "\n" + content
+	}
+	return content
 }
 
 // formatNodeDetail renders a node's scontrol fields grouped by category.

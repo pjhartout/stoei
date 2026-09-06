@@ -171,7 +171,7 @@ func TestClientJobUsageCommands(t *testing.T) {
 		t.Fatal(err)
 	}
 	call := lastCall(r)
-	if call.Name != "sacct" || !argsContain(call, "-j") || !argsContain(call, "5834914") || !argsContain(call, sacctUsageFormat) {
+	if call.Name != "sacct" || !argsContain(call, "--allusers") || !argsContain(call, "-j") || !argsContain(call, "5834914") || !argsContain(call, sacctUsageFormat) {
 		t.Errorf("finished-job usage argv: %s %v", call.Name, call.Args)
 	}
 

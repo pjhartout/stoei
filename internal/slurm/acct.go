@@ -73,9 +73,8 @@ func ParseAcctJobs(raw string) []ControllerJob {
 	return jobs
 }
 
-// acctQueryTimeout caps the sacct query well below the UI's 30s fetch budget so
-// a slow slurmdbd cannot starve the squeue journal query that shares the fetch
-// context.
+// acctQueryTimeout bounds each sacct call so a slurmdbd outage cannot consume
+// the caller's entire fetch budget.
 const acctQueryTimeout = 10 * time.Second
 
 // queryAcctJobs runs the single per-user sacct query, windowed to the journal
@@ -94,6 +93,50 @@ func (c *Client) queryAcctJobs(ctx context.Context) ([]ControllerJob, error) {
 		return nil, err
 	}
 	return ParseAcctJobs(string(out)), nil
+}
+
+// accountingJobDetail returns one scontrol-shaped detail record from sacct.
+// It is used only after the controller has purged a completed job; --allusers
+// requests another user's record when cluster accounting policy permits it.
+func (c *Client) accountingJobDetail(ctx context.Context, jobID string) (JobDetail, bool, error) {
+	ctx, cancel := context.WithTimeout(ctx, acctQueryTimeout)
+	defer cancel()
+	out, err := c.runner.Run(ctx, "sacct",
+		"--allusers", "-n", "-P", "-X",
+		"-j", jobID,
+		"--format="+acctFormat,
+	)
+	if err != nil {
+		return JobDetail{}, false, err
+	}
+	for _, job := range ParseAcctJobs(string(out)) {
+		if job.ID != jobID {
+			continue
+		}
+		fields := make(map[string]string, 15)
+		set := func(key, value string) {
+			if strings.TrimSpace(value) != "" {
+				fields[key] = value
+			}
+		}
+		set("JobId", job.ID)
+		set("JobName", job.Name)
+		set("UserId", job.User)
+		set("JobState", job.State)
+		set("Partition", job.Partition)
+		set("SubmitTime", job.Submit)
+		set("StartTime", job.Start)
+		set("EndTime", job.End)
+		set("RunTime", job.Elapsed)
+		set("ExitCode", job.ExitCode)
+		set("NodeList", job.NodeList)
+		set("NumCPUs", job.NCPUS)
+		set("AllocTRES", job.AllocTRES)
+		set("StdOut", job.StdOut)
+		set("StdErr", job.StdErr)
+		return JobDetail{Fields: fields, Source: "sacct"}, true, nil
+	}
+	return JobDetail{}, false, nil
 }
 
 // The sacct reconcile runs once at launch (when the last success predates the

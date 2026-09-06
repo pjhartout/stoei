@@ -102,9 +102,9 @@ func NewJobDetail(client store.SlurmClient, cache *JobDetailCache, styles theme.
 	return d
 }
 
-// Init returns the Cmd the modal needs after it is pushed: either nothing (a
-// cache hit already populated the box) or a fetch Cmd plus the spinner tick. The
-// root calls this once when pushing the modal.
+// Init shows cached details immediately and refreshes live usage asynchronously.
+// A cache miss fetches the detail with a spinner; the root calls this once when
+// pushing the modal.
 func (d *JobDetail) Init() tea.Cmd {
 	if e, ok := d.cache.Get(d.jobID, d.state); ok {
 		d.applyEntry(e)
@@ -142,14 +142,21 @@ func (d *JobDetail) applyEntry(e cachedDetail) {
 	d.box.GotoTop()
 }
 
-// usageInitCmd decides whether a cache hit still needs a usage fetch: a
-// running job is re-sampled on every open so the live numbers stay live, and
-// an entry cached before its usage section arrived completes now.
+// usageInitCmd refreshes the detail before sampling a live job so fresh counters
+// are not divided by a cached RunTime or allocation. Finished jobs only fetch
+// usage if their cached section has not arrived yet.
 func (d *JobDetail) usageInitCmd(e cachedDetail) tea.Cmd {
 	if e.err != "" {
 		return nil
 	}
-	if e.usage != "" && store.IsTerminalState(d.currentState()) {
+	state := d.currentState()
+	if state == "" || strings.HasPrefix(state, "PENDING") {
+		return nil
+	}
+	if !store.IsTerminalState(state) && d.ownJob() {
+		return d.fetchCmd()
+	}
+	if e.usage != "" && store.IsTerminalState(state) {
 		return nil
 	}
 	return d.startUsageFetch()

@@ -86,7 +86,7 @@ func (c *Client) JobUsage(ctx context.Context, jobID string, running bool) (JobU
 		return ParseSstatUsage(normalized, string(out)), nil
 	}
 
-	out, err := c.runner.Run(ctx, "sacct", "-n", "-P", "-j", normalized, "-o", sacctUsageFormat)
+	out, err := c.runner.Run(ctx, "sacct", "--allusers", "-n", "-P", "-j", normalized, "-o", sacctUsageFormat)
 	if err != nil {
 		return JobUsage{}, fmt.Errorf("job %s usage: %w", jobID, err)
 	}
