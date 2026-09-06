@@ -1,6 +1,7 @@
 package modals
 
 import (
+	"context"
 	"errors"
 	"regexp"
 	"strings"
@@ -43,6 +44,18 @@ var ansiSeq = regexp.MustCompile(`\x1b\[[0-9;]*m`)
 
 // stripAnsi removes SGR escape sequences from a rendered view.
 func stripAnsi(s string) string { return ansiSeq.ReplaceAllString(s, "") }
+
+type translatedUsageClient struct {
+	*store.FakeClient
+	usageJobID string
+}
+
+func (c *translatedUsageClient) JobUsage(ctx context.Context, jobID string, running bool) (store.JobUsage, error) {
+	if jobID != c.usageJobID {
+		return store.JobUsage{}, errors.New("sstat cannot match the display array-task ID")
+	}
+	return c.FakeClient.JobUsage(ctx, jobID, running)
+}
 
 // TestJobDetailRendersFieldsFromFakeClient drives the job-detail modal end to end
 // against a FakeClient: Init issues a fetch Cmd (not a blocking read), and feeding
@@ -120,6 +133,45 @@ func TestJobDetailCacheHitSkipsFetch(t *testing.T) {
 	}
 	if !strings.Contains(d.View(), "CACHED DETAIL") {
 		t.Errorf("cache hit not rendered, got:\n%s", d.View())
+	}
+}
+func TestJobDetailRunningArrayUsesControllerIDForLiveUsage(t *testing.T) {
+	fc := &translatedUsageClient{
+		FakeClient: &store.FakeClient{
+			UsernameStr: "alice",
+			JobDetailData: store.JobDetail{
+				Source: "scontrol",
+				Fields: map[string]string{
+					"JobId":    "5871576",
+					"JobState": "RUNNING",
+					"UserId":   "alice(1000)",
+					"RunTime":  "00:01:00",
+					"NumCPUs":  "2",
+					"TRES":     "cpu=2,mem=4G,node=1",
+				},
+			},
+			JobUsageData: store.JobUsage{
+				Source:      "sstat",
+				Sampled:     true,
+				CPUTimeSec:  96,
+				MaxRSSBytes: 1 << 30,
+			},
+		},
+		usageJobID: "5871576",
+	}
+	d := NewJobDetail(fc, NewJobDetailCache(), testStyles(), "5871571_0", "RUNNING", store.JobDetail{})
+	d.SetSize(100, 40)
+
+	loaded := firstMsg(d.Init()).(jobDetailLoadedMsg)
+	_, usageCmd, _ := d.Update(loaded)
+	usageMsg := firstMsg(usageCmd).(jobUsageLoadedMsg)
+	d.Update(usageMsg)
+
+	view := d.View()
+	for _, want := range []string{"Efficiency (live)", "CPU efficiency", "80%", "Peak RAM"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("running array efficiency missing %q, got:\n%s", want, view)
+		}
 	}
 }
 

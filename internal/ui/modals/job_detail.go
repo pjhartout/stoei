@@ -290,10 +290,20 @@ func (d *JobDetail) startUsageFetch() tea.Cmd {
 		return nil
 	}
 	client, jobID := d.client, d.jobID
+	usageID := jobID
+	if running {
+		// squeue identifies array tasks as "<ArrayJobId>_<ArrayTaskId>", but
+		// sstat reports their steps under scontrol's distinct numeric JobId.
+		// Querying that controller ID selects the task instead of every sibling
+		// and gives the parser the same prefix sstat returns.
+		if id := strings.TrimSpace(d.fields["JobId"]); id != "" {
+			usageID = id
+		}
+	}
 	return func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), detailFetchTimeout)
 		defer cancel()
-		usage, err := client.JobUsage(ctx, jobID, running)
+		usage, err := client.JobUsage(ctx, usageID, running)
 		return jobUsageLoadedMsg{jobID: jobID, usage: usage, err: err}
 	}
 }
