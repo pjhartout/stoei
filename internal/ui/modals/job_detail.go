@@ -63,9 +63,10 @@ type JobDetail struct {
 	// retains a finished job only for MinJobAge, but its logs live on).
 	fallback store.JobDetail
 
-	box     scrollBox
-	spin    spinner.Model
-	loading bool
+	box          scrollBox
+	spin         spinner.Model
+	loading      bool
+	usageLoading bool
 
 	stdout string
 	stderr string
@@ -74,7 +75,7 @@ type JobDetail struct {
 	// modal with current values pre-filled.
 	fields map[string]string
 	// content is the rendered detail fields; usage is the rendered Efficiency
-	// section appended below them once the usage lookup lands.
+	// section shown above them once the usage lookup lands.
 	content string
 	usage   string
 }
@@ -180,11 +181,14 @@ func (d *JobDetail) Update(msg tea.Msg) (Modal, tea.Cmd, bool) {
 		return d, nil, false
 
 	case spinner.TickMsg:
-		if !d.loading {
+		if !d.loading && !d.usageLoading {
 			return d, nil, false
 		}
 		var cmd tea.Cmd
 		d.spin, cmd = d.spin.Update(msg)
+		if d.usageLoading {
+			d.renderUsageLoading()
+		}
 		return d, cmd, false
 
 	case tea.KeyPressMsg:
@@ -296,6 +300,8 @@ func (d *JobDetail) startUsageFetch() tea.Cmd {
 		d.setUsage(formatUsageNote(usageForeignNote, d.styles))
 		return nil
 	}
+	d.usageLoading = true
+	d.renderUsageLoading()
 	client, jobID := d.client, d.jobID
 	usageID := jobID
 	if running {
@@ -307,17 +313,25 @@ func (d *JobDetail) startUsageFetch() tea.Cmd {
 			usageID = id
 		}
 	}
-	return func() tea.Msg {
+	fetch := func() tea.Msg {
 		ctx, cancel := context.WithTimeout(context.Background(), detailFetchTimeout)
 		defer cancel()
 		usage, err := client.JobUsage(ctx, usageID, running)
 		return jobUsageLoadedMsg{jobID: jobID, usage: usage, err: err}
 	}
+	return tea.Batch(fetch, d.spin.Tick)
 }
 
-// applyUsage renders the efficiency lookup result below the detail fields. A
+// renderUsageLoading keeps transient spinner frames out of the detail cache.
+func (d *JobDetail) renderUsageLoading() {
+	note := formatUsageNote(d.spin.View()+" Loading usage…", d.styles)
+	d.box.SetContent(composedContent(d.content, note))
+}
+
+// applyUsage renders the efficiency lookup result above the detail fields. A
 // lookup error renders as a subdued note rather than replacing the detail.
 func (d *JobDetail) applyUsage(msg jobUsageLoadedMsg) {
+	d.usageLoading = false
 	if msg.err != nil {
 		d.setUsage(formatUsageNote("usage unavailable: "+msg.err.Error(), d.styles))
 		return
@@ -333,14 +347,12 @@ func (d *JobDetail) setUsage(section string) {
 	d.cache.SetUsage(d.jobID, d.state, section)
 }
 
-// composedContent joins the detail render and the usage section with the same
-// blank separator line formatCategorized puts between its categories (the
-// section strings start with a single newline, the detail ends without one).
+// composedContent puts efficiency first with a blank line before the details.
 func composedContent(content, usage string) string {
 	if usage == "" {
 		return content
 	}
-	return content + "\n" + usage
+	return strings.TrimPrefix(usage, "\n") + "\n\n" + content
 }
 
 // openModify emits an OpenModifyMsg carrying the loaded scontrol fields so the

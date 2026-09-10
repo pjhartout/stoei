@@ -210,7 +210,7 @@ func TestJobDetailRunningArrayUsesControllerIDForLiveUsage(t *testing.T) {
 }
 
 // TestJobDetailUsageSectionRendersAfterLoad drives the full two-step flow: the
-// detail load starts the usage lookup, and feeding its result appends the
+// detail load starts the usage lookup, and feeding its result shows the
 // Efficiency section with the derived metrics.
 func TestJobDetailUsageSectionRendersAfterLoad(t *testing.T) {
 	fc := &store.FakeClient{
@@ -244,6 +244,14 @@ func TestJobDetailUsageSectionRendersAfterLoad(t *testing.T) {
 	if usageCmd == nil {
 		t.Fatal("detail load did not start the usage lookup")
 	}
+	loadingView := d.View()
+	if !strings.Contains(loadingView, "Loading usage…") ||
+		strings.Index(loadingView, "Efficiency") > strings.Index(loadingView, "showing the accounting record") {
+		t.Fatalf("usage loading state must precede job details, got:\n%s", loadingView)
+	}
+	if entry, _ := cache.Get("5834914", "COMPLETED"); entry.usage != "" {
+		t.Fatal("loading placeholder cached as completed usage")
+	}
 	if fc.LastJobUsageRunning {
 		t.Error("terminal job queried via sstat; want sacct (running=false)")
 	}
@@ -254,6 +262,10 @@ func TestJobDetailUsageSectionRendersAfterLoad(t *testing.T) {
 	d.Update(usageMsg)
 
 	view := d.View()
+	if strings.Contains(view, "Loading usage…") ||
+		strings.Index(view, "Efficiency") > strings.Index(view, "showing the accounting record") {
+		t.Fatalf("loaded efficiency must replace loading state before job details, got:\n%s", view)
+	}
 	for _, want := range []string{"showing the accounting record", "Efficiency", "CPU efficiency", "25%", "Peak RAM", "2.4M", "Disk read", "30.0G"} {
 		if !strings.Contains(view, want) {
 			t.Errorf("Efficiency section missing %q, got:\n%s", want, view)
@@ -285,6 +297,43 @@ func TestJobDetailUsageSectionRendersAfterLoad(t *testing.T) {
 	}
 	if !strings.Contains(reopened.View(), "CPU efficiency") {
 		t.Error("reopen lost the cached Efficiency section")
+	}
+}
+
+func TestJobDetailUsageSpinner(t *testing.T) {
+	for _, failed := range []bool{false, true} {
+		name := "success"
+		var usageErr error
+		if failed {
+			name = "error"
+			usageErr = errors.New("accounting unavailable")
+		}
+		t.Run(name, func(t *testing.T) {
+			d := NewJobDetail(&store.FakeClient{}, NewJobDetailCache(), testStyles(), "123", "COMPLETED", store.JobDetail{})
+			d.SetSize(100, 40)
+			_, cmd, _ := d.Update(jobDetailLoadedMsg{
+				jobID:  "123",
+				detail: store.JobDetail{Fields: map[string]string{"JobState": "COMPLETED"}},
+			})
+			batch, ok := cmd().(tea.BatchMsg)
+			if !ok || len(batch) != 2 {
+				t.Fatal("usage fetch must start the spinner alongside the lookup")
+			}
+			before := d.View()
+			_, tickCmd, _ := d.Update(batch[1]())
+			if tickCmd == nil || d.View() == before {
+				t.Fatal("usage spinner did not animate and schedule another frame")
+			}
+			d.Update(jobUsageLoadedMsg{jobID: "123", err: usageErr})
+			finished := d.View()
+			if strings.Contains(finished, "Loading usage…") {
+				t.Fatal("usage loading state remained after lookup completed")
+			}
+			_, tickCmd, _ = d.Update(d.spin.Tick())
+			if tickCmd != nil || d.View() != finished {
+				t.Fatal("usage spinner continued after lookup completed")
+			}
+		})
 	}
 }
 

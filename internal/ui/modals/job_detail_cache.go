@@ -22,7 +22,7 @@ type cachedDetail struct {
 	// fields is the parsed scontrol detail backing the render, kept so the
 	// modify modal can pre-fill current values on a cache hit.
 	fields map[string]string
-	// usage is the rendered Efficiency section appended below content; it
+	// usage is the rendered Efficiency section shown above content; it
 	// arrives after the detail render and is attached via SetUsage.
 	usage string
 }

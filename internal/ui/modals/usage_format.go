@@ -15,7 +15,7 @@ import (
 const usageForeignNote = "only visible to the job's owner while it runs; " +
 	"recorded to accounting on completion"
 
-// formatUsageSection renders the Efficiency section appended below the
+// formatUsageSection renders the Efficiency section shown above the
 // scontrol fields in the job-detail modal: measured CPU efficiency, peak RAM,
 // GPU utilization/memory, and cumulative disk IO with average rates.
 func formatUsageSection(eff store.JobEfficiency, styles theme.Styles) string {
