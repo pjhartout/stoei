@@ -121,6 +121,41 @@ func TestClientJobHistoryFromJournal(t *testing.T) {
 	}
 }
 
+// TestRefreshJobHistoryBypassesSnapshotThrottle verifies a completion burst
+// performs one real coalesced query even when the ordinary journal cache is fresh.
+func TestRefreshJobHistoryBypassesSnapshotThrottle(t *testing.T) {
+	r := &fixtureRunner{outputs: map[string]string{"squeue": ""}}
+	c := NewClient(r, WithUsername("alice"),
+		WithJournal(filepath.Join(t.TempDir(), "jobs.jsonl")),
+		WithClock(func() time.Time { return time.Date(2024, 1, 16, 0, 0, 0, 0, time.UTC) }),
+	)
+	squeueCalls := func() int {
+		n := 0
+		for _, call := range r.calls {
+			if call.Name == "squeue" {
+				n++
+			}
+		}
+		return n
+	}
+
+	if _, _, err := c.JobHistory(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := c.JobHistory(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	if got := squeueCalls(); got != 1 {
+		t.Fatalf("ordinary history queries issued %d squeue calls, want 1", got)
+	}
+	if _, _, err := c.RefreshJobHistory(context.Background(), 7); err != nil {
+		t.Fatal(err)
+	}
+	if got := squeueCalls(); got != 2 {
+		t.Fatalf("forced history refresh issued %d total squeue calls, want 2", got)
+	}
+}
+
 func TestClientClusterNodesCommand(t *testing.T) {
 	r := &fixtureRunner{outputs: map[string]string{"scontrol": loadFixture(t, "scontrol_nodes.txt")}}
 	c := NewClient(r, WithUsername("alice"))

@@ -63,6 +63,8 @@ type FakeClient struct {
 	LastCompletedJobID string
 	// LastHistoryDays is the day window passed to the most recent JobHistory call.
 	LastHistoryDays int
+	// LastHistoryForced reports whether RefreshJobHistory was called.
+	LastHistoryForced bool
 	// AcctWarningMsg is returned (and cleared) by the next AcctWarning call.
 	AcctWarningMsg string
 	// AcctDueFlag is returned by AcctDue.
@@ -98,6 +100,14 @@ func (f *FakeClient) AllUsersJobs(_ context.Context) ([]slurm.AllUsersJob, error
 // JobHistory implements SlurmClient.
 func (f *FakeClient) JobHistory(_ context.Context, days int) ([]slurm.HistoryJob, slurm.HistoryStats, error) {
 	f.LastHistoryDays = days
+	f.LastHistoryForced = false
+	return f.HistoryJobsData, f.HistoryStatsData, f.JobHistoryErr
+}
+
+// RefreshJobHistory implements SlurmClient.
+func (f *FakeClient) RefreshJobHistory(_ context.Context, days int) ([]slurm.HistoryJob, slurm.HistoryStats, error) {
+	f.LastHistoryDays = days
+	f.LastHistoryForced = true
 	return f.HistoryJobsData, f.HistoryStatsData, f.JobHistoryErr
 }
 

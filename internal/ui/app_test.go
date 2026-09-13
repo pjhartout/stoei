@@ -19,9 +19,12 @@ import (
 // username, with a fixed clock so LastUpdated is deterministic.
 func newTestApp(t *testing.T, fc *store.FakeClient) App {
 	t.Helper()
+	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
 	st := store.New()
-	st.SetClock(func() time.Time { return time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC) })
+	st.SetClock(func() time.Time { return now })
 	a := New(st, fc)
+	a.polls.now = func() time.Time { return now }
+	a.polls.jitterState = 1
 	// Use a negligible tick interval so re-arm timer Cmds fire immediately when a
 	// test drains them; the assertions only inspect the produced message types,
 	// never real timing.
@@ -377,6 +380,90 @@ func TestManualRefreshSkipsLoadingSection(t *testing.T) {
 
 	if got := a.store.Gen(store.SectionAllUsersJobs); got != g {
 		t.Errorf("all-users generation bumped (%d→%d); manualRefresh must skip a loading section", g, got)
+	}
+}
+
+// TestHeavySectionCooldownPreventsRefreshHammering verifies a settled
+// cluster-wide query cannot be immediately repeated by manual refresh or tab
+// switching, but becomes eligible again after its freshness window.
+func TestHeavySectionCooldownPreventsRefreshHammering(t *testing.T) {
+	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	a := newTestApp(t, &store.FakeClient{})
+	a.polls.now = func() time.Time { return now }
+
+	first := a.dispatchSection(store.SectionAllUsersJobs)
+	if first == nil {
+		t.Fatal("first all-users fetch was suppressed")
+	}
+	m, _ := a.Update(first())
+	a = m.(App)
+	if cmd := a.dispatchSection(store.SectionAllUsersJobs); cmd != nil {
+		t.Fatal("fresh all-users data was immediately re-fetched")
+	}
+
+	now = now.Add(allUsersFetchCooldown)
+	if cmd := a.dispatchSection(store.SectionAllUsersJobs); cmd == nil {
+		t.Fatal("all-users fetch remained blocked after its freshness cooldown")
+	}
+}
+
+// TestRecurringFetchFailureBacksOff verifies scheduler failures progressively
+// delay automatic retries and a recovery clears the delay.
+func TestRecurringFetchFailureBacksOff(t *testing.T) {
+	now := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	fc := &store.FakeClient{RunningJobsErr: errors.New("controller overloaded")}
+	a := newTestApp(t, fc)
+	a.polls.now = func() time.Time { return now }
+	a.intervals.Fast = time.Minute
+
+	fail := func() {
+		cmd := a.dispatchRunning(false)
+		if cmd == nil {
+			t.Fatal("expected running-jobs fetch")
+		}
+		m, _ := a.Update(cmd())
+		a = m.(App)
+	}
+
+	fail()
+	if cmd := a.dispatchRunning(false); cmd != nil {
+		t.Fatal("first failure did not delay the next automatic retry")
+	}
+	now = now.Add(time.Minute)
+	fail()
+	now = now.Add(time.Minute)
+	if cmd := a.dispatchRunning(false); cmd != nil {
+		t.Fatal("second failure did not double the retry delay")
+	}
+	now = now.Add(time.Minute)
+	fc.RunningJobsErr = nil
+	cmd := a.dispatchRunning(false)
+	if cmd == nil {
+		t.Fatal("retry stayed blocked after the doubled delay elapsed")
+	}
+	m, _ := a.Update(cmd())
+	a = m.(App)
+	if a.polls.failures[store.SectionRunningJobs] != 0 {
+		t.Fatal("successful refresh did not reset failure backoff")
+	}
+}
+
+// TestPollJitterStaysWithinCadenceBounds verifies staggering cannot turn into
+// either high-frequency polling or excessive staleness.
+func TestPollJitterStaysWithinCadenceBounds(t *testing.T) {
+	p := newPollControl()
+	p.jitterState = 1
+	base := time.Minute
+	seen := map[time.Duration]struct{}{}
+	for range 32 {
+		got := p.jitter(base)
+		if got < 54*time.Second || got > 66*time.Second {
+			t.Fatalf("jittered minute = %s, outside ±10%%", got)
+		}
+		seen[got] = struct{}{}
+	}
+	if len(seen) == 1 {
+		t.Fatal("poll jitter did not vary recurring delays")
 	}
 }
 

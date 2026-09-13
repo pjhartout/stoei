@@ -37,7 +37,7 @@ func TestEmbeddedDefaultParsesToDefaults(t *testing.T) {
 func TestLoadRoundTrips(t *testing.T) {
 	in := Config{
 		Theme:           "dracula",
-		RefreshInterval: 12.5,
+		RefreshInterval: 180,
 		JobHistoryDays:  30,
 		LogViewerLines:  20000,
 		KeybindMode:     KeybindEmacs,
@@ -115,6 +115,24 @@ func TestClampPreservesBoundaryValues(t *testing.T) {
 	}
 }
 
+// TestLoadRejectsTooFastRefresh protects slurmctld from high-rate polling
+// configured by an older stoei release.
+func TestLoadRejectsTooFastRefresh(t *testing.T) {
+	in := Default()
+	in.RefreshInterval = MinRefreshInterval - 1
+	data, err := rawYAML(in)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.RefreshInterval != DefaultRefreshInterval {
+		t.Errorf("too-fast refresh retained as %v seconds", got.RefreshInterval)
+	}
+}
+
 // TestLoadInvalidYAMLReturnsDefaults asserts malformed YAML yields defaults+err.
 func TestLoadInvalidYAMLReturnsDefaults(t *testing.T) {
 	got, err := Load([]byte("this: : : not yaml"))
@@ -133,7 +151,7 @@ func TestSaveLoadFileRoundTrips(t *testing.T) {
 	path := filepath.Join(dir, "nested", "config.yaml")
 	in := Config{
 		Theme:           "dracula",
-		RefreshInterval: 12.5,
+		RefreshInterval: 180,
 		JobHistoryDays:  30,
 		LogViewerLines:  20000,
 		KeybindMode:     KeybindEmacs,

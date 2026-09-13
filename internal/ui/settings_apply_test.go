@@ -38,7 +38,7 @@ func TestApplyConfigSwapsThemeKeymapIntervals(t *testing.T) {
 
 	newCfg := config.Config{
 		Theme:           "dracula",
-		RefreshInterval: 30,
+		RefreshInterval: 180,
 		JobHistoryDays:  14,
 		LogViewerLines:  20000,
 		KeybindMode:     config.KeybindEmacs,

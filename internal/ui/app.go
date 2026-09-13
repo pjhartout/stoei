@@ -46,6 +46,91 @@ var tabTitles = [numTabs]string{"Jobs", "Nodes", "Users", "Priority", "Logs"}
 // maxToasts caps how many toast lines are shown at once.
 const maxToasts = 3
 
+const (
+	manualRefreshCooldown = 10 * time.Second
+	historyFetchCooldown  = 2 * time.Minute
+	allUsersFetchCooldown = 2 * time.Minute
+	nodesFetchCooldown    = 5 * time.Minute
+	priorityFetchCooldown = 5 * time.Minute
+	maxFetchBackoff       = 15 * time.Minute
+)
+
+// pollControl rate-limits scheduler requests across App value copies. The
+// pointer is intentional: Bubble Tea calls Init on a copy, while the dispatch
+// times recorded there must still protect the live model from duplicate work.
+type pollControl struct {
+	now          func() time.Time
+	lastDispatch map[store.Section]time.Time
+	failures     map[store.Section]uint
+	retryAfter   map[store.Section]time.Time
+	jitterState  uint64
+}
+
+func newPollControl() *pollControl {
+	seed := uint64(time.Now().UnixNano())
+	if seed == 0 {
+		seed = 1
+	}
+	return &pollControl{
+		now:          time.Now,
+		lastDispatch: make(map[store.Section]time.Time),
+		failures:     make(map[store.Section]uint),
+		retryAfter:   make(map[store.Section]time.Time),
+		jitterState:  seed,
+	}
+}
+
+// allow records a dispatch when the section is outside its freshness cooldown
+// and failure backoff. Explicit personal-job refreshes may bypass backoff, but
+// still keep a short debounce so repeated key presses cannot hammer slurmctld.
+func (p *pollControl) allow(section store.Section, cooldown time.Duration, bypassBackoff bool) bool {
+	now := p.now()
+	if !bypassBackoff && now.Before(p.retryAfter[section]) {
+		return false
+	}
+	if last := p.lastDispatch[section]; !last.IsZero() && now.Sub(last) < cooldown {
+		return false
+	}
+	p.lastDispatch[section] = now
+	return true
+}
+
+// recordResult applies a capped exponential retry delay after errors and resets
+// it after recovery. The first retry remains at the section's normal cadence.
+func (p *pollControl) recordResult(section store.Section, err error, base time.Duration) {
+	if err == nil {
+		delete(p.failures, section)
+		delete(p.retryAfter, section)
+		return
+	}
+	failures := p.failures[section] + 1
+	p.failures[section] = failures
+	delay := base
+	for n := uint(1); n < failures && delay < maxFetchBackoff; n++ {
+		delay *= 2
+	}
+	if delay > maxFetchBackoff {
+		delay = maxFetchBackoff
+	}
+	p.retryAfter[section] = p.now().Add(delay)
+}
+
+// jitter varies recurring tick delays by ±10%, spreading RPCs from sessions
+// started together without changing their long-run refresh cadence.
+func (p *pollControl) jitter(base time.Duration) time.Duration {
+	x := p.jitterState
+	x ^= x << 13
+	x ^= x >> 7
+	x ^= x << 17
+	p.jitterState = x
+	offset := int64(x%2001) - 1000
+	d := base + time.Duration(int64(base)*offset/10000)
+	if d < time.Nanosecond {
+		return time.Nanosecond
+	}
+	return d
+}
+
 // App is the root Bubble Tea model. It is a value type (Bubble Tea copies models
 // between Update calls); the Store and SlurmClient are pointers/interfaces so the
 // shared mutable state lives behind them.
@@ -98,6 +183,7 @@ type App struct {
 	// heavy (slow-tier) fetches are instead guarded per section by their
 	// StateLoading flag, so visibility-gated and tick-driven dispatches never stack.
 	runningInFlight bool
+	polls           *pollControl
 	// spinnerActive is true while the loading-spinner animation tick is in flight,
 	// so it is started at most once and stopped when nothing is loading.
 	spinnerActive bool
@@ -204,6 +290,7 @@ func NewWithConfig(s *store.Store, client store.SlurmClient, ring *components.Lo
 		focused:         true,
 		animActive:      true,
 		runningInFlight: true,
+		polls:           newPollControl(),
 		lastInput:       time.Now(),
 		jobs:            tabs.NewJobs(s, username, styles),
 		nodes:           tabs.NewNodes(s, styles),
@@ -238,35 +325,44 @@ func (a *App) applyKeyModeToTabs() {
 }
 
 // intervalsFromConfig derives the two-tier refresh intervals from cfg's
-// refresh_interval (seconds): the fast tier is the configured interval, the slow
-// tier is slowIntervalFactor times it.
+// refresh_interval (seconds): the personal-job tier is configured directly and
+// cluster-wide work runs four times less often.
 func intervalsFromConfig(cfg config.Config) Intervals {
-	fast := time.Duration(cfg.RefreshInterval * float64(time.Second))
-	if fast <= 0 {
-		fast = defaultFastInterval
+	seconds := cfg.RefreshInterval
+	if seconds < config.MinRefreshInterval || seconds > config.MaxRefreshInterval {
+		seconds = config.DefaultRefreshInterval
 	}
+	fast := time.Duration(seconds * float64(time.Second))
 	return Intervals{Fast: fast, Slow: fast * slowIntervalFactor}
 }
 
-// Init fires the minimal-critical first wave (availability + running jobs +
-// history), then a batched dispatch of the heavy sections, and starts both
-// tickers. Each fetch bumps its section generation and marks it loading (I4).
+type scheduledFetchMsg struct{ section store.Section }
+
+func scheduleFetchAfter(section store.Section, delay time.Duration) tea.Cmd {
+	return tea.Tick(delay, func(time.Time) tea.Msg { return scheduledFetchMsg{section: section} })
+}
+
+const (
+	startupHistoryDelay  = 250 * time.Millisecond
+	startupAllUsersDelay = 750 * time.Millisecond
+	startupNodesDelay    = 1500 * time.Millisecond
+)
+
+// Init starts the personal-job query immediately, staggers the cluster-wide
+// startup work, and starts both jittered polling tiers. Staging avoids the old
+// four-RPC burst produced by launching every Slurm query in one tea.Batch.
 func (a App) Init() tea.Cmd {
 	a.log("INFO", fmt.Sprintf("stoei %s started as %s · refresh every %s, heavy sections every %s · config %s",
 		a.version, a.client.Username(), a.intervals.Fast, a.intervals.Slow, cmp.Or(a.configPath, "(defaults)")))
-	critical := tea.Batch(
-		checkAvailability(a.client),
-		a.dispatchRunning(),
-		a.dispatchHistory(),
-	)
-	heavy := a.dispatchHeavyVisible()
-
 	cmds := []tea.Cmd{
 		tea.RequestBackgroundColor,
-		critical,
-		heavy,
-		fastTick(a.intervals.Fast),
-		slowTick(a.intervals.Slow),
+		checkAvailability(a.client),
+		a.dispatchRunning(false),
+		scheduleFetchAfter(store.SectionHistory, a.polls.jitter(startupHistoryDelay)),
+		scheduleFetchAfter(store.SectionAllUsersJobs, a.polls.jitter(startupAllUsersDelay)),
+		scheduleFetchAfter(store.SectionNodes, a.polls.jitter(startupNodesDelay)),
+		fastTick(a.polls.jitter(a.intervals.Fast)),
+		slowTick(a.polls.jitter(a.intervals.Slow)),
 		toastTick(toastTickInterval),
 		spinnerTick(spinnerTickInterval),
 		animTick(animTickInterval),
@@ -279,66 +375,65 @@ func (a App) Init() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// dispatchRunning bumps the running-jobs generation, marks it loading, sets the
-// in-flight guard, and returns the fetch Cmd.
-func (a *App) dispatchRunning() tea.Cmd {
+// dispatchRunning starts the personal-job query when failure backoff permits.
+// A manual dispatch bypasses failure backoff but remains debounced.
+func (a *App) dispatchRunning(manual bool) tea.Cmd {
+	cooldown := time.Duration(0)
+	if manual {
+		cooldown = manualRefreshCooldown
+	}
+	if !a.polls.allow(store.SectionRunningJobs, cooldown, manual) {
+		return nil
+	}
 	gen := a.store.NextGen(store.SectionRunningJobs)
 	a.store.SetLoading(store.SectionRunningJobs, gen)
 	a.runningInFlight = true
 	return fetchRunningJobs(a.client, gen)
 }
 
-// completionBulkThreshold is the just-vanished job count above which
-// fetchCompletions switches from one "scontrol show jobid" per id to a single
-// bulk history refresh. A draining array can vanish dozens of jobs in one tick;
-// past this threshold the bulk path is both lighter and complete.
-const completionBulkThreshold = 8
+// A second simultaneous completion is already cheaper as one user-scoped
+// history query than as parallel per-job scontrol RPCs.
+const completionBulkThreshold = 1
 
-// fetchCompletions returns a Cmd that records the final state of just-vanished
-// jobs in history, so completions observed mid-session reach the history view.
-// For a small batch it asks the controller for each job's record directly; once
-// the batch exceeds completionBulkThreshold (a draining array) it instead runs
-// one bulk "scontrol show jobs" history refresh (throttled at the client), which
-// captures every retained job in a single controller call rather than dozens —
-// and, unlike the per-id path, drops none of them. Returns nil when nothing
-// vanished.
+// fetchCompletions records final state for jobs that just left the live queue.
+// One completion uses an indexed scontrol lookup; a burst uses one user-scoped
+// journal refresh, never a fan-out of controller RPCs.
 func (a *App) fetchCompletions(ids []string) tea.Cmd {
 	if len(ids) == 0 {
 		return nil
 	}
 	if len(ids) > completionBulkThreshold {
-		return a.dispatchHistory()
+		return a.dispatchHistory(true)
 	}
-	cmds := make([]tea.Cmd, len(ids))
-	for i, id := range ids {
-		cmds[i] = fetchCompletedJob(a.client, id)
-	}
-	return tea.Batch(cmds...)
+	return fetchCompletedJob(a.client, ids[0])
 }
 
-// dispatchHistory bumps the history generation, marks it loading, and returns the
-// fetch Cmd. When the fetch will carry the daily sacct reconcile, it batches an
-// acctReconcilingMsg so Update pushes the spinner toast — a direct push here
-// would be lost when Init dispatches on a discarded model copy.
-func (a *App) dispatchHistory() tea.Cmd {
+// dispatchHistory starts a user-scoped journal refresh. Urgent completion
+// reconciliation bypasses failure backoff but remains debounced; ordinary
+// tick, tab-entry, and manual paths share the normal freshness cooldown.
+func (a *App) dispatchHistory(urgent bool) tea.Cmd {
+	if a.store.State(store.SectionHistory) == store.StateLoading {
+		return nil
+	}
+	cooldown := historyFetchCooldown
+	if urgent {
+		cooldown = manualRefreshCooldown
+	}
+	if !a.polls.allow(store.SectionHistory, cooldown, urgent) {
+		return nil
+	}
 	gen := a.store.NextGen(store.SectionHistory)
 	a.store.SetLoading(store.SectionHistory, gen)
-	fetch := fetchHistory(a.client, gen, a.cfg.JobHistoryDays)
+	fetch := fetchHistory(a.client, gen, a.cfg.JobHistoryDays, urgent)
 	if a.client.AcctDue() {
 		return tea.Batch(func() tea.Msg { return acctReconcilingMsg{} }, fetch)
 	}
 	return fetch
 }
 
-// dispatchHistoryIfIdle dispatches a history refresh unless one is already in
-// flight, so a slow tick or a tab-entry reconcile never stacks on an outstanding
-// fetch (and on a wave where Init/manualRefresh already dispatched history, this
-// self-skips). The controller call beneath it is throttled at the client (3s).
+// dispatchHistoryIfIdle applies the normal history cooldown and in-flight guard.
 func (a *App) dispatchHistoryIfIdle() tea.Cmd {
-	if a.store.State(store.SectionHistory) == store.StateLoading {
-		return nil
-	}
-	return a.dispatchHistory()
+	return a.dispatchHistory(false)
 }
 
 // dispatchHeavyVisible dispatches the heavy fetches whose data the UI can
@@ -392,11 +487,14 @@ func (a *App) priorityDataCmds() []tea.Cmd {
 	return cmds
 }
 
-// dispatchSection bumps a heavy section's generation, marks it loading, and
-// returns its fetch Cmd — unless it is already loading, in which case it returns
-// nil so a concurrent dispatch is not stacked on top.
+// dispatchSection starts one cluster-wide fetch when it is neither in flight,
+// fresh inside its section-specific cooldown, nor delayed by failure backoff.
 func (a *App) dispatchSection(section store.Section) tea.Cmd {
 	if a.store.State(section) == store.StateLoading {
+		return nil
+	}
+	cooldown, ok := sectionCooldown(section)
+	if !ok || !a.polls.allow(section, cooldown, false) {
 		return nil
 	}
 	gen := a.store.NextGen(section)
@@ -414,6 +512,37 @@ func (a *App) dispatchSection(section store.Section) tea.Cmd {
 		return fetchPriorityConfig(a.client, gen)
 	default:
 		return nil
+	}
+}
+
+func sectionCooldown(section store.Section) (time.Duration, bool) {
+	switch section {
+	case store.SectionAllUsersJobs:
+		return allUsersFetchCooldown, true
+	case store.SectionNodes:
+		return nodesFetchCooldown, true
+	case store.SectionFairShare, store.SectionPendingPrio, store.SectionPriorityConfig:
+		return priorityFetchCooldown, true
+	default:
+		return 0, false
+	}
+}
+
+// recordFetchResult updates failure backoff for one current-generation result.
+func (a *App) recordFetchResult(section store.Section, err error) {
+	a.polls.recordResult(section, err, a.pollInterval(section))
+}
+
+func (a *App) pollInterval(section store.Section) time.Duration {
+	switch section {
+	case store.SectionRunningJobs:
+		return a.intervals.Fast
+	case store.SectionNodes:
+		return a.intervals.Slow * nodesTickFactor
+	case store.SectionFairShare, store.SectionPendingPrio, store.SectionPriorityConfig:
+		return a.intervals.Slow * prioTickFactor
+	default:
+		return a.intervals.Slow
 	}
 }
 
@@ -445,6 +574,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.unavailable = msg.err
 		a.frame.invalidate()
 		return a, nil
+
+	case scheduledFetchMsg:
+		var cmd tea.Cmd
+		if msg.section == store.SectionHistory {
+			cmd = a.dispatchHistory(false)
+		} else {
+			cmd = a.dispatchSection(msg.section)
+		}
+		return a, tea.Batch(cmd, a.ensureSpinner())
 
 	case fastTickMsg:
 		return a.handleFastTick()
@@ -502,10 +640,11 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case runningJobsMsg:
-		// Only the newest fetch may release the single-flight guard; a stale
-		// generation arriving late must not unlock a still-running fetch.
+		// Only the newest fetch may release the single-flight guard or affect
+		// retry state; a stale generation belongs to a superseded request.
 		if msg.gen >= a.store.Gen(store.SectionRunningJobs) {
 			a.runningInFlight = false
+			a.recordFetchResult(store.SectionRunningJobs, msg.err)
 		}
 		// The manual-refresh progress toast is done the moment the result lands.
 		a.dropToasts(refreshToastTag)
@@ -532,6 +671,9 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if msg.warn != "" {
 			a.pushToastLevel(msg.warn, toastError)
 		}
+		if msg.gen >= a.store.Gen(store.SectionHistory) {
+			a.recordFetchResult(store.SectionHistory, msg.err)
+		}
 		a.store.SetHistory(msg.jobs, msg.stats, msg.gen, msg.err)
 		a.observeGen(store.SectionHistory, msg.gen, msg.err)
 		a.jobs.Refresh() // Completed/failed history jobs merge into the Jobs table.
@@ -549,6 +691,9 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case nodesMsg:
+		if msg.gen >= a.store.Gen(store.SectionNodes) {
+			a.recordFetchResult(store.SectionNodes, msg.err)
+		}
 		a.store.SetNodes(msg.nodes, msg.gen, msg.err)
 		a.observeGen(store.SectionNodes, msg.gen, msg.err)
 		a.nodes.Refresh()
@@ -557,6 +702,9 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case allUsersJobsMsg:
+		if msg.gen >= a.store.Gen(store.SectionAllUsersJobs) {
+			a.recordFetchResult(store.SectionAllUsersJobs, msg.err)
+		}
 		a.store.SetAllUsersJobs(msg.jobs, msg.gen, msg.err)
 		a.observeGen(store.SectionAllUsersJobs, msg.gen, msg.err)
 		a.jobs.Refresh()   // My-Usage banner derives from all-users jobs.
@@ -566,6 +714,9 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case fairShareMsg:
+		if msg.gen >= a.store.Gen(store.SectionFairShare) {
+			a.recordFetchResult(store.SectionFairShare, msg.err)
+		}
 		a.store.SetFairShare(msg.entries, msg.gen, msg.err)
 		a.observeGen(store.SectionFairShare, msg.gen, msg.err)
 		a.priority.Refresh()
@@ -573,6 +724,9 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case pendingPrioMsg:
+		if msg.gen >= a.store.Gen(store.SectionPendingPrio) {
+			a.recordFetchResult(store.SectionPendingPrio, msg.err)
+		}
 		a.store.SetPendingPrio(msg.entries, msg.gen, msg.err)
 		a.observeGen(store.SectionPendingPrio, msg.gen, msg.err)
 		a.priority.Refresh()
@@ -580,6 +734,9 @@ func (a App) handleDataMsg(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return a, nil, true
 
 	case priorityConfigMsg:
+		if msg.gen >= a.store.Gen(store.SectionPriorityConfig) {
+			a.recordFetchResult(store.SectionPriorityConfig, msg.err)
+		}
 		a.store.SetPriorityConfig(msg.cfg, msg.gen, msg.err)
 		a.observeGen(store.SectionPriorityConfig, msg.gen, msg.err)
 		a.priority.Refresh()
@@ -863,34 +1020,27 @@ func (a *App) setActive(idx tabIndex) tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// manualRefresh re-fetches the running jobs, the journal history, and the visible
-// heavy data, bumping their generations so superseded in-flight results are
-// dropped (I4). The running fetch is skipped while one is in flight; the heavy
-// fetches self-skip per section while already loading (dispatchSection), and only
-// the data the visible UI needs is refreshed (dispatchHeavyVisible). History
-// refreshes from the controller journal (throttled at the client), so it is always
-// re-run without ever touching slurmdbd. The caller owns user-visible feedback (the
-// 'r' key pushes a toast), since re-fetching alone is not visible while data is on
-// screen.
+// manualRefresh refreshes the personal queue immediately, subject to a short
+// key-repeat debounce. Cluster-wide sections share their freshness cooldowns
+// with tick and tab-entry dispatches, so repeated refreshes cannot bypass the
+// controller load limits.
 func (a *App) manualRefresh() tea.Cmd {
 	a.frame.invalidate()
-	cmds := []tea.Cmd{a.dispatchHistory()}
+	cmds := []tea.Cmd{a.dispatchHistory(false)}
 	if !a.runningInFlight {
-		cmds = append(cmds, a.dispatchRunning())
+		cmds = append(cmds, a.dispatchRunning(true))
 	}
 	cmds = append(cmds, a.dispatchHeavyVisible(), a.ensureSpinner())
 	return tea.Batch(cmds...)
 }
 
 // handleFastTick dispatches a running-jobs refresh when none is in flight and
-// always re-arms exactly the fast tier (I2). The live squeue list is never gated
-// on terminal focus: focus is not visibility (a visible-but-unfocused pane — a
-// tmux split, a tiling layout — would otherwise silently freeze), so the primary
-// list the user watches always refreshes.
+// re-arms the tier with jitter. The live list is never focus-gated: focus is not
+// visibility in tmux or tiled terminals.
 func (a App) handleFastTick() (tea.Model, tea.Cmd) {
-	cmds := []tea.Cmd{fastTick(a.intervals.Fast)}
+	cmds := []tea.Cmd{fastTick(a.polls.jitter(a.intervals.Fast))}
 	if !a.runningInFlight {
-		cmds = append(cmds, a.dispatchRunning())
+		cmds = append(cmds, a.dispatchRunning(false))
 	}
 	// The log ring is appended to outside the Update loop (a logging sink), so the
 	// Logs tab is re-rendered on the fast tick to surface new lines.
@@ -900,28 +1050,38 @@ func (a App) handleFastTick() (tea.Model, tea.Cmd) {
 	return a, tea.Batch(cmds...)
 }
 
-// Slow-tier cadence multipliers: with the default 4min slow interval, nodes
-// refresh every 8min and fair-share/priority every 12min, trimming controller load.
+// Slow-tier cadence multipliers: with the default eight-minute slow interval,
+// nodes refresh every 16 minutes and fair-share/priority every 24 minutes.
 const (
 	nodesTickFactor = 2
 	prioTickFactor  = 3
+
+	slowAllUsersDelay  = 250 * time.Millisecond
+	slowNodesDelay     = 750 * time.Millisecond
+	slowFairShareDelay = 1250 * time.Millisecond
+	slowPriorityDelay  = 1750 * time.Millisecond
 )
 
-// handleSlowTick dispatches the visible heavy fetches and always re-arms exactly
-// the slow tier (I2). Each fetch self-skips while its section is already loading.
-// Controller load is bounded by tab visibility and per-section cadence factors —
-// never by terminal focus. Manual refresh and tab entry still fetch immediately.
+// handleSlowTick schedules due heavy sections at distinct offsets and re-arms
+// with jitter. Cooldowns and failure backoff apply when each delayed message
+// lands, preventing manual refreshes or tab changes from filling the gaps.
 func (a App) handleSlowTick() (tea.Model, tea.Cmd) {
 	a.slowTicks++
-	cmds := []tea.Cmd{slowTick(a.intervals.Slow), a.dispatchSection(store.SectionAllUsersJobs)}
-	if a.slowTicks%nodesTickFactor == 0 {
-		cmds = append(cmds, a.dispatchSection(store.SectionNodes))
+	cmds := []tea.Cmd{
+		slowTick(a.polls.jitter(a.intervals.Slow)),
+		scheduleFetchAfter(store.SectionAllUsersJobs, a.polls.jitter(slowAllUsersDelay)),
 	}
 	if a.active == tabJobs {
 		cmds = append(cmds, a.dispatchHistoryIfIdle())
 	}
+	if a.slowTicks%nodesTickFactor == 0 {
+		cmds = append(cmds, scheduleFetchAfter(store.SectionNodes, a.polls.jitter(slowNodesDelay)))
+	}
 	if a.tabNeedsPriorityData(a.active) && a.slowTicks%prioTickFactor == 0 {
-		cmds = append(cmds, a.dispatchSection(store.SectionFairShare), a.dispatchSection(store.SectionPendingPrio))
+		cmds = append(cmds,
+			scheduleFetchAfter(store.SectionFairShare, a.polls.jitter(slowFairShareDelay)),
+			scheduleFetchAfter(store.SectionPendingPrio, a.polls.jitter(slowPriorityDelay)),
+		)
 	}
 	cmds = append(cmds, a.ensureSpinner())
 	return a, tea.Batch(cmds...)

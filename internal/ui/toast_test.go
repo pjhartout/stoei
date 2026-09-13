@@ -125,7 +125,7 @@ func TestRefreshToastAnimatesAndClearsOnCompletion(t *testing.T) {
 func TestAcctReconcileToastShowsAndClears(t *testing.T) {
 	a := newTestApp(t, &store.FakeClient{UsernameStr: "alice", AcctDueFlag: true})
 	var sawReconciling bool
-	for _, msg := range drainCmd(a.dispatchHistory()) {
+	for _, msg := range drainCmd(a.dispatchHistory(false)) {
 		if _, ok := msg.(acctReconcilingMsg); ok {
 			sawReconciling = true
 			m, _ := a.Update(msg)
@@ -154,7 +154,7 @@ func TestAcctReconcileToastShowsAndClears(t *testing.T) {
 
 	// Without a due reconcile the dispatch stays silent.
 	b := newTestApp(t, &store.FakeClient{UsernameStr: "alice"})
-	for _, msg := range drainCmd(b.dispatchHistory()) {
+	for _, msg := range drainCmd(b.dispatchHistory(false)) {
 		if _, ok := msg.(acctReconcilingMsg); ok {
 			t.Error("dispatch without reconcile due emitted acctReconcilingMsg")
 		}

@@ -116,10 +116,10 @@ usage again. CPU efficiency is relative to all allocated CPUs, not a single core
 disk throughput is averaged over the refreshed runtime.
 
 > [!WARNING]
-> stoei polls the Slurm controller (headnode) directly on every refresh, since
-> it reads live state via `squeue`/`scontrol` rather than the accounting
-> database. On busy clusters a short refresh interval multiplied across many
-> users adds load to slurmctld — raise the refresh interval if your admins ask.
+> stoei polls `slurmctld` for live state. Personal jobs refresh at most once
+> every two minutes; cluster-wide queries run less often, are staggered, and
+> back off after failures. Each session polls independently, so administrators
+> may still ask users to select a longer refresh interval on busy clusters.
 
 ### Keyboard shortcuts
 
@@ -146,7 +146,7 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `?` | Help |
 | `q` | Quit |
 
-Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, refresh interval, history window, keybindings) and can be edited in-app via `s`.
+Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, 120–300 second refresh interval, history window, keybindings) and can be edited in-app via `s`.
 
 ### Reading the Priority tab
 

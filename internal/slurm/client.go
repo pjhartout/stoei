@@ -139,15 +139,17 @@ func (c *Client) queryJournalJobs(ctx context.Context) ([]ControllerJob, error) 
 }
 
 // refreshJournalJobs merges the latest journal query into the persistent
-// journal, throttled and serialized under mu so a refresh wave queries the
-// controller at most once. No-op when the journal is disabled.
-func (c *Client) refreshJournalJobs(ctx context.Context) error {
+// journal, serialized under mu so concurrent waves issue at most one controller
+// query at a time. Ordinary refreshes reuse a snapshot inside the throttle
+// window; force is reserved for a newly observed completion that must not be
+// hidden by that cache. No-op when the journal is disabled.
+func (c *Client) refreshJournalJobs(ctx context.Context, force bool) error {
 	if c.journal == nil {
 		return nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if !c.lastFetch.IsZero() && c.now().Sub(c.lastFetch) < journalFetchThrottle {
+	if !force && !c.lastFetch.IsZero() && c.now().Sub(c.lastFetch) < journalFetchThrottle {
 		return nil
 	}
 	jobs, err := c.queryJournalJobs(ctx)
@@ -160,8 +162,8 @@ func (c *Client) refreshJournalJobs(ctx context.Context) error {
 
 // journalJobs returns the accumulated controller jobs: the journal when enabled,
 // otherwise just the latest journal query.
-func (c *Client) journalJobs(ctx context.Context) ([]ControllerJob, error) {
-	if err := c.refreshJournalJobs(ctx); err != nil {
+func (c *Client) journalJobs(ctx context.Context, force bool) ([]ControllerJob, error) {
+	if err := c.refreshJournalJobs(ctx, force); err != nil {
 		return nil, err
 	}
 	if c.journal != nil {
@@ -205,17 +207,25 @@ func (c *Client) AllUsersJobs(ctx context.Context) ([]AllUsersJob, error) {
 	return ParseAllUsersJobs(string(out)), nil
 }
 
-// JobHistory returns the current user's job history and requeue statistics from
-// the journal, windowed to the last days days: a job whose most recent
-// parseable timestamp is older is excluded. days <= 0 disables the window. It
-// additionally reconciles the journal against sacct at most once a night
-// (best-effort — see reconcileAcct).
+// JobHistory returns the current user's cached job history for the last days
+// days, refreshing the journal subject to its controller-query throttle.
 func (c *Client) JobHistory(ctx context.Context, days int) ([]HistoryJob, HistoryStats, error) {
+	return c.jobHistory(ctx, days, false)
+}
+
+// RefreshJobHistory refreshes the controller journal even inside its normal
+// throttle window. It is used to absorb several newly completed jobs with one
+// user-scoped squeue request instead of parallel per-job scontrol requests.
+func (c *Client) RefreshJobHistory(ctx context.Context, days int) ([]HistoryJob, HistoryStats, error) {
+	return c.jobHistory(ctx, days, true)
+}
+
+func (c *Client) jobHistory(ctx context.Context, days int, force bool) ([]HistoryJob, HistoryStats, error) {
 	if err := validateUsername(c.username); err != nil {
 		return nil, HistoryStats{}, err
 	}
 	c.reconcileAcct(ctx)
-	jobs, err := c.journalJobs(ctx)
+	jobs, err := c.journalJobs(ctx, force)
 	if err != nil {
 		return nil, HistoryStats{}, err
 	}

@@ -12,14 +12,15 @@ import (
 // Bounds for the configurable numeric fields. Load clamps every value to these
 // ranges; out-of-range or unparseable values fall back to the matching default.
 const (
-	// MinRefreshInterval and MaxRefreshInterval bound the fast-tier refresh in
-	// seconds.
-	MinRefreshInterval = 1.0
+	// MinRefreshInterval and MaxRefreshInterval bound the personal-job refresh
+	// in seconds. Two minutes is the shortest supported cadence: every refresh
+	// sends an squeue RPC to slurmctld, so faster polling multiplies into harmful
+	// controller load across many stoei sessions.
+	MinRefreshInterval = 120.0
 	MaxRefreshInterval = 300.0
-	// DefaultRefreshInterval is the default fast-tier refresh in seconds. It is
-	// deliberately conservative to keep load off the Slurm controller; the slow
-	// tier follows at 4x (4min).
-	DefaultRefreshInterval = 60.0
+	// DefaultRefreshInterval is the default personal-job refresh in seconds.
+	// Cluster-wide sections run at longer cadences derived from it.
+	DefaultRefreshInterval = 120.0
 
 	// MinJobHistoryDays and MaxJobHistoryDays bound the history window in days.
 	MinJobHistoryDays = 1
@@ -80,7 +81,7 @@ var ValidThemes = []string{
 type Config struct {
 	// Theme is the palette name.
 	Theme string `yaml:"theme"`
-	// RefreshInterval is the fast-tier refresh in seconds.
+	// RefreshInterval is the personal-job refresh in seconds.
 	RefreshInterval float64 `yaml:"refresh_interval"`
 	// JobHistoryDays is the history window in days.
 	JobHistoryDays int `yaml:"job_history_days"`

@@ -6,11 +6,10 @@ import (
 	tea "charm.land/bubbletea/v2"
 )
 
-// Default refresh intervals. The fast tier drives squeue-based sections; the slow
-// tier (4x the fast interval) drives the heavy batch sections. These are the
-// fallback defaults; the live intervals are derived from the user config.
+// Fallback refresh intervals. The personal tier drives squeue; the cluster-wide
+// tier runs four times less often. Live values normally come from config.
 const (
-	defaultFastInterval = time.Minute
+	defaultFastInterval = 2 * time.Minute
 	slowIntervalFactor  = 4
 )
 

@@ -46,7 +46,7 @@ func TestFetchHistoryCarriesStats(t *testing.T) {
 		HistoryJobsData:  []store.HistoryJob{{ID: "1"}},
 		HistoryStatsData: store.HistoryStats{TotalJobs: 5, TotalRequeues: 2, MaxRequeues: 1},
 	}
-	got := fetchHistory(client, 1, 7)().(historyMsg)
+	got := fetchHistory(client, 1, 7, false)().(historyMsg)
 	if got.stats.TotalJobs != 5 || got.stats.TotalRequeues != 2 || got.stats.MaxRequeues != 1 {
 		t.Errorf("stats = %+v", got.stats)
 	}
@@ -58,7 +58,7 @@ func TestFetchHistoryCarriesStats(t *testing.T) {
 func TestFetchHistoryError(t *testing.T) {
 	wantErr := errors.New("sacct down")
 	client := &store.FakeClient{JobHistoryErr: wantErr}
-	got := fetchHistory(client, 9, 7)().(historyMsg)
+	got := fetchHistory(client, 9, 7, false)().(historyMsg)
 	if !errors.Is(got.err, wantErr) {
 		t.Errorf("err = %v; want %v", got.err, wantErr)
 	}

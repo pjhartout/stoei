@@ -194,14 +194,20 @@ func fetchCompletedJob(client store.SlurmClient, id string) tea.Cmd {
 	}
 }
 
-// fetchHistory returns a Cmd that loads the current user's job history for the
-// last days days, reporting it as a historyMsg tagged with gen.
-func fetchHistory(client store.SlurmClient, gen uint64, days int) tea.Cmd {
+// fetchHistory returns a Cmd that loads the current user's job history. A fresh
+// fetch bypasses the journal throttle to coalesce a newly observed completion
+// burst into one real controller query.
+func fetchHistory(client store.SlurmClient, gen uint64, days int, fresh bool) tea.Cmd {
 	return func() tea.Msg {
 		var stats store.HistoryStats
 		jobs, err := runFetch(func(ctx context.Context) ([]store.HistoryJob, error) {
-			j, s, e := client.JobHistory(ctx, days)
-			stats = s
+			var j []store.HistoryJob
+			var e error
+			if fresh {
+				j, stats, e = client.RefreshJobHistory(ctx, days)
+			} else {
+				j, stats, e = client.JobHistory(ctx, days)
+			}
 			return j, e
 		})
 		return historyMsg{gen: gen, jobs: jobs, stats: stats, warn: client.AcctWarning(), err: err}

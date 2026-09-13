@@ -23,9 +23,10 @@ type SlurmClient interface {
 	RunningJobs(ctx context.Context) ([]slurm.RunningJob, error)
 	// AllUsersJobs returns every RUNNING and PENDING job across all users.
 	AllUsersJobs(ctx context.Context) ([]slurm.AllUsersJob, error)
-	// JobHistory returns the current user's job history for the last days days
-	// plus aggregate requeue statistics.
+	// JobHistory returns cached history after a throttled journal refresh.
 	JobHistory(ctx context.Context, days int) ([]slurm.HistoryJob, slurm.HistoryStats, error)
+	// RefreshJobHistory forces one journal refresh to coalesce newly completed jobs.
+	RefreshJobHistory(ctx context.Context, days int) ([]slurm.HistoryJob, slurm.HistoryStats, error)
 	// AcctWarning returns and clears the one-shot warning from a failed sacct
 	// journal reconcile; "" when there is none.
 	AcctWarning() string

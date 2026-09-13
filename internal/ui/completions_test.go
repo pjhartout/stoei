@@ -1,7 +1,6 @@
 package ui
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/pjhartout/stoei/internal/store"
@@ -61,20 +60,16 @@ func TestRunningJobsNoCompletionsNoLookup(t *testing.T) {
 	}
 }
 
-// TestLargeCompletionBurstUsesBulkHistory asserts that when more than
-// completionBulkThreshold jobs vanish in one refresh (a draining array), the app
-// issues a single bulk history refresh instead of one controller lookup per job.
-func TestLargeCompletionBurstUsesBulkHistory(t *testing.T) {
+// TestMultipleCompletionsUseBulkHistory asserts two jobs vanishing together
+// issue one history refresh rather than parallel per-job controller lookups.
+func TestMultipleCompletionsUseBulkHistory(t *testing.T) {
 	fc := &store.FakeClient{}
 	a := newTestApp(t, fc)
 
-	big := make([]store.RunningJob, 0, completionBulkThreshold+2)
-	for i := 0; i < completionBulkThreshold+2; i++ {
-		big = append(big, store.RunningJob{ID: fmt.Sprintf("job-%d", i)})
-	}
-	m, _ := a.Update(runningJobsMsg{gen: 1, jobs: big})
+	running := []store.RunningJob{{ID: "A"}, {ID: "B"}}
+	m, _ := a.Update(runningJobsMsg{gen: 1, jobs: running})
 	a = m.(App)
-	_, cmd := a.Update(runningJobsMsg{gen: 2, jobs: nil}) // the whole set vanishes at once
+	_, cmd := a.Update(runningJobsMsg{gen: 2, jobs: nil})
 
 	var sawHistory, sawCompleted bool
 	for _, msg := range drainCmd(cmd) {
@@ -86,10 +81,13 @@ func TestLargeCompletionBurstUsesBulkHistory(t *testing.T) {
 		}
 	}
 	if !sawHistory {
-		t.Error("large completion burst did not trigger a bulk history refresh")
+		t.Error("completion burst did not trigger one bulk history refresh")
+	}
+	if !fc.LastHistoryForced {
+		t.Error("completion burst reused a throttled history snapshot instead of forcing one coalesced query")
 	}
 	if sawCompleted {
-		t.Error("large burst issued per-job controller lookups; want one bulk refresh")
+		t.Error("completion burst issued per-job controller lookups; want one bulk refresh")
 	}
 	if fc.LastCompletedJobID != "" {
 		t.Errorf("per-job lookup happened (%q); want none for a bulk burst", fc.LastCompletedJobID)
