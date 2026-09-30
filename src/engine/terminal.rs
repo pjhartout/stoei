@@ -81,6 +81,33 @@ pub(super) fn configure_editor(command: &mut Command) {
     platform::configure_editor(command);
 }
 
+#[cfg(test)]
+pub(super) fn attach_test_terminal() -> io::Result<()> {
+    if unsafe { libc::setsid() } < 0
+        || unsafe { libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) } < 0
+    {
+        return Err(io::Error::last_os_error());
+    }
+    platform::foreground(unsafe { libc::getpgrp() } as u32)
+}
+
+#[cfg(test)]
+pub(super) struct FixtureChild(pub(super) Child);
+
+#[cfg(test)]
+impl Drop for FixtureChild {
+    fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(Some(_))) {
+            return;
+        }
+        unsafe {
+            libc::kill(-(self.0.id() as i32), libc::SIGKILL);
+        }
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
+}
+
 pub(super) fn editor_stopped(child: &Child) -> io::Result<bool> {
     let mut event = std::mem::MaybeUninit::<libc::siginfo_t>::zeroed();
     // Consume only stop events; Child::try_wait retains ownership of exit-status reaping.
@@ -280,6 +307,7 @@ mod tests {
     #[test]
     fn editor_session_restores_modes_foreground_and_flags() {
         let (_master, slave) = pty();
+        eprintln!("editor fixture: terminal opened");
         let inspect = slave.try_clone().unwrap();
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
@@ -287,32 +315,29 @@ mod tests {
                 "--ignored",
                 "--exact",
                 "engine::terminal::tests::session_process",
+                "--nocapture",
             ])
             .env("STOEI_EDITOR_SESSION_FIXTURE", "1")
             .stdin(slave.try_clone().unwrap())
-            .stdout(slave)
+            .stdout(Stdio::null())
             .stderr(Stdio::piped());
         unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() < 0
-                    || libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) < 0
-                {
-                    return Err(io::Error::last_os_error());
-                }
-                Ok(())
-            });
+            command.pre_exec(attach_test_terminal);
         }
-        let mut child = command.spawn().unwrap();
-        let mut stderr = BufReader::new(child.stderr.take().unwrap());
+        let mut child = FixtureChild(command.spawn().unwrap());
+        eprintln!("editor fixture: child started");
+        let mut stderr = BufReader::new(child.0.stderr.take().unwrap());
         let mut ready = String::new();
         stderr.read_line(&mut ready).unwrap();
         assert_eq!(ready, "editor suspending\n");
+        eprintln!("editor fixture: ready to suspend");
         let mut status = 0;
         assert_eq!(
-            unsafe { libc::waitpid(child.id() as i32, &mut status, libc::WUNTRACED) },
-            child.id() as i32
+            unsafe { libc::waitpid(child.0.id() as i32, &mut status, libc::WUNTRACED) },
+            child.0.id() as i32
         );
         assert!(libc::WIFSTOPPED(status));
+        eprintln!("editor fixture: suspended");
         let mut current = std::mem::MaybeUninit::<libc::termios>::uninit();
         assert_eq!(
             unsafe { libc::tcgetattr(inspect.as_raw_fd(), current.as_mut_ptr()) },
@@ -321,8 +346,9 @@ mod tests {
         let current = unsafe { current.assume_init() };
         assert_ne!(current.c_lflag & libc::ICANON, 0);
         assert_ne!(current.c_lflag & libc::ECHO, 0);
-        assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGCONT) }, 0);
-        let status = child.wait().unwrap();
+        assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGCONT) }, 0);
+        eprintln!("editor fixture: resumed");
+        let status = child.0.wait().unwrap();
         let mut errors = String::new();
         stderr.read_to_string(&mut errors).unwrap();
         assert!(status.success(), "{status}: {errors}");
@@ -379,17 +405,17 @@ mod tests {
             );
             let stopped = AtomicBool::new(false);
             let mut session = EditorSession::new(&stopped).unwrap();
-            let child = raw_editor(&session);
+            let (mut child, editor) = raw_editor(&session);
             let current = attrs();
             assert_eq!(current.c_lflag & libc::ICANON, 0);
             assert_eq!(current.c_lflag & libc::ECHO, 0);
             if !stopping {
                 pause_editor(&child.0, &session);
-                child.1.resume();
+                editor.resume();
                 assert_eq!(attrs().c_lflag & libc::ICANON, 0);
             }
-            child.1.signal(true);
-            child.0.wait_with_output().unwrap();
+            editor.signal(true);
+            child.0.wait().unwrap();
             stopped.store(stopping, Ordering::Relaxed);
             session.restore().unwrap();
             let current = attrs();
@@ -427,7 +453,7 @@ mod tests {
         session.suspend().unwrap();
     }
 
-    fn raw_editor(session: &EditorSession<'_>) -> (Child, EditorGroup) {
+    fn raw_editor(session: &EditorSession<'_>) -> (FixtureChild, EditorGroup) {
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
             .args([
@@ -439,11 +465,17 @@ mod tests {
             .env("STOEI_RAW_EDITOR_FIXTURE", "1")
             .stdout(Stdio::piped());
         configure_editor(&mut command);
-        let mut child = command.spawn().unwrap();
-        let group = EditorGroup::new(&child).unwrap();
-        session.foreground(child.id()).unwrap();
+        let mut child = FixtureChild(command.spawn().unwrap());
+        let group = EditorGroup::new(&child.0).unwrap();
+        let mut status = 0;
+        assert_eq!(
+            unsafe { libc::waitpid(child.0.id() as i32, &mut status, libc::WUNTRACED) },
+            child.0.id() as i32
+        );
+        assert!(libc::WIFSTOPPED(status));
+        session.foreground(child.0.id()).unwrap();
         group.resume();
-        let mut output = BufReader::new(child.stdout.take().unwrap());
+        let mut output = BufReader::new(child.0.stdout.take().unwrap());
         let mut line = String::new();
         for _ in 0..8 {
             line.clear();
@@ -462,6 +494,7 @@ mod tests {
         if std::env::var_os("STOEI_RAW_EDITOR_FIXTURE").is_none() {
             return;
         }
+        assert_eq!(unsafe { libc::raise(libc::SIGSTOP) }, 0);
         let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
         assert_eq!(flags & libc::O_NONBLOCK, 0);
         let mut raw = attrs();

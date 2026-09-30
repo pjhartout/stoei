@@ -259,7 +259,7 @@ mod tests {
 
     #[test]
     fn partial_terminal_input_stops_and_restores_stdin() {
-        use std::io::{BufRead, BufReader, Write};
+        use std::io::{BufRead, BufReader, Read, Write};
         use std::os::fd::{FromRawFd, OwnedFd};
         use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
@@ -286,36 +286,36 @@ mod tests {
         );
         let mut master = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(master) });
         let slave = std::fs::File::from(unsafe { OwnedFd::from_raw_fd(slave) });
+        eprintln!("input fixture: terminal opened");
         let mut command = Command::new(std::env::current_exe().unwrap());
         command
             .args([
                 "--ignored",
                 "--exact",
                 "engine::input::tests::terminal_process",
+                "--nocapture",
             ])
             .env("STOEI_INPUT_PTY_FIXTURE", "1")
             .stdin(slave.try_clone().unwrap())
-            .stdout(slave)
+            .stdout(Stdio::null())
             .stderr(Stdio::piped());
         unsafe {
-            command.pre_exec(|| {
-                if libc::setsid() < 0
-                    || libc::ioctl(libc::STDIN_FILENO, libc::TIOCSCTTY as _, 0) < 0
-                {
-                    return Err(std::io::Error::last_os_error());
-                }
-                Ok(())
-            });
+            command.pre_exec(super::super::terminal::attach_test_terminal);
         }
-        let mut child = command.spawn().unwrap();
+        let mut child = super::super::terminal::FixtureChild(command.spawn().unwrap());
+        eprintln!("input fixture: child started");
+        let mut stderr = BufReader::new(child.0.stderr.take().unwrap());
         let mut ready = String::new();
-        BufReader::new(child.stderr.take().unwrap())
-            .read_line(&mut ready)
-            .unwrap();
+        stderr.read_line(&mut ready).unwrap();
         assert_eq!(ready, "input ready\n");
+        eprintln!("input fixture: ready");
         master.write_all(b"\x1b[").unwrap();
-        assert_eq!(unsafe { libc::kill(child.id() as i32, libc::SIGTERM) }, 0);
-        assert!(child.wait().unwrap().success());
+        assert_eq!(unsafe { libc::kill(child.0.id() as i32, libc::SIGTERM) }, 0);
+        eprintln!("input fixture: stop requested");
+        let status = child.0.wait().unwrap();
+        let mut errors = String::new();
+        stderr.read_to_string(&mut errors).unwrap();
+        assert!(status.success(), "{status}: {errors}");
     }
 
     #[test]
@@ -325,13 +325,17 @@ mod tests {
             return;
         }
         use std::io::Write;
+        use std::os::fd::{AsFd, AsRawFd};
         let flags = |fd| unsafe { libc::fcntl(fd, libc::F_GETFL) };
         let original = flags(libc::STDIN_FILENO);
         let output = flags(libc::STDOUT_FILENO);
+        // Keep a shared terminal description while the harness writes outside the PTY.
+        let shared = std::io::stdin().as_fd().try_clone_to_owned().unwrap();
         crossterm::terminal::enable_raw_mode().unwrap();
         let (events, receiver) = mpsc::sync_channel(1);
         let input = Input::new(events, Arc::new(AtomicBool::new(false))).unwrap();
         assert_ne!(flags(libc::STDIN_FILENO) & libc::O_NONBLOCK, 0);
+        assert_eq!(flags(shared.as_raw_fd()), original);
         assert_eq!(flags(libc::STDOUT_FILENO), output);
         std::io::stderr().write_all(b"input ready\n").unwrap();
         while !input.stopped() {
@@ -345,6 +349,7 @@ mod tests {
         }
         drop(input);
         assert_eq!(flags(libc::STDIN_FILENO), original);
+        assert_eq!(flags(shared.as_raw_fd()), original);
         assert_eq!(flags(libc::STDOUT_FILENO), output);
         crossterm::terminal::disable_raw_mode().unwrap();
     }
