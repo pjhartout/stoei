@@ -422,7 +422,13 @@ mod tests {
             assert_eq!(current.c_iflag, initial.c_iflag);
             assert_eq!(current.c_oflag, initial.c_oflag);
             assert_eq!(current.c_cflag, initial.c_cflag);
-            assert_eq!(current.c_lflag, initial.c_lflag);
+            // Darwin sets PENDIN when canonical input is restored.
+            let pending = if cfg!(target_os = "macos") {
+                libc::PENDIN
+            } else {
+                0
+            };
+            assert_eq!(current.c_lflag & !pending, initial.c_lflag & !pending);
             assert_eq!(current.c_cc, initial.c_cc);
             assert_eq!(unsafe { libc::tcgetpgrp(libc::STDIN_FILENO) }, group);
             let flags = unsafe { libc::fcntl(libc::STDIN_FILENO, libc::F_GETFL) };
