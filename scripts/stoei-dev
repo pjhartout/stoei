@@ -6,7 +6,7 @@
 #
 #   ln -sf "$(pwd)/scripts/stoei-dev" ~/.local/bin/stoei
 #
-# It uses `go run`, so each launch reflects the current source (no manual
+# It uses `cargo run`, so each launch reflects the current source (no manual
 # rebuild) and is an unstripped, debuggable build. readlink -f resolves the
 # symlink back to this file so the repo root is found regardless of where the
 # command is invoked from.
@@ -14,4 +14,4 @@ set -euo pipefail
 SCRIPT="$(readlink -f "${BASH_SOURCE[0]}")"
 PROJECT_ROOT="$(cd "$(dirname "$SCRIPT")/.." && pwd)"
 cd "$PROJECT_ROOT"
-exec go run ./cmd/stoei "$@"
+exec cargo run --locked -- "$@"

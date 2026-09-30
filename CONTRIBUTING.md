@@ -1,85 +1,48 @@
 # Contributing to Stoei
 
-Thanks for your interest in contributing!
-
-## Prerequisites
-
-- Go 1.25 or newer (the Charm v2 modules require it)
-- [golangci-lint](https://golangci-lint.run/) for linting
-- Optionally, a Slurm login node for manual testing
-
-## Setup
+Install Rust 1.89 or newer on Linux or macOS, including rustfmt and Clippy.
 
 ```bash
 git clone https://github.com/pjhartout/stoei.git
 cd stoei
-go build ./...
-pre-commit install   # optional: runs gofmt/vet/golangci-lint on commit
+cargo build --locked
 ```
 
-Run the app with `go run ./cmd/stoei`.
-
-### Local debug build
-
-To make the `stoei` command run your working copy — a live build that recompiles
-on each launch — symlink the dev wrapper onto your `PATH`:
+For a local build on your PATH:
 
 ```bash
-ln -sf "$(pwd)/scripts/stoei-dev" ~/.local/bin/stoei   # ~/.local/bin must be on $PATH
+cargo build --release --locked
+mkdir -p ~/.local/bin
+install -m 755 target/release/stoei ~/.local/bin/stoei
 ```
 
-Now `stoei` runs `go run ./cmd/stoei` from this checkout, always reflecting your
-edits. If a release binary or the old Python tool is still installed, make sure
-`~/.local/bin` comes first on your `PATH` so the wrapper wins. Prefer a fast
-prebuilt binary over recompiling each launch? Build once and rebuild after
-changes:
+Rebuild after source changes. Alternatively, symlink `scripts/stoei-dev` onto
+your PATH to build the current checkout on launch.
+
+The dependency direction is `ui → store → slurm`. `src/engine` wires the event
+loop and bounded background workers; `src/config` and `src/update` handle
+persistence and releases. The UI changes plain data and emits effects; workers
+perform disk, network, and scheduler IO. Rendering runs only after a visible
+state change. Keep the main loop free of polling and animation timers.
+
+Run the checks before pushing:
 
 ```bash
-go build -o ~/.local/bin/stoei ./cmd/stoei
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --all-targets --locked
+cargo build --release --locked
 ```
 
-## Layout
+Tests must use fake `Runner` implementations and the golden fixtures in
+`tests/fixtures`; they must never reach a real scheduler. Inject time into
+scheduling decisions. Do not run the TUI in automation; use Ratatui's
+`TestBackend` to verify rendered screens.
 
-```
-cmd/stoei/        # main entry point
-internal/slurm/   # Slurm command runner, parsers, types
-internal/store/   # data store + derivations (cluster stats, energy, wait times)
-internal/ui/      # Bubble Tea root model, tabs, modals, components, theme
-internal/config/  # config load/save + defaults
-```
+Use `scripts/release <version>` to check a clean, gated `main`, create the tag,
+and push it. The release workflow builds Linux static musl binaries and macOS
+binaries for amd64 and arm64. Archive names and `checksums.txt` remain compatible
+with the self-updater.
 
-Dependencies flow one way: `ui → store → slurm`, enforced by depguard in
-`.golangci.yml`. Keep that direction — the store never imports the UI, and the
-slurm package never imports the store. The test seams are `slurm.Runner`,
-`store.SlurmClient`, and the UI `Modal`/`Component` interfaces.
-
-## Checks
-
-Run before pushing (CI in `.github/workflows/go.yml` runs the same):
-
-```bash
-gofmt -l .            # must print nothing
-go vet ./...
-golangci-lint run
-go test ./... -race
-```
-
-## Tests
-
-- Tests MUST NOT shell out to a real scheduler. Use the `slurm.Runner` /
-  `store.SlurmClient` fakes and the golden fixtures under
-  `internal/slurm/testdata/`.
-- No sleeps and no wall-clock — inject clocks where time matters.
-- Do not run the TUI itself in automation; it blocks on a terminal.
-
-## Pull requests
-
-- Keep the `ui → store → slurm` dependency direction intact.
-- PR descriptions are a summary of the changes only — no test-plan or checklist
-  sections.
-- Do not add AI co-author trailers.
-
-## Releases
-
-Run `scripts/release <version>` — it verifies a clean, gated `main`, then tags
-and pushes so GoReleaser builds and publishes the binaries.
+PR descriptions contain only a summary. Keep commits focused and attribute
+them solely to the human author.

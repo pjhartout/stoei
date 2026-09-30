@@ -5,27 +5,35 @@ and cancel jobs, and see cluster load — all without leaving the terminal.
 
 # Tech stack
 
-- TUI on the Charm stack: **Bubble Tea v2** (`charm.land/bubbletea/v2`), Lip Gloss
-  v2, Bubbles v2. These require **Go >= 1.25**.
-- Build and run with the Go toolchain (`go build ./...`, `go run ./cmd/stoei`).
-- Lint with `golangci-lint` (config in `.golangci.yml`); format with `gofmt`.
-- Ship as a single static binary via GoReleaser; `go install` also works.
+- Rust **1.89+**, Ratatui, and Crossterm. Use the Cargo toolchain.
+- Build with `cargo build --release --locked`.
+- Format with `cargo fmt`; lint with Clippy.
+- Support Linux and macOS. Release single binaries via GitHub Actions; Linux
+  releases use static musl and macOS builds use its native toolchain.
+  `cargo install` also works.
 - **Stale-binary trap:** when a bug looks already-fixed in source, suspect the
   installed binary is old before re-debugging. `stoei update` pulls the latest
   *release*, which can lag unreleased local commits. Compare the binary mtime
   against the fixing commit's date, then rebuild
-  (`go build -o ~/.local/bin/stoei ./cmd/stoei`).
+  (`cargo build --release --locked` followed by
+  `install -m 755 target/release/stoei ~/.local/bin/stoei`).
 
 ## Architecture
 
-Dependencies flow one way: `ui → store → slurm`, enforced by depguard. The store
-never imports the UI; the slurm package never imports the store. Three test seams:
-`slurm.Runner`, `store.SlurmClient`, and the UI `Modal` interface.
+Dependencies flow one way: `ui → store → slurm`. The store never imports the UI;
+Slurm never imports the store. `engine` connects UI effects to bounded IO workers.
+Tests use fake `slurm::Runner`, injected clocks, store datasets, and Ratatui's
+`TestBackend`.
 
-Async responsiveness is the #1 design driver. All IO happens inside `tea.Cmd`
-closures, never on the Update path. Refresh is two-tier (fast `squeue`, slow
-journal/nodes); each ticker re-arms once from its own handler; store setters drop
-stale results by generation tag so the UI never blocks or shows out-of-order data.
+Lowest idle CPU/RAM is the design priority. The UI blocks between input, data,
+resize, and actual deadlines; do not add frame or animation timers. Keep queues,
+logs, caches, command output, and log tails bounded. All disk, network, and
+scheduler IO happens on workers. Interactive and background requests use separate
+queues; generation tags reject stale refreshes and tokens reject stale modals.
+Every thread needs a defined purpose and a lifetime tied to the app session or
+an operation. Bound thread counts and request queues; stop and join workers on
+shutdown. Keep blocking DNS inside cancellable helper processes, not detached
+resolver threads in the app.
 
 ## Maintainability
 
@@ -34,18 +42,18 @@ otherwise favor functionality over pattern purity.
 
 ## Testing
 
-- Standard `go test ./... -race`. Tests **must never reach a real scheduler** — use
-  the `slurm.Runner` / `store.SlurmClient` fakes and the golden fixtures under
-  `internal/slurm/testdata/`.
+- Standard `cargo test --all-targets --locked`. Tests **must never reach a real
+  scheduler** — use fake `slurm::Runner` implementations and golden fixtures under
+  `tests/fixtures/`.
 - No sleeps, no wall-clock; inject clocks where time matters.
 - The suite must stay fast (well under 20s) — fix slow tests at the root cause,
   never paper over them with timeouts.
-- **Do NOT run the TUI itself** (`go run ./cmd/stoei`) in development/testing — it
+- **Do NOT run the TUI itself** (`cargo run`) in development/testing — it
   blocks on a terminal. Verify with the test suite instead.
 
 ## Docstrings
 
-Use standard Go doc comments (full sentences starting with the identifier name).
+Use standard Rust documentation comments for public interfaces where useful.
 Comments explain *why*, not *what*.
 
 ## Documentation
@@ -61,7 +69,7 @@ feedback regardless.
 
 ## Code style
 
-- Format with `gofmt`; keep `golangci-lint run` clean.
+- Format with `cargo fmt`; keep `cargo clippy --all-targets --locked -- -D warnings` clean.
 - No useless comments. No section-separator comments. No dead code.
 - Imports grouped stdlib / third-party / local.
 
@@ -70,10 +78,10 @@ feedback regardless.
 **CRITICAL: After making ANY code change, automatically run:**
 
 ```bash
-gofmt -w .
-go vet ./...
-golangci-lint run
-go test ./... -race
+cargo fmt --all
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --all-targets --locked
+cargo build --release --locked
 ```
 
 **Do NOT ask the user — just run these after code changes.**

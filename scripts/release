@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Cut a release: verify a clean, gated main, then tag and push so the Release
-# workflow (GoReleaser) builds and publishes the binaries.
+# workflow builds and publishes the binaries.
 #
 #   scripts/release 0.7.11   # or v0.7.11
 set -euo pipefail
@@ -21,11 +21,10 @@ if git rev-parse -q --verify "refs/tags/$VERSION" >/dev/null; then
 	exit 1
 fi
 
-command -v golangci-lint >/dev/null || PATH="$(go env GOPATH)/bin:$PATH"
-[[ -z "$(gofmt -l .)" ]] || { echo "error: gofmt needed on:" && gofmt -l .; exit 1; } >&2
-go vet ./...
-golangci-lint run
-go test ./... -race
+cargo fmt --all -- --check
+cargo clippy --all-targets --locked -- -D warnings
+cargo test --all-targets --locked
+cargo build --release --locked
 
 git tag -a "$VERSION" -m "$VERSION"
 git push origin "$VERSION"

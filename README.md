@@ -3,7 +3,7 @@
 A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nodes, users, and cluster load, and lets you inspect, filter, and cancel jobs without leaving the terminal.
 
 [![GitHub release](https://img.shields.io/github/v/release/pjhartout/stoei?label=version)](https://github.com/pjhartout/stoei/releases)
-[![Go Version](https://img.shields.io/github/go-mod/go-version/pjhartout/stoei)](https://go.dev/)
+[![Rust](https://img.shields.io/badge/Rust-1.89%2B-orange)](https://www.rust-lang.org/)
 [![License](https://img.shields.io/github/license/pjhartout/stoei)](https://github.com/pjhartout/stoei/blob/main/LICENSE)
 
 ## Features
@@ -21,17 +21,24 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
   limit, QOS, hold/release, or any raw `scontrol update` field
 - Configurable themes and vim/emacs keybindings
 
+The UI uses [Ratatui](https://ratatui.rs/). It redraws when input or data changes
+and sleeps between events and refresh deadlines. Four threads serve the app
+session: the UI, input and signals, and two I/O workers with bounded queues.
+Shutdown wakes input and cancels work; update downloads run in temporary,
+deadline-limited helper processes. Log tails and caches have fixed memory limits.
+
 ## Installation
 
-stoei is a single static binary with no runtime dependencies. Install it on a
-login node: that is where the Slurm CLIs it drives (`squeue`, `scontrol`, …)
-work. Pick one of the methods below, then check with `stoei --version`.
+stoei supports Linux and macOS. It ships as a single binary; Linux releases are
+statically linked. Install it on a login node: that is where the Slurm CLIs it
+drives (`squeue`, `scontrol`, …) work. Pick one of the methods below, then check
+with `stoei --version`.
 
 ### Prebuilt binary (recommended)
 
-Releases ship for Linux and macOS (amd64, arm64) as `.tar.gz` and for Windows as
-`.zip`, with a `checksums.txt`. Login nodes rarely allow `sudo`, so this installs
-into `~/.local/bin`:
+Releases ship for Linux and macOS (amd64, arm64) as `.tar.gz` archives with a
+`checksums.txt`. Login nodes rarely allow `sudo`, so this installs into
+`~/.local/bin`:
 
 ```bash
 version=$(curl -fsSL https://api.github.com/repos/pjhartout/stoei/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
@@ -54,23 +61,25 @@ You can also download the archive by hand from the
 [latest release](https://github.com/pjhartout/stoei/releases/latest) and copy
 the `stoei` binary anywhere on your `PATH`.
 
-### go install
+### Cargo
 
-With a Go 1.25+ toolchain:
+With a Rust 1.89+ toolchain:
 
 ```bash
-go install github.com/pjhartout/stoei/cmd/stoei@latest
+cargo install --git https://github.com/pjhartout/stoei --locked
 ```
 
-This installs `stoei` into `$(go env GOPATH)/bin` (usually `~/go/bin`); make sure
-that directory is on your `PATH`.
+This installs `stoei` into `~/.cargo/bin`; make sure that directory is on your
+`PATH`.
 
 ### From source
 
 ```bash
 git clone https://github.com/pjhartout/stoei.git
 cd stoei
-go build -o ~/.local/bin/stoei ./cmd/stoei
+cargo build --release --locked
+mkdir -p ~/.local/bin
+install -m 755 target/release/stoei ~/.local/bin/stoei
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for a live-reloading dev build.
@@ -83,10 +92,12 @@ stoei update
 
 It downloads the latest release for your platform, verifies the checksum, and
 atomically replaces the running binary in place (so it needs write access to
-wherever `stoei` lives). This also turns a `go install` or source build (which
+wherever `stoei` lives). This also turns a Cargo or source build (which
 reports `dev` from `stoei --version`) into the latest release. The TUI checks
 for a newer release once a day (silently, cached) and shows a hint in the
 status bar when one exists; `dev` builds skip that check and never phone home.
+The same command upgrades existing Go installations to Rust releases. Restart
+stoei after updating to use the new binary.
 
 ### Uninstalling
 
@@ -178,6 +189,7 @@ partition in queue order (with the cluster-wide rank as a secondary column).
 
 ## Requirements
 
+- Linux or macOS
 - Slurm CLIs on `PATH`: `squeue`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
 - A login node where those commands talk to your cluster
 
