@@ -86,9 +86,19 @@ fn render(ui: &mut Ui, store: &Store, width: u16, height: u16) -> String {
 }
 
 fn render_buffer(ui: &mut Ui, store: &Store, width: u16, height: u16) -> ratatui::buffer::Buffer {
+    render_buffer_with_version(ui, store, width, height, "dev")
+}
+
+fn render_buffer_with_version(
+    ui: &mut Ui,
+    store: &Store,
+    width: u16,
+    height: u16,
+    version: &str,
+) -> ratatui::buffer::Buffer {
     let logs = LogRing::default();
     let status = RuntimeStatus {
-        version: "dev",
+        version,
         update_available: None,
         unavailable: None,
         logs: &logs,
@@ -259,22 +269,28 @@ fn familiar_chrome_keeps_tab_divider_and_quit_controls_in_place() {
     let store = populated_store();
     let mut ui = Ui::new(Config::default());
     ui.observe_data(&store);
-    for (width, height) in [(40, 12), (80, 24), (100, 24), (160, 32)] {
-        let buffer = render_buffer(&mut ui, &store, width, height);
-        assert!(line(&buffer, 0).starts_with(" stoei "));
-        assert_eq!(line(&buffer, 1), "─".repeat(usize::from(width)));
-        let footer = line(&buffer, height - 1);
-        assert!(footer.contains("? help"));
-        assert!(footer.contains("q quit"));
-        assert!(!line(&buffer, 0).contains("dev"));
-        if width >= 80 {
-            assert!(line(&buffer, 0).contains("5 Logs"));
-            assert!(footer.ends_with(" sync 0s "));
+    for (version, label) in [("dev", "dev"), ("1.2.3", "v1.2.3"), ("v1.2.3", "v1.2.3")] {
+        for (tab, title) in [('1', "1 Jobs"), ('4', "4 Priority"), ('5', "5 Logs")] {
+            ui.handle_key(key(KeyCode::Char(tab)), &store);
+            for (width, height) in [(40, 12), (60, 24), (80, 24), (100, 24), (160, 32)] {
+                let buffer = render_buffer_with_version(&mut ui, &store, width, height, version);
+                let header = line(&buffer, 0);
+                assert!(header.starts_with(&format!(" stoei  {label} ")));
+                assert!(header.contains(title), "active tab missing: {header}");
+                assert_eq!(line(&buffer, 1), "─".repeat(usize::from(width)));
+                let footer = line(&buffer, height - 1);
+                assert!(footer.contains("? help"));
+                assert!(footer.contains("q quit"));
+                if width >= 80 {
+                    assert!(header.contains("5 Logs"));
+                    assert!(footer.ends_with(" sync 0s "));
+                }
+                assert_eq!(
+                    buffer[(width / 2, height - 1)].bg,
+                    theme::Theme::by_name("nord").border
+                );
+            }
         }
-        assert_eq!(
-            buffer[(width / 2, height - 1)].bg,
-            theme::Theme::by_name("nord").border
-        );
     }
 }
 
@@ -283,7 +299,7 @@ fn development_build_label_is_explained_in_help() {
     let store = populated_store();
     let mut ui = Ui::new(Config::default());
     ui.observe_data(&store);
-    assert!(!render(&mut ui, &store, 100, 24).contains("dev"));
+    assert!(line(&render_buffer(&mut ui, &store, 100, 24), 0).contains(" dev "));
     ui.modals.push(Modal::help());
     assert!(render(&mut ui, &store, 100, 24).contains("stoei · local development build"));
 }

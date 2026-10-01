@@ -23,7 +23,11 @@ impl Ui {
         frame.render_widget(Block::default().style(theme.text()), frame.area());
         if frame.area().height < 5 || frame.area().width < 18 {
             frame.render_widget(
-                Paragraph::new("stoei · resize terminal · q quit").style(theme.text()),
+                Paragraph::new(format!(
+                    "stoei {} · resize terminal · q quit",
+                    version_label(status.version)
+                ))
+                .style(theme.text()),
                 frame.area(),
             );
             return;
@@ -36,7 +40,7 @@ impl Ui {
             Constraint::Length(1),
         ])
         .areas(frame.area());
-        self.render_tabs(frame, tabs, store, theme);
+        self.render_tabs(frame, tabs, store, status.version, theme);
         frame.render_widget(
             Paragraph::new("─".repeat(usize::from(rule.width))).style(theme.subtle()),
             rule,
@@ -82,8 +86,21 @@ impl Ui {
         }
     }
 
-    fn render_tabs(&self, frame: &mut Frame<'_>, area: Rect, store: &Store, theme: Theme) {
-        let mut spans = vec![Span::styled(" stoei ", theme.selected()), Span::raw(" ")];
+    fn render_tabs(
+        &self,
+        frame: &mut Frame<'_>,
+        area: Rect,
+        store: &Store,
+        version: &str,
+        theme: Theme,
+    ) {
+        let tag = Span::styled(format!(" {} ", version_label(version)), theme.bar());
+        let show_labels = usize::from(area.width).saturating_sub(tag.width()) >= 60;
+        let mut spans = vec![
+            Span::styled(" stoei ", theme.selected()),
+            tag,
+            Span::raw(" "),
+        ];
         for (index, label) in ["Jobs", "Nodes", "Users", "Priority", "Logs"]
             .iter()
             .enumerate()
@@ -100,7 +117,7 @@ impl Ui {
                 State::Error => " !",
                 _ => "",
             });
-            let label = if area.width >= 60 || index == self.active {
+            let label = if show_labels || index == self.active {
                 format!(" {} {label}{mark} ", index + 1)
             } else {
                 format!(" {}{mark} ", index + 1)
@@ -287,6 +304,15 @@ impl Ui {
             ),
             _ => Line::default(),
         }
+    }
+}
+
+fn version_label(version: &str) -> String {
+    let version = clean(version);
+    if version == "dev" {
+        version
+    } else {
+        format!("v{}", version.strip_prefix('v').unwrap_or(&version))
     }
 }
 
