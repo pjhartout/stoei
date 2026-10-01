@@ -525,6 +525,7 @@ impl Ui {
     }
 
     fn open_job(&mut self, id: &str, state: &str, fallback: Option<JobDetail>) -> Vec<Effect> {
+        let modify_id = id.to_owned();
         let id = store::normalize_array_job_id(id);
         let token = self.token();
         let cached = self
@@ -542,6 +543,7 @@ impl Ui {
         self.modals.push(Modal::Job(DetailView {
             token,
             id: id.clone(),
+            modify_id,
             state: state.into(),
             snapshot: cached,
             loading: !terminal_cached,

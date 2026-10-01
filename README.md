@@ -19,6 +19,8 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 - Quick filtering (`/`), sorting (`o`), and job cancellation (`c`)
 - Job modification from the detail view (`m`): array throttle, partition, time
   limit, QOS, hold/release, or any raw `scontrol update` field
+- Partition changes check current state and apply only to selected jobs or array
+  tasks that are still pending
 - Configurable themes and vim/emacs keybindings
 
 The UI uses [Ratatui](https://ratatui.rs/). It redraws when input or data changes

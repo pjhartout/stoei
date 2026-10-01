@@ -201,6 +201,180 @@ fn mutations_normalize_array_leaders_and_preserve_single_arguments() {
 }
 
 #[test]
+fn partition_updates_resolve_fresh_pending_tasks_and_preserve_the_selected_range() {
+    let runner = Arc::new(FakeRunner::default());
+    let client = client(&runner);
+    runner.output(
+        "squeue",
+        "47701_0|47701\n47701_49|47701\n47701_51|47701\n47701_52|47701\n47701_53|47701\n47701_55|47701\n47701_100|47701\n",
+    );
+    client
+        .update_job("47701_[50-99%10]", "Partition", "cpu")
+        .unwrap();
+    assert_eq!(runner.count("squeue"), 1);
+    assert_eq!(runner.count("scontrol"), 1);
+    assert_eq!(runner.count("sacct"), 0);
+    let calls = runner.calls.lock().unwrap();
+    assert_eq!(
+        calls[0].1,
+        [
+            "--noheader",
+            "--array",
+            "--jobs=47701",
+            "--states",
+            "PENDING",
+            "--format",
+            "%i|%A"
+        ]
+    );
+    assert_eq!(calls[0].2, Duration::from_secs(15));
+    assert_eq!(
+        calls[1].1,
+        ["update", "JobId=47701_[51-53,55]", "Partition=cpu"]
+    );
+    assert_eq!(calls[1].2, Duration::from_secs(10));
+}
+
+#[test]
+fn partition_updates_handle_task_zero_single_jobs_and_explicit_tasks() {
+    for (id, pending, target) in [
+        ("123", "123|123\n", "123"),
+        ("000123", "123|123\n", "123"),
+        ("47749", "47701_48|47749\n", "47749"),
+        ("123", "123_0|123\n123_2|456\n123_3|789\n", "123_[0,2-3]"),
+        ("123_0", "123_0|456\n", "123_[0]"),
+        (
+            "123_[0,2-3%4]",
+            "123_0|123\n123_1|123\n123_2|123\n123_3|123\n",
+            "123_[0,2-3]",
+        ),
+        (
+            "123_[8-10,0-4,3-6,5%2]",
+            "123_10|123\n123_5|123\n123_0|123\n123_8|123\n123_5|123\n123_7|123\n",
+            "123_[0,5,8,10]",
+        ),
+        (
+            "123_[0-4294967295]",
+            "123_4294967295|123\n123_0|123\n123_4294967294|123\n",
+            "123_[0,4294967294-4294967295]",
+        ),
+    ] {
+        let runner = Arc::new(FakeRunner::default());
+        runner.output("squeue", pending);
+        client(&runner).update_job(id, "pArTiTiOn", "cpu").unwrap();
+        assert_call(
+            &runner,
+            "scontrol",
+            &["update", &format!("JobId={target}"), "pArTiTiOn=cpu"],
+            10,
+        );
+        assert_eq!(runner.count("squeue"), 1);
+    }
+}
+
+#[test]
+fn partition_updates_never_fall_back_to_the_leader_when_pending_tasks_disappear() {
+    for (id, pending) in [
+        ("123", ""),
+        ("123_4", ""),
+        ("123_[4-6]", "123_1|123\n123_8|123\n"),
+    ] {
+        let runner = Arc::new(FakeRunner::default());
+        runner.output("squeue", pending);
+        let error = client(&runner)
+            .update_job(id, "Partition", "cpu")
+            .unwrap_err();
+        assert!(error.contains("still pending"));
+        assert_eq!(runner.count("scontrol"), 0);
+        assert_eq!(runner.count("squeue"), 1);
+    }
+}
+
+#[test]
+fn partition_updates_reject_incomplete_selections_and_unexpected_scheduler_ids() {
+    for id in [
+        "123_[4-...]",
+        "123_[4-6",
+        "123_[6-4]",
+        "123_[]",
+        "123_[4-6%bad]",
+        "123_[4-6]junk",
+        "123_[4-6:2]",
+    ] {
+        let runner = Arc::new(FakeRunner::default());
+        assert!(client(&runner).update_job(id, "Partition", "cpu").is_err());
+        assert!(runner.calls.lock().unwrap().is_empty());
+    }
+    for pending in [
+        "123_[1-9]|123\n",
+        "999_1|999\n",
+        "123_4294967296|123\n",
+        "123;evil|123\n",
+        "123|123\n123_1|456\n",
+        "123\n",
+        "123|123|456\n",
+    ] {
+        let runner = Arc::new(FakeRunner::default());
+        runner.output("squeue", pending);
+        assert!(
+            client(&runner)
+                .update_job("123", "Partition", "cpu")
+                .is_err()
+        );
+        assert_eq!(runner.count("scontrol"), 0);
+    }
+}
+
+#[test]
+fn partition_lookup_and_partial_update_errors_are_reported_without_retry() {
+    let runner = Arc::new(FakeRunner::default());
+    let client = client(&runner);
+    runner.fail(
+        "squeue",
+        CommandErrorCause::TimedOut,
+        "controller unavailable",
+    );
+    let error = client.update_job("123", "Partition", "cpu").unwrap_err();
+    assert!(error.contains("controller unavailable"));
+    assert_eq!(runner.count("scontrol"), 0);
+    runner.recover("squeue");
+    runner.output("squeue", "123_4|123\n123_5|123\n");
+    runner.fail(
+        "scontrol",
+        CommandErrorCause::Exit(Some(1)),
+        "123_4: Job is no longer pending execution\n123_5: No error",
+    );
+    let error = client.update_job("123", "Partition", "cpu").unwrap_err();
+    assert!(error.contains("some array tasks may already have changed"));
+    assert!(error.contains("123_4: Job is no longer pending execution"));
+    assert_eq!(runner.count("scontrol"), 1);
+    assert_eq!(runner.count("squeue"), 2);
+}
+
+#[test]
+fn oversized_partition_selections_fail_without_mutating_jobs() {
+    let runner = Arc::new(FakeRunner::default());
+    let client = client(&runner);
+    let selection = format!("123_[{}0]", "0,".repeat(40_000));
+    let error = client
+        .update_job(&selection, "Partition", "cpu")
+        .unwrap_err();
+    assert!(error.contains("selection exceeds size limit"));
+    assert!(runner.calls.lock().unwrap().is_empty());
+    runner.output("squeue", &"123_0|123\n".repeat(100_001));
+    let error = client.update_job("123", "Partition", "cpu").unwrap_err();
+    assert!(error.contains("selection exceeds task limit"));
+    assert_eq!(runner.count("scontrol"), 0);
+    let fragmented: String = (0..20_000)
+        .map(|task| format!("123_{}|123\n", task * 2))
+        .collect();
+    runner.output("squeue", &fragmented);
+    let error = client.update_job("123", "Partition", "cpu").unwrap_err();
+    assert!(error.contains("selection exceeds size limit"));
+    assert_eq!(runner.count("scontrol"), 0);
+}
+
+#[test]
 fn controller_array_detail_prefers_active_record() {
     let runner = Arc::new(FakeRunner::default());
     runner.output("scontrol", include_str!("fixtures/scontrol_job_array.txt"));

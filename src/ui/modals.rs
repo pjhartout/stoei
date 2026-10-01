@@ -40,6 +40,7 @@ pub(super) enum Modal {
 pub(super) struct DetailView {
     pub token: u64,
     pub id: String,
+    pub modify_id: String,
     pub state: String,
     pub snapshot: Option<JobSnapshot>,
     pub loading: bool,
@@ -245,7 +246,10 @@ impl Ui {
             return (
                 true,
                 Vec::new(),
-                Some(Modal::Modify(modify_view(&view.id, &snapshot.detail))),
+                Some(Modal::Modify(modify_view(
+                    &view.modify_id,
+                    &snapshot.detail,
+                ))),
             );
         }
         let keep = scroll_key(key, &mut view.scroll, &mut view.horizontal);
@@ -447,13 +451,13 @@ impl Ui {
             } else {
                 self.notify(error);
             }
-            return Vec::new();
-        }
-        if let Some(position) = position {
-            self.modals.remove(position);
+        } else {
+            if let Some(position) = position {
+                self.modals.remove(position);
+            }
+            self.notify(format!("Job {id} updated"));
         }
         self.invalidate(&id);
-        self.notify(format!("Job {id} updated"));
         let token = self.token();
         let mut effects = vec![Effect::Refresh];
         if let Some(Modal::Job(view)) = self
@@ -890,6 +894,7 @@ mod tests {
             Modal::Job(DetailView {
                 token: 1,
                 id: "123".into(),
+                modify_id: "123".into(),
                 state: "RUNNING".into(),
                 snapshot: None,
                 loading: false,

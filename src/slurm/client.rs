@@ -9,6 +9,7 @@ use std::{
 use chrono::{DateTime, Days, Local, NaiveDateTime, TimeZone};
 
 use super::journal::JOURNAL_RETENTION_DAYS;
+use super::selection::PendingSelection;
 use super::*;
 
 const FETCH_TIMEOUT: Duration = Duration::from_secs(30);
@@ -240,7 +241,7 @@ impl Client {
     }
 
     pub fn update_job(&self, id: &str, key: &str, value: &str) -> Result<(), String> {
-        let id = checked_job_id(id)?;
+        let normalized = checked_job_id(id)?;
         let key = key.trim();
         if !key.as_bytes().first().is_some_and(u8::is_ascii_alphabetic)
             || !key.bytes().all(|b| b.is_ascii_alphanumeric())
@@ -254,13 +255,40 @@ impl Client {
         if value.is_empty() {
             return Err("value cannot be empty".into());
         }
+        let target = if key.eq_ignore_ascii_case("partition") {
+            let selection = PendingSelection::parse(id)?;
+            let pending = self
+                .run(
+                    "squeue",
+                    &[
+                        "--noheader",
+                        "--array",
+                        &format!("--jobs={}", selection.query_id),
+                        "--states",
+                        "PENDING",
+                        "--format",
+                        "%i|%A",
+                    ],
+                    DETAIL_TIMEOUT,
+                )
+                .map_err(|error| format!("could not check pending jobs: {error}"))?;
+            selection.target(&pending)?
+        } else {
+            normalized
+        };
         self.run(
             "scontrol",
-            &["update", &format!("JobId={id}"), &format!("{key}={value}")],
+            &["update", &format!("JobId={target}"), &format!("{key}={value}")],
             ACTION_TIMEOUT,
         )
         .map(|_| ())
-        .map_err(|e| format!("scontrol update error: {e}"))
+        .map_err(|error| {
+            if key.eq_ignore_ascii_case("partition") {
+                format!("Partition update failed; some array tasks may already have changed. Tasks that started running cannot change partition. {error}")
+            } else {
+                format!("scontrol update error: {error}")
+            }
+        })
     }
 
     pub fn hold_job(&self, id: &str, hold: bool) -> Result<(), String> {

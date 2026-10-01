@@ -1159,6 +1159,12 @@ fn render_modify(frame: &mut Frame<'_>, area: Rect, view: &ModifyView, theme: Th
     if view.editing {
         let row = &view.rows[view.selected];
         lines.push(Line::from(format!(" {} · job {}", row.key, row.target)));
+        if row.key.eq_ignore_ascii_case("partition") {
+            lines.push(Line::from(Span::styled(
+                " Only pending jobs or array tasks will change partition.",
+                theme.subtle(),
+            )));
+        }
         lines.push(Line::default());
         lines.push(Line::from(Span::styled(
             format!(" > {}▏", clean(&view.input)),

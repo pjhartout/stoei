@@ -305,6 +305,66 @@ fn development_build_label_is_explained_in_help() {
 }
 
 #[test]
+fn array_partition_edits_keep_the_selected_group_when_detail_shows_a_running_task() {
+    let store = populated_store();
+    let mut ui = Ui::new(Config::default());
+    let effects = ui.open_job("123_[0-9%3]", "PENDING", None);
+    let Effect::FetchJob { token, .. } = effects[0] else {
+        panic!("expected detail request");
+    };
+    let mut value = snapshot("123", "RUNNING");
+    value
+        .detail
+        .fields
+        .insert("ArrayJobId".into(), "123".into());
+    ui.receive(ActionResult::Job {
+        token,
+        job_id: "123".into(),
+        result: Ok(value),
+    });
+    ui.handle_key(key(KeyCode::Char('m')), &store);
+    ui.handle_key(key(KeyCode::Down), &store);
+    ui.handle_key(key(KeyCode::Enter), &store);
+    for ch in "cpu".chars() {
+        ui.handle_key(key(KeyCode::Char(ch)), &store);
+    }
+    let effects = ui.handle_key(key(KeyCode::Enter), &store);
+    assert!(
+        matches!(effects.as_slice(), [Effect::Modify { job_id, fields }] if job_id == "123_[0-9%3]" && fields == &[("Partition".into(), "cpu".into())])
+    );
+    let effects = ui.receive(ActionResult::Modify {
+        job_id: "123_[0-9%3]".into(),
+        result: Err("task started while applying partition".into()),
+    });
+    assert!(
+        matches!(effects.as_slice(), [Effect::Refresh, Effect::FetchJob { job_id, .. }] if job_id == "123")
+    );
+    let Some(Modal::Modify(view)) = ui.modals.last() else {
+        panic!("failed edit must remain open");
+    };
+    assert_eq!(view.input, "cpu");
+    assert_eq!(view.pending_id, None);
+    assert_eq!(
+        view.error.as_deref(),
+        Some("task started while applying partition")
+    );
+    assert!(render(&mut ui, &store, 100, 40).contains("task started while applying partition"));
+    assert!(ui.toasts.is_empty());
+    assert!(matches!(
+        ui.handle_key(key(KeyCode::Enter), &store).as_slice(),
+        [Effect::Modify { .. }]
+    ));
+    let effects = ui.receive(ActionResult::Modify {
+        job_id: "123_[0-9%3]".into(),
+        result: Ok(()),
+    });
+    assert!(
+        matches!(effects.as_slice(), [Effect::Refresh, Effect::FetchJob { job_id, .. }] if job_id == "123")
+    );
+    assert!(matches!(ui.modals.last(), Some(Modal::Job(_))));
+}
+
+#[test]
 fn active_priority_pane_stays_visible_beside_a_wide_sidebar() {
     let mut store = populated_store();
     apply_test_data(&mut store, Dataset::Nodes(vec![idle_node()]));

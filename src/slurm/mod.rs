@@ -3,6 +3,7 @@ mod journal;
 mod parse;
 mod resources;
 mod runner;
+mod selection;
 mod time;
 mod types;
 mod usage;
