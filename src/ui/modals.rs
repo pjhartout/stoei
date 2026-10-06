@@ -5,11 +5,13 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use crate::config::{Config, THEMES};
 use crate::store::{self, JobDetail, Store};
 
+use super::gpu::GpuView;
 use super::{Effect, JobSnapshot, Tail, Ui, append_bounded};
 
 pub(super) enum Modal {
     Job(DetailView),
     Node(NodeView),
+    Gpu(GpuView),
     Info {
         name: String,
         account: bool,
@@ -159,7 +161,7 @@ impl Modal {
     }
 }
 
-type Response = (bool, Vec<Effect>, Option<Modal>);
+pub(super) type Response = (bool, Vec<Effect>, Option<Modal>);
 
 impl Ui {
     pub(super) fn handle_modal(&mut self, key: KeyEvent, store: &Store) -> Vec<Effect> {
@@ -171,6 +173,7 @@ impl Ui {
         };
         let (keep, effects, next) = match &mut modal {
             Modal::Job(view) => self.handle_detail(key, view),
+            Modal::Gpu(view) => self.handle_gpu(key, view),
             Modal::Node(view) => {
                 let keep = scroll_key(key, &mut view.scroll, &mut view.horizontal);
                 (keep, Vec::new(), None)
@@ -200,6 +203,9 @@ impl Ui {
     }
 
     fn handle_detail(&mut self, key: KeyEvent, view: &mut DetailView) -> Response {
+        if key.code == KeyCode::Char('v') {
+            return self.gpu_response(&view.id);
+        }
         if key.code == KeyCode::Char('r') && !view.loading {
             view.token = self.token();
             view.loading = true;
@@ -827,7 +833,7 @@ fn edit_key(key: KeyEvent, text: &mut String) {
     }
 }
 
-fn scroll_key(key: KeyEvent, scroll: &mut u16, horizontal: &mut u16) -> bool {
+pub(super) fn scroll_key(key: KeyEvent, scroll: &mut u16, horizontal: &mut u16) -> bool {
     match key.code {
         KeyCode::Esc | KeyCode::Char('q') => return false,
         KeyCode::Up | KeyCode::Char('k') => *scroll = scroll.saturating_sub(1),

@@ -1,5 +1,6 @@
 mod cluster;
 mod format;
+mod gpu;
 mod modals;
 mod render;
 mod table;
@@ -15,7 +16,7 @@ use ratatui::Frame;
 
 use crate::config::Config;
 use crate::log::LogRing;
-use crate::store::{self, JobDetail, JobUsage, Store};
+use crate::store::{self, GpuSnapshot, JobDetail, JobUsage, Store};
 
 use modals::{DetailView, Modal};
 use table::{Source, TableView};
@@ -51,6 +52,11 @@ pub enum ActionResult {
         name: String,
         result: Result<JobDetail, String>,
     },
+    Gpu {
+        token: u64,
+        job_id: String,
+        result: Result<GpuSnapshot, String>,
+    },
     Log {
         token: u64,
         result: Result<Tail, String>,
@@ -78,6 +84,10 @@ pub enum Effect {
     FetchNode {
         token: u64,
         name: String,
+    },
+    FetchGpu {
+        token: u64,
+        job_id: String,
     },
     FetchLog {
         token: u64,
@@ -586,6 +596,14 @@ impl Ui {
                 result,
             } => {
                 self.receive_node(token, name, result);
+                Vec::new()
+            }
+            ActionResult::Gpu {
+                token,
+                job_id,
+                result,
+            } => {
+                self.receive_gpu(token, job_id, result);
                 Vec::new()
             }
             ActionResult::Log { token, result } => {

@@ -642,6 +642,16 @@ fn action_feedback(result: &ActionResult) -> Option<(&'static str, String)> {
                 .err()
                 .map(|err| ("ERROR", format!("node {name}: {err}")));
         }
+        ActionResult::Gpu { job_id, result, .. } => {
+            return match result {
+                Ok(snapshot) if !snapshot.warnings.is_empty() => Some((
+                    "WARN",
+                    format!("job {job_id} GPUs: {}", snapshot.warnings.join("; ")),
+                )),
+                Ok(_) => None,
+                Err(error) => Some(("ERROR", format!("job {job_id} GPUs: {error}"))),
+            };
+        }
         ActionResult::Log { result, .. } => {
             return Some(match result {
                 Ok(tail) => (
@@ -676,6 +686,11 @@ fn failed_action(effect: Effect, error: String) -> Option<ActionResult> {
         Effect::FetchNode { token, name } => ActionResult::Node {
             token,
             name,
+            result: Err(error),
+        },
+        Effect::FetchGpu { token, job_id } => ActionResult::Gpu {
+            token,
+            job_id,
             result: Err(error),
         },
         Effect::FetchLog { token, .. } => ActionResult::Log {

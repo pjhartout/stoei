@@ -77,6 +77,131 @@ fn snapshot(id: &str, state: &str) -> JobSnapshot {
     }
 }
 
+fn gpu_snapshot() -> GpuSnapshot {
+    GpuSnapshot {
+        devices: vec![store::GpuDevice {
+            node: "gpu001".into(),
+            index: 2,
+            name: "NVIDIA H100".into(),
+            uuid: "GPU-test".into(),
+            memory_used_bytes: Some(12 << 30),
+            memory_total_bytes: Some(80 << 30),
+            utilization_percent: Some(65.0),
+        }],
+        warnings: Vec::new(),
+    }
+}
+
+#[test]
+fn gpu_snapshots_are_requested_and_refreshed_only_by_modal_keys() {
+    let store = populated_store();
+    let mut ui = Ui::new(Config::default());
+    assert!(matches!(
+        ui.open_job("123", "RUNNING", None).as_slice(),
+        [Effect::FetchJob { .. }]
+    ));
+    let effects = ui.handle_key(key(KeyCode::Char('v')), &store);
+    let [Effect::FetchGpu { token, job_id }] = effects.as_slice() else {
+        panic!("expected an on-demand GPU query");
+    };
+    assert_eq!(job_id, "123");
+    assert!(render(&mut ui, &store, 100, 24).contains("Loading"));
+    assert!(ui.handle_key(key(KeyCode::Char('r')), &store).is_empty());
+    ui.receive(ActionResult::Gpu {
+        token: *token,
+        job_id: job_id.clone(),
+        result: Ok(gpu_snapshot()),
+    });
+    let text = render(&mut ui, &store, 100, 24);
+    assert!(text.contains("gpu001 · GPU 2 · NVIDIA H100"));
+    assert!(text.contains("65%"));
+    assert!(text.contains("12.0G / 80.0G"));
+    let refresh = ui.handle_key(key(KeyCode::Char('r')), &store);
+    let [Effect::FetchGpu { token: next, .. }] = refresh.as_slice() else {
+        panic!("expected a manual GPU refresh");
+    };
+    assert_ne!(next, token);
+    assert!(render(&mut ui, &store, 100, 24).contains("previous snapshot"));
+    ui.receive(ActionResult::Gpu {
+        token: *next,
+        job_id: "123".into(),
+        result: Err("SSH connection failed".into()),
+    });
+    let text = render(&mut ui, &store, 100, 24);
+    assert!(text.contains("SSH connection failed"));
+    assert!(text.contains("previous snapshot"));
+    assert!(text.contains("12.0G / 80.0G"));
+    assert!(ui.handle_key(key(KeyCode::Esc), &store).is_empty());
+    assert!(matches!(ui.modals.last(), Some(Modal::Job(_))));
+}
+
+#[test]
+fn gpu_results_for_closed_or_other_requests_are_ignored() {
+    let store = populated_store();
+    let mut ui = Ui::new(Config::default());
+    ui.open_job("123", "RUNNING", None);
+    let effects = ui.handle_key(key(KeyCode::Char('v')), &store);
+    let [Effect::FetchGpu { token: first, .. }] = effects.as_slice() else {
+        panic!("expected a GPU query");
+    };
+    ui.handle_key(key(KeyCode::Esc), &store);
+    let effects = ui.handle_key(key(KeyCode::Char('v')), &store);
+    let [Effect::FetchGpu { token: second, .. }] = effects.as_slice() else {
+        panic!("expected another GPU query");
+    };
+    for (token, job_id) in [(*first, "123"), (*second, "456")] {
+        ui.receive(ActionResult::Gpu {
+            token,
+            job_id: job_id.into(),
+            result: Ok(gpu_snapshot()),
+        });
+        assert!(
+            matches!(ui.modals.last(), Some(Modal::Gpu(view)) if view.loading && view.snapshot.is_none())
+        );
+    }
+    ui.handle_key(key(KeyCode::Esc), &store);
+    ui.receive(ActionResult::Gpu {
+        token: *second,
+        job_id: "123".into(),
+        result: Ok(gpu_snapshot()),
+    });
+    assert!(matches!(ui.modals.last(), Some(Modal::Job(_))));
+}
+
+#[test]
+fn gpu_popup_distinguishes_unavailable_readings_from_zero_and_reports_partial_failures() {
+    let store = populated_store();
+    let mut ui = Ui::new(Config::default());
+    ui.open_job("123", "RUNNING", None);
+    let effects = ui.handle_key(key(KeyCode::Char('v')), &store);
+    let [Effect::FetchGpu { token, .. }] = effects.as_slice() else {
+        panic!("expected a GPU query");
+    };
+    let mut data = gpu_snapshot();
+    data.devices[0].memory_used_bytes = None;
+    data.devices[0].utilization_percent = None;
+    data.warnings.push("gpu002: SSH unavailable".into());
+    ui.receive(ActionResult::Gpu {
+        token: *token,
+        job_id: "123".into(),
+        result: Ok(data.clone()),
+    });
+    let text = render(&mut ui, &store, 100, 30);
+    assert!(text.contains("gpu002: SSH unavailable"));
+    assert!(text.contains("GPU utilization......... n/a"));
+    assert!(text.contains("n/a / 80.0G"));
+    data.devices[0].memory_used_bytes = Some(0);
+    data.devices[0].utilization_percent = Some(0.0);
+    ui.receive(ActionResult::Gpu {
+        token: *token,
+        job_id: "123".into(),
+        result: Ok(data),
+    });
+    let text = render(&mut ui, &store, 100, 30);
+    assert!(text.contains("GPU utilization......... 0%"));
+    assert!(text.contains("0B / 80.0G"));
+}
+
 fn render(ui: &mut Ui, store: &Store, width: u16, height: u16) -> String {
     render_buffer(ui, store, width, height)
         .content

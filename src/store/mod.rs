@@ -5,14 +5,14 @@ mod priority;
 mod timeline;
 
 pub use crate::slurm::{
-    AllUsersJob, FairShareEntry, GPUEntry, HistoryJob, HistoryResult, HistoryStats, JobDetail,
-    JobUsage, Node, PriorityConfig, PriorityEntry, PriorityFactor, PriorityFactors,
-    PriorityWeights, RunningJob, TRESResources, aggregate_gpu_counts, calculate_total_gpus,
-    expand_node_list, expand_std_io_path, format_gpu_types, has_specific_gpu_types, is_mig_type,
-    is_terminal_state, job_std_io, normalize_array_job_id, parse_array_size,
-    parse_cpu_count_from_tres, parse_elapsed_to_seconds, parse_gpu_entries, parse_gpu_from_gres,
-    parse_size_bytes, parse_slurm_timestamp, parse_tres_pairs, parse_tres_resources,
-    short_gpu_label, try_expand_node_list, wait_time_seconds,
+    AllUsersJob, FairShareEntry, GPUEntry, GpuDevice, GpuSnapshot, HistoryJob, HistoryResult,
+    HistoryStats, JobDetail, JobUsage, Node, PriorityConfig, PriorityEntry, PriorityFactor,
+    PriorityFactors, PriorityWeights, RunningJob, TRESResources, aggregate_gpu_counts,
+    calculate_total_gpus, expand_node_list, expand_std_io_path, format_gpu_types,
+    has_specific_gpu_types, is_mig_type, is_terminal_state, job_std_io, normalize_array_job_id,
+    parse_array_size, parse_cpu_count_from_tres, parse_elapsed_to_seconds, parse_gpu_entries,
+    parse_gpu_from_gres, parse_size_bytes, parse_slurm_timestamp, parse_tres_pairs,
+    parse_tres_resources, short_gpu_label, try_expand_node_list, wait_time_seconds,
 };
 pub use derive::*;
 pub use display::*;

@@ -233,6 +233,11 @@ impl Client {
         }
     }
 
+    /// Query allocated physical GPUs over SSH without creating or changing job steps.
+    pub fn job_gpu_snapshot(&self, id: &str) -> Result<GpuSnapshot, String> {
+        super::gpu::job_gpu_snapshot(self.runner.as_ref(), &self.username, id)
+    }
+
     pub fn cancel_job(&self, id: &str) -> Result<(), String> {
         let id = checked_job_id(id)?;
         self.run("scancel", &[&id], ACTION_TIMEOUT)

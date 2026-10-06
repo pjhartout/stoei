@@ -1,0 +1,2 @@
+NodeName=gpu01 Gres=gpu:h100:2(S:0-1) CfgTRES=cpu=8,gres/gpu=2
+NodeName=gpu02 Gres=gpu:h100:1(S:0) CfgTRES=cpu=8,gres/gpu=1
