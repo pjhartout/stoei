@@ -1,0 +1,5 @@
+JobId=70001 ArrayJobId=123 ArrayTaskId=7 JobName=train UserId=alice(1000)
+   JobState=RUNNING StartTime=2026-10-06T12:00:00 NodeList=gpu[01-02]
+   AllocTRES=cpu=8,gres/gpu:h100=2,gres/gpu=2
+   Nodes=gpu01 CPU_IDs=0-3 Mem=16000 GRES=gpu:h100:1(IDX:1)
+   Nodes=gpu02 CPU_IDs=0-3 Mem=16000 GRES=gpu:h100:1(IDX:0)

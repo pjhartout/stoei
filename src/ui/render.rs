@@ -7,6 +7,7 @@ use ratatui::widgets::{Block, BorderType, Clear, Padding, Paragraph, Wrap};
 use crate::store::{self, Section, State, Store};
 
 use super::format::{clean, efficiency_lines, field_lines};
+use super::gpu::gpu_lines;
 use super::modals::{DetailView, LogView, Modal, ModifyView, SettingsView};
 use super::table::Source;
 use super::theme::Theme;
@@ -855,6 +856,7 @@ fn modal_title(modal: &Modal) -> String {
     match modal {
         Modal::Job(view) => format!(" Job {} ", clean(&view.id)),
         Modal::Node(view) => format!(" Node {} ", clean(&view.name)),
+        Modal::Gpu(view) => format!(" GPU snapshot · job {} ", clean(&view.id)),
         Modal::Info { name, account, .. } => format!(
             " {} {} ",
             if *account { "Account" } else { "User" },
@@ -872,7 +874,8 @@ fn modal_title(modal: &Modal) -> String {
 
 fn modal_hint(modal: &Modal) -> &'static str {
     match modal {
-        Modal::Job(_) => "Esc close · o stdout · e stderr · m modify · r reload",
+        Modal::Job(_) => "Esc close · v GPUs · o/e logs · m modify · r reload",
+        Modal::Gpu(_) => "Esc back · r refresh · ↑↓ scroll · ←→ pan",
         Modal::Log(_) => "Esc close · / search · n/N match · r reload · e editor",
         Modal::Modify(view) if view.editing => "Esc back · Enter apply · C-u clear",
         Modal::Modify(_) => "Esc close · ↑↓ choose · Enter edit/apply",
@@ -891,6 +894,8 @@ fn modal_short_hint(modal: &Modal) -> &'static str {
         Modal::Cancel { .. } => "Esc abort · Enter confirm",
         Modal::Input { .. } => "Esc close · Enter inspect",
         Modal::Log(_) => "Esc close · / search",
+        Modal::Gpu(_) => "Esc back · r refresh",
+        Modal::Job(_) => "Esc close · v GPUs · r reload",
         _ => "Esc close · ↑↓ scroll",
     }
 }
@@ -909,6 +914,14 @@ fn render_modal_content(
             frame,
             area,
             detail_lines(view, theme),
+            &mut view.scroll,
+            &mut view.horizontal,
+            theme,
+        ),
+        Modal::Gpu(view) => render_scrolled(
+            frame,
+            area,
+            gpu_lines(view, theme),
             &mut view.scroll,
             &mut view.horizontal,
             theme,
@@ -1057,7 +1070,11 @@ fn detail_lines(view: &DetailView, theme: Theme) -> Vec<Line<'static>> {
     lines
 }
 
-fn loading_lines(loading: bool, error: Option<&str>, theme: Theme) -> Vec<Line<'static>> {
+pub(super) fn loading_lines(
+    loading: bool,
+    error: Option<&str>,
+    theme: Theme,
+) -> Vec<Line<'static>> {
     let mut lines = Vec::new();
     if loading {
         lines.push(Line::from(Span::styled(" Loading…", theme.role("warning"))));
@@ -1523,7 +1540,7 @@ fn help_lines(mode: &str, version: &str, theme: Theme) -> Vec<Line<'static>> {
         )),
         Line::default(),
     ];
-    lines.extend([" Navigation", " 1–5 tabs · Tab/Shift+Tab next/previous · ↑↓ rows · PgUp/PgDn pages", " g/G first/last · ←→ horizontal scrolling · Enter inspect", globals, "", " Jobs", " i enter a job ID · c cancel active job (confirmation defaults to No)", " Completed jobs appear alongside your live jobs.", "", " Users", " r Running · p Pending · Enter user summary", "", " Priority", " m My Priority · u Active Users · a Accounts · j Pending Jobs", " Fair-share rank is among users with recent usage.", " Queue positions are per partition; multi-partition jobs appear in each queue.", "", " Filtering and sorting", " Filter text matches a case-insensitive literal substring.", " Combine column:value constraints (state:RUNNING name:train) with free text.", " Enter keeps the filter; Esc clears it. Sort cycles ascending, descending, then next column.", "", " Job detail", " o stdout · e stderr · m modify · r refresh detail · ↑↓ scroll", " Live usage is visible only for your own running jobs.", " CPU efficiency uses all allocated CPUs; MIG GPU utilization is unavailable.", "", " Job modification", " Array throttle · Partition · TimeLimit · QOS · Nice · JobName", " Hold/Release · Other raw Key=Value · Enter apply · Esc back", "", " Log viewer", " / literal search · n/N next/previous match · r reload", " c copy path · e external editor ($VISUAL/$EDITOR, otherwise vi)", " l toggle original line numbers · g/G top/bottom · ←→ horizontal scroll", "", " Settings", " ↑↓/Tab choose field · ←→ cycle theme/keybindings · edit numeric values", " C-s save · Enter advance/save last field · Esc cancel", "", " Cluster load", " L opens a scrollable summary; wide terminals also show the sidebar.", "", " Exit", " q closes a modal or quits the dashboard; C-c quits."].into_iter().map(|text| {
+    lines.extend([" Navigation", " 1–5 tabs · Tab/Shift+Tab next/previous · ↑↓ rows · PgUp/PgDn pages", " g/G first/last · ←→ horizontal scrolling · Enter inspect", globals, "", " Jobs", " i enter a job ID · c cancel active job (confirmation defaults to No)", " Completed jobs appear alongside your live jobs.", "", " Users", " r Running · p Pending · Enter user summary", "", " Priority", " m My Priority · u Active Users · a Accounts · j Pending Jobs", " Fair-share rank is among users with recent usage.", " Queue positions are per partition; multi-partition jobs appear in each queue.", "", " Filtering and sorting", " Filter text matches a case-insensitive literal substring.", " Combine column:value constraints (state:RUNNING name:train) with free text.", " Enter keeps the filter; Esc clears it. Sort cycles ascending, descending, then next column.", "", " Job detail", " v current GPU snapshot · o stdout · e stderr · m modify · r refresh detail", " GPU snapshots run only on request; r resamples and Esc returns to details.", " Live usage is visible only for your own running jobs.", " CPU efficiency uses all allocated CPUs; MIG GPU utilization is unavailable.", "", " Job modification", " Array throttle · Partition · TimeLimit · QOS · Nice · JobName", " Hold/Release · Other raw Key=Value · Enter apply · Esc back", "", " Log viewer", " / literal search · n/N next/previous match · r reload", " c copy path · e external editor ($VISUAL/$EDITOR, otherwise vi)", " l toggle original line numbers · g/G top/bottom · ←→ horizontal scroll", "", " Settings", " ↑↓/Tab choose field · ←→ cycle theme/keybindings · edit numeric values", " C-s save · Enter advance/save last field · Esc cancel", "", " Cluster load", " L opens a scrollable summary; wide terminals also show the sidebar.", "", " Exit", " q closes a modal or quits the dashboard; C-c quits."].into_iter().map(|text| {
         if !text.starts_with(' ') && !text.is_empty() { Line::from(Span::styled(text.to_owned(), theme.title())) } else { Line::from(text.to_owned()) }
     }));
     lines

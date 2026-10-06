@@ -102,6 +102,7 @@ impl Workers {
                 ..
             } | Work::Latest
                 | Work::Action(Effect::FetchLog { .. })
+                | Work::Action(Effect::FetchGpu { .. })
         );
         let sender = if slow { &self.slow } else { &self.fast };
         match sender.as_ref().ok_or("worker stopped")?.try_send(work) {
@@ -195,6 +196,11 @@ fn action(
                 result,
             }
         }
+        Effect::FetchGpu { token, job_id } => ActionResult::Gpu {
+            token,
+            result: client.job_gpu_snapshot(&job_id),
+            job_id,
+        },
         Effect::FetchLog {
             token,
             path,

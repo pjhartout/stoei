@@ -12,6 +12,7 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 - Completed-job history merged into the Jobs tab
 - Job detail view (`Enter` or `i`) with live/final CPU, RAM, GPU, and disk
   efficiency, plus a log viewer with search and `$EDITOR`
+- On-demand per-GPU utilization and VRAM snapshots (`v` in job details)
 - Tabs for Jobs, Nodes, Users, Priority, and Logs — the Logs tab records every
   Slurm command stoei runs (with size and timing), fetch failures and
   recoveries, and the feedback from your own actions
@@ -128,6 +129,14 @@ Reopening your running job refreshes its runtime and allocation before sampling
 usage again. CPU efficiency is relative to all allocated CPUs, not a single core;
 disk throughput is averaged over the refreshed runtime.
 
+For a current GPU snapshot, open your running job with `Enter`, then press `v`.
+The popup shows utilization and VRAM used/total for each allocated NVIDIA GPU.
+Press `r` to take another snapshot and `Esc` to return to job details. Snapshots
+run only on request, using non-interactive SSH to the allocated compute nodes;
+SSH access and `nvidia-smi` on those nodes are required. Readings cover the whole
+GPU, so shared devices include other processes. Unsupported device mappings and
+MIG allocations report an unavailable message.
+
 > [!WARNING]
 > stoei polls `slurmctld` for live state. Personal jobs refresh at most once
 > every two minutes; cluster-wide queries run less often, are staggered, and
@@ -146,6 +155,7 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `Tab` / `Shift+Tab` | Next / previous tab |
 | `↑` / `↓` (`k` / `j`) | Navigate rows |
 | `Enter` | View the selected row's details |
+| `v` | Job details: current GPU utilization and VRAM snapshot |
 | `i` | Enter a job ID to view (Jobs tab) |
 | `c` | Cancel the selected job (Jobs tab) |
 | `/` | Filter (`col:value` or substring) |

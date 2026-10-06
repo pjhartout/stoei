@@ -1,4 +1,5 @@
 mod client;
+mod gpu;
 mod journal;
 mod parse;
 mod resources;
@@ -9,6 +10,7 @@ mod types;
 mod usage;
 
 pub use client::*;
+pub use gpu::{GpuDevice, GpuSnapshot};
 pub use journal::{Journal, acct_stamp_path, journal_path};
 pub use parse::*;
 pub use resources::*;
