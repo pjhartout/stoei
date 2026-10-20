@@ -16,7 +16,7 @@ A terminal UI for monitoring Slurm jobs. It auto-refreshes, summarizes jobs, nod
 - Tabs for Jobs, Nodes, Users, Priority, and Logs — the Logs tab records every
   Slurm command stoei runs (with size and timing), fetch failures and
   recoveries, and the feedback from your own actions
-- Cluster-load sidebar: free vs. allocated nodes/CPU/memory/GPU, and the pending queue
+- Resizable, collapsible cluster-load sidebar: free vs. allocated nodes/CPU/memory/GPU, and the pending queue
 - Quick filtering (`/`), sorting (`o`), and job cancellation (`c`)
 - Job modification from the detail view (`m`): array throttle, partition, time
   limit, QOS, hold/release, or any raw `scontrol update` field
@@ -154,6 +154,7 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `1`–`5` | Switch tab: Jobs / Nodes / Users / Priority / Logs |
 | `Tab` / `Shift+Tab` | Next / previous tab |
 | `↑` / `↓` (`k` / `j`) | Navigate rows |
+| `←` / `→` | Scroll the table horizontally when columns overflow |
 | `Enter` | View the selected row's details |
 | `v` | Job details: current GPU utilization and VRAM snapshot |
 | `i` | Enter a job ID to view (Jobs tab) |
@@ -165,9 +166,21 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `m` / `u` / `a` / `j` | Priority tab: My / Active Users / Accounts / Jobs pane |
 | `r` | Refresh now (on the Users tab, `r` switches pane instead) |
 | `L` | Cluster load (scrollable popup) |
+| `b` | Collapse / restore the cluster sidebar |
+| `[` / `]` | Narrow / widen the sidebar by four columns |
+| `=` | Restore automatic sidebar width |
+| `Alt` + `↑` / `↓` | Scroll the sidebar vertically |
 | `s` | Settings |
 | `?` | Help |
 | `q` | Quit |
+
+The sidebar starts at roughly one third of the terminal width, capped at 44
+columns, rather than expanding to fit long GPU or partition names. Resizing
+always leaves at least 60 columns for the active tab. Width and collapse choices
+last for the current session and survive terminal resizing; `=` resumes automatic
+sizing. On narrow or short terminals the sidebar auto-hides. Long lines are
+clipped; widen the sidebar or press `L` for the full cluster-load popup, which
+supports arrow-key scrolling in both directions.
 
 Config lives at `${XDG_CONFIG_HOME:-~/.config}/stoei/config.yaml` (theme, 120–300 second refresh interval, history window, keybindings) and can be edited in-app via `s`.
 

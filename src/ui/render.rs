@@ -22,6 +22,7 @@ impl Ui {
     ) {
         let theme = Theme::by_name(&self.config.theme);
         frame.render_widget(Block::default().style(theme.text()), frame.area());
+        self.sidebar.area = Rect::default();
         if frame.area().height < 5 || frame.area().width < 18 {
             frame.render_widget(
                 Paragraph::new(format!(
@@ -49,12 +50,13 @@ impl Ui {
         if let Some(error) = status.unavailable {
             render_unavailable(frame, body, error, theme);
         } else {
-            let main = if body.width >= 100 {
+            self.sidebar.area = body;
+            let width = self.sidebar.width();
+            let main = if width > 0 {
                 let lines = super::cluster::lines(store, theme);
-                let width = super::cluster::sidebar_width(&lines, body.width);
                 let [main, sidebar] =
                     Layout::horizontal([Constraint::Min(1), Constraint::Length(width)]).areas(body);
-                super::cluster::render_sidebar(frame, sidebar, lines, theme);
+                super::cluster::render_sidebar(frame, sidebar, lines, &mut self.sidebar, theme);
                 main
             } else {
                 body
@@ -211,8 +213,13 @@ impl Ui {
             ("/", "o", "s")
         };
         let mut hints = match self.active {
-            4 => vec![("↑↓", "scroll"), (filter, "filter")],
-            _ => vec![("Enter", "inspect"), (filter, "filter"), (sort, "sort")],
+            4 => vec![("b", "sidebar"), ("↑↓", "scroll"), (filter, "filter")],
+            _ => vec![
+                ("b", "sidebar"),
+                ("Enter", "inspect"),
+                (filter, "filter"),
+                (sort, "sort"),
+            ],
         };
         if !view.filter.is_empty() {
             hints.push(("Esc", "clear"));
@@ -1543,6 +1550,12 @@ fn help_lines(mode: &str, version: &str, theme: Theme) -> Vec<Line<'static>> {
     lines.extend([" Navigation", " 1–5 tabs · Tab/Shift+Tab next/previous · ↑↓ rows · PgUp/PgDn pages", " g/G first/last · ←→ horizontal scrolling · Enter inspect", globals, "", " Jobs", " i enter a job ID · c cancel active job (confirmation defaults to No)", " Completed jobs appear alongside your live jobs.", "", " Users", " r Running · p Pending · Enter user summary", "", " Priority", " m My Priority · u Active Users · a Accounts · j Pending Jobs", " Fair-share rank is among users with recent usage.", " Queue positions are per partition; multi-partition jobs appear in each queue.", "", " Filtering and sorting", " Filter text matches a case-insensitive literal substring.", " Combine column:value constraints (state:RUNNING name:train) with free text.", " Enter keeps the filter; Esc clears it. Sort cycles ascending, descending, then next column.", "", " Job detail", " v current GPU snapshot · o stdout · e stderr · m modify · r refresh detail", " GPU snapshots run only on request; r resamples and Esc returns to details.", " Live usage is visible only for your own running jobs.", " CPU efficiency uses all allocated CPUs; MIG GPU utilization is unavailable.", "", " Job modification", " Array throttle · Partition · TimeLimit · QOS · Nice · JobName", " Hold/Release · Other raw Key=Value · Enter apply · Esc back", "", " Log viewer", " / literal search · n/N next/previous match · r reload", " c copy path · e external editor ($VISUAL/$EDITOR, otherwise vi)", " l toggle original line numbers · g/G top/bottom · ←→ horizontal scroll", "", " Settings", " ↑↓/Tab choose field · ←→ cycle theme/keybindings · edit numeric values", " C-s save · Enter advance/save last field · Esc cancel", "", " Cluster load", " L opens a scrollable summary; wide terminals also show the sidebar.", "", " Exit", " q closes a modal or quits the dashboard; C-c quits."].into_iter().map(|text| {
         if !text.starts_with(' ') && !text.is_empty() { Line::from(Span::styled(text.to_owned(), theme.title())) } else { Line::from(text.to_owned()) }
     }));
+    lines.extend([
+        Line::default(),
+        Line::from(Span::styled(" Cluster sidebar", theme.title())),
+        Line::from(" b collapse/restore · [ / ] narrow/widen · = automatic width"),
+        Line::from(" Alt+↑/↓ vertical scroll"),
+    ]);
     lines
 }
 

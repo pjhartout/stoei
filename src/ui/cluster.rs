@@ -1,3 +1,4 @@
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Modifier;
@@ -6,34 +7,90 @@ use ratatui::widgets::{Block, BorderType, Padding, Paragraph};
 
 use crate::store::{self, Section, State, Store};
 
+use super::Ui;
 use super::format::clean;
 use super::theme::Theme;
 
-pub(super) fn sidebar_width(lines: &[Line<'_>], terminal_width: u16) -> u16 {
-    let content = lines.iter().map(Line::width).max().unwrap_or(12);
-    content
-        .saturating_add(6)
-        .clamp(28, usize::from(terminal_width / 2)) as u16
+#[derive(Default)]
+pub(super) struct Sidebar {
+    pub area: Rect,
+    collapsed: bool,
+    preferred_width: Option<u16>,
+    scroll: u16,
+}
+
+impl Sidebar {
+    pub fn width(&self) -> u16 {
+        if self.collapsed || self.area.width < 100 || self.area.height < 6 {
+            return 0;
+        }
+        self.preferred_width
+            .unwrap_or((self.area.width / 3).min(44))
+            .clamp(24, self.area.width - 60)
+    }
+}
+
+impl Ui {
+    pub(super) fn handle_sidebar_key(&mut self, key: KeyEvent) -> bool {
+        let sidebar = &mut self.sidebar;
+        if key.modifiers == KeyModifiers::ALT {
+            match key.code {
+                KeyCode::Up | KeyCode::Down if sidebar.width() == 0 => {}
+                KeyCode::Up => sidebar.scroll = sidebar.scroll.saturating_sub(1),
+                KeyCode::Down => sidebar.scroll = sidebar.scroll.saturating_add(1),
+                _ => return false,
+            }
+            return true;
+        }
+        if key
+            .modifiers
+            .intersects(KeyModifiers::CONTROL | KeyModifiers::ALT)
+        {
+            return false;
+        }
+        match key.code {
+            KeyCode::Char('b') => sidebar.collapsed = sidebar.width() > 0,
+            KeyCode::Char('[' | ']') => {
+                let width = sidebar.width();
+                if width == 0 {
+                    return true;
+                }
+                let preferred = if key.code == KeyCode::Char('[') {
+                    width.saturating_sub(4)
+                } else {
+                    width.saturating_add(4)
+                };
+                sidebar.preferred_width = Some(preferred.clamp(24, sidebar.area.width - 60));
+            }
+            KeyCode::Char('=') => sidebar.preferred_width = None,
+            _ => return false,
+        }
+        if key.code == KeyCode::Char('b') && !sidebar.collapsed && sidebar.width() == 0 {
+            self.notify("Sidebar does not fit; press L for cluster load".into());
+        }
+        true
+    }
 }
 
 pub(super) fn render_sidebar(
     frame: &mut Frame<'_>,
     area: Rect,
     lines: Vec<Line<'static>>,
+    state: &mut Sidebar,
     theme: Theme,
 ) {
     let block = Block::bordered()
         .border_type(BorderType::Rounded)
         .border_style(theme.text().fg(theme.accent))
-        .padding(Padding::new(2, 2, u16::from(area.height >= 12), 0))
+        .padding(Padding::horizontal(1))
         .style(theme.text());
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let [title, rule, _, body] = ratatui::layout::Layout::vertical([
+    let [title, rule, body, footer] = ratatui::layout::Layout::vertical([
         ratatui::layout::Constraint::Length(1),
         ratatui::layout::Constraint::Length(1),
-        ratatui::layout::Constraint::Length(u16::from(inner.height >= 6)),
-        ratatui::layout::Constraint::Min(0),
+        ratatui::layout::Constraint::Min(1),
+        ratatui::layout::Constraint::Length(1),
     ])
     .areas(inner);
     frame.render_widget(Paragraph::new("Cluster Load").style(theme.title()), title);
@@ -41,7 +98,22 @@ pub(super) fn render_sidebar(
         Paragraph::new("─".repeat(usize::from(rule.width))).style(theme.subtle()),
         rule,
     );
-    frame.render_widget(Paragraph::new(lines).style(theme.text()), body);
+    state.scroll = state.scroll.min(
+        lines
+            .len()
+            .saturating_sub(usize::from(body.height))
+            .min(usize::from(u16::MAX)) as u16,
+    );
+    frame.render_widget(
+        Paragraph::new(lines)
+            .style(theme.text())
+            .scroll((state.scroll, 0)),
+        body,
+    );
+    frame.render_widget(
+        Paragraph::new("Alt+↑/↓ scroll").style(theme.subtle()),
+        footer,
+    );
 }
 
 pub(super) fn lines(store: &Store, theme: Theme) -> Vec<Line<'static>> {

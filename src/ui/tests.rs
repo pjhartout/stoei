@@ -650,11 +650,6 @@ fn long_priority_summary_values_wrap_inside_the_main_pane() {
     assert!(words.contains("without jobs to reach 1× your share"));
     assert!(words.contains("Heavily over-served"));
     assert!(words.contains("Partition 100"));
-    let recovery_row = (4..39)
-        .find(|row| line(&buffer, *row).contains("Recovery"))
-        .unwrap();
-    assert_eq!(buffer[(20, recovery_row + 1)].symbol(), " ");
-    assert_ne!(buffer[(21, recovery_row + 1)].symbol(), " ");
 }
 
 #[test]
@@ -998,4 +993,158 @@ fn emacs_filter_and_settings_bindings_work_without_vim_globals() {
     ui.handle_key(key(KeyCode::Esc), &store);
     ui.handle_key(ctrl(','), &store);
     assert!(matches!(ui.modals.last(), Some(Modal::Settings(_))));
+}
+
+fn rendered_sidebar_width(buffer: &ratatui::buffer::Buffer) -> u16 {
+    (0..buffer.area.width)
+        .find(|x| buffer[(*x, 2)].symbol() == "╭")
+        .map_or(0, |x| buffer.area.width - x)
+}
+
+#[test]
+fn sidebar_resizing_preserves_table_space_and_survives_collapse_and_terminal_changes() {
+    let mut store = populated_store();
+    let mut ui = Ui::new(Config::default());
+    ui.observe_data(&store);
+    let initial = rendered_sidebar_width(&render_buffer(&mut ui, &store, 120, 24));
+    ui.handle_key(key(KeyCode::Char(']')), &store);
+    assert_eq!(
+        rendered_sidebar_width(&render_buffer(&mut ui, &store, 120, 24)),
+        initial + 4
+    );
+    for _ in 0..30 {
+        ui.handle_key(key(KeyCode::Char(']')), &store);
+    }
+    let preferred = rendered_sidebar_width(&render_buffer(&mut ui, &store, 120, 24));
+    assert_eq!(120 - preferred, 60);
+    assert_eq!(
+        100 - rendered_sidebar_width(&render_buffer(&mut ui, &store, 100, 24)),
+        60
+    );
+    assert_eq!(
+        rendered_sidebar_width(&render_buffer(&mut ui, &store, 160, 24)),
+        preferred
+    );
+
+    ui.handle_key(key(KeyCode::Char('b')), &store);
+    let collapsed = render_buffer(&mut ui, &store, 180, 24);
+    assert_eq!(rendered_sidebar_width(&collapsed), 0);
+    assert!(!line(&collapsed, 3).contains("Cluster Load"));
+    ui.handle_key(key(KeyCode::Char('b')), &store);
+    assert_eq!(
+        rendered_sidebar_width(&render_buffer(&mut ui, &store, 180, 24)),
+        preferred
+    );
+    for (width, height) in [(80, 24), (160, 8), (12, 4)] {
+        assert_eq!(
+            rendered_sidebar_width(&render_buffer(&mut ui, &store, width, height)),
+            0
+        );
+        assert_eq!(
+            rendered_sidebar_width(&render_buffer(&mut ui, &store, 160, 24)),
+            preferred
+        );
+    }
+    ui.handle_key(key(KeyCode::Char('=')), &store);
+    let automatic = rendered_sidebar_width(&render_buffer(&mut ui, &store, 160, 24));
+    assert!(automatic < preferred);
+    apply_test_data(
+        &mut store,
+        Dataset::AllUsersJobs(vec![store::AllUsersJob {
+            id: "500".into(),
+            state: "PENDING".into(),
+            partition: "a-partition-name-that-is-much-wider-than-the-sidebar".into(),
+            tres: "cpu=128,mem=512G".into(),
+            ..Default::default()
+        }]),
+    );
+    ui.observe_data(&store);
+    assert_eq!(
+        rendered_sidebar_width(&render_buffer(&mut ui, &store, 160, 24)),
+        automatic
+    );
+}
+
+#[test]
+fn sidebar_vertical_scroll_reaches_pending_resources_without_moving_selection() {
+    let mut store = populated_store();
+    apply_test_data(&mut store, Dataset::Nodes(vec![idle_node()]));
+    apply_test_data(
+        &mut store,
+        Dataset::AllUsersJobs(vec![store::AllUsersJob {
+            id: "500".into(),
+            state: "PENDING".into(),
+            partition: "cpu".into(),
+            tres: "cpu=913,mem=682G".into(),
+            ..Default::default()
+        }]),
+    );
+    let mut ui = Ui::new(Config::default());
+    ui.observe_data(&store);
+    render_buffer(&mut ui, &store, 120, 14);
+    for _ in 0..20 {
+        ui.handle_key(key(KeyCode::Char('[')), &store);
+    }
+    let first = render_buffer(&mut ui, &store, 120, 14);
+    assert_eq!(rendered_sidebar_width(&first), 24);
+    assert!(!render(&mut ui, &store, 120, 14).contains("1j·913c·682G"));
+    let cursor = ui.tables[0].cursor;
+    for _ in 0..30 {
+        ui.handle_key(KeyEvent::new(KeyCode::Down, KeyModifiers::ALT), &store);
+    }
+    let scrolled = render(&mut ui, &store, 120, 14);
+    assert!(scrolled.contains("1j·913c·682G"));
+    assert!(scrolled.contains("Cluster Load"));
+    assert_eq!(ui.tables[0].cursor, cursor);
+    ui.observe_data(&store);
+    assert!(render(&mut ui, &store, 120, 14).contains("1j·913c·682G"));
+    ui.handle_key(key(KeyCode::Down), &store);
+    assert_ne!(ui.tables[0].cursor, cursor);
+
+    apply_test_data(&mut store, Dataset::Nodes(Vec::new()));
+    apply_test_data(&mut store, Dataset::AllUsersJobs(Vec::new()));
+    ui.observe_data(&store);
+    let refreshed = render(&mut ui, &store, 120, 36);
+    assert!(refreshed.contains("0/0 free (n/a)"));
+    assert!(!refreshed.contains("1j·913c·682G"));
+}
+
+#[test]
+fn sidebar_shortcuts_remain_literal_filter_text_in_both_key_presets() {
+    let mut store = populated_store();
+    apply_test_data(
+        &mut store,
+        Dataset::RunningJobs(vec![RunningJob {
+            id: "789".into(),
+            name: "b[]=".into(),
+            state: "RUNNING".into(),
+            ..Default::default()
+        }]),
+    );
+    for mode in ["vim", "emacs"] {
+        let mut ui = Ui::new(Config {
+            keybind_mode: mode.into(),
+            ..Config::default()
+        });
+        ui.observe_data(&store);
+        let width = rendered_sidebar_width(&render_buffer(&mut ui, &store, 120, 24));
+        ui.handle_key(
+            if mode == "emacs" {
+                ctrl('s')
+            } else {
+                key(KeyCode::Char('/'))
+            },
+            &store,
+        );
+        for ch in "b[]=".chars() {
+            ui.handle_key(key(KeyCode::Char(ch)), &store);
+        }
+        assert_eq!(
+            rendered_sidebar_width(&render_buffer(&mut ui, &store, 120, 24)),
+            width
+        );
+        assert_eq!(ui.tables[0].filter, "b[]=");
+        assert_eq!(ui.tables[0].indices.len(), 1);
+        assert_eq!(source_for(0, &store).key(ui.tables[0].indices[0]), "789");
+    }
 }

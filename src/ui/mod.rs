@@ -139,6 +139,7 @@ pub struct Ui {
     users_pending: bool,
     priority_pane: usize,
     tables: [TableView; 9],
+    sidebar: cluster::Sidebar,
     modals: Vec<Modal>,
     cache: VecDeque<CachedDetail>,
     next_token: u64,
@@ -156,6 +157,7 @@ impl Ui {
             users_pending: false,
             priority_pane: 0,
             tables: std::array::from_fn(|_| TableView::default()),
+            sidebar: cluster::Sidebar::default(),
             modals: Vec::new(),
             cache: VecDeque::new(),
             next_token: 0,
@@ -251,6 +253,9 @@ impl Ui {
         }
         if self.quit_key(key) {
             return vec![Effect::Quit];
+        }
+        if self.handle_sidebar_key(key) {
+            return Vec::new();
         }
         if key.code == KeyCode::Esc {
             self.tables[index].filter.clear();
