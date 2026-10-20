@@ -102,20 +102,17 @@ fn configure(command: &mut Command, stdout: &File, stderr: &File) -> Result<(), 
         .stdout(stdout.try_clone().map_err(|err| err.to_string())?)
         .stderr(stderr.try_clone().map_err(|err| err.to_string())?);
     command.process_group(0);
-    #[cfg(target_os = "linux")]
-    {
-        let parent = std::process::id() as libc::pid_t;
-        unsafe {
-            command.pre_exec(move || {
-                if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
-                    return Err(std::io::Error::last_os_error());
-                }
-                if libc::getppid() != parent {
-                    libc::_exit(125);
-                }
-                Ok(())
-            });
-        }
+    let parent = std::process::id() as libc::pid_t;
+    unsafe {
+        command.pre_exec(move || {
+            if libc::prctl(libc::PR_SET_PDEATHSIG, libc::SIGKILL) != 0 {
+                return Err(std::io::Error::last_os_error());
+            }
+            if libc::getppid() != parent {
+                libc::_exit(125);
+            }
+            Ok(())
+        });
     }
     Ok(())
 }

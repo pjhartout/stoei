@@ -15,19 +15,9 @@ jobs:
         include:
           - runner: ubuntu-24.04
             target: x86_64-unknown-linux-musl
-            os: linux
             arch: amd64
           - runner: ubuntu-24.04-arm
             target: aarch64-unknown-linux-musl
-            os: linux
-            arch: arm64
-          - runner: macos-15-intel
-            target: x86_64-apple-darwin
-            os: darwin
-            arch: amd64
-          - runner: macos-15
-            target: aarch64-apple-darwin
-            os: darwin
             arch: arm64
     runs-on: ${{ matrix.runner }}
     steps:
@@ -41,25 +31,23 @@ jobs:
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --all-targets --locked -- --nocapture
       - name: Install musl compiler
-        if: matrix.os == 'linux'
         run: sudo apt-get update && sudo apt-get install -y musl-tools
       - name: Build
         shell: bash
         run: |
           export STOEI_VERSION="${GITHUB_REF_NAME#v}"
-          if [[ "${{ matrix.os }}" == "linux" ]]; then
-            export CC=musl-gcc
-          fi
+          export CC=musl-gcc
           cargo build --release --locked --target "${{ matrix.target }}"
+          "./target/${{ matrix.target }}/release/stoei" --version
       - name: Package tarball
         shell: bash
         run: |
           mkdir -p dist package
           cp "target/${{ matrix.target }}/release/stoei" LICENSE README.md package/
-          tar -czf "dist/stoei_${GITHUB_REF_NAME#v}_${{ matrix.os }}_${{ matrix.arch }}.tar.gz" -C package stoei LICENSE README.md
+          tar -czf "dist/stoei_${GITHUB_REF_NAME#v}_linux_${{ matrix.arch }}.tar.gz" -C package stoei LICENSE README.md
       - uses: actions/upload-artifact@v4
         with:
-          name: stoei-${{ matrix.os }}-${{ matrix.arch }}
+          name: stoei-linux-${{ matrix.arch }}
           path: dist/*
           if-no-files-found: error
 

@@ -1,6 +1,6 @@
 # Contributing to Stoei
 
-Install Rust 1.89 or newer on Linux or macOS, including rustfmt and Clippy.
+Install Rust 1.89 or newer on Linux, including rustfmt and Clippy.
 
 ```bash
 git clone https://github.com/pjhartout/stoei.git
@@ -40,9 +40,9 @@ scheduling decisions. Do not run the TUI in automation; use Ratatui's
 `TestBackend` to verify rendered screens.
 
 Use `scripts/release <version>` to check a clean, gated `main`, create the tag,
-and push it. The release workflow builds Linux static musl binaries and macOS
-binaries for amd64 and arm64. Archive names and `checksums.txt` remain compatible
-with the self-updater.
+and push it. The release workflow builds only static musl binaries for Linux
+x86-64 (amd64) and AArch64 (arm64), matching MPCDF and EuroHPC login nodes.
+Archive names and `checksums.txt` remain compatible with the self-updater.
 
 PR descriptions contain only a summary. Keep commits focused and attribute
 them solely to the human author.

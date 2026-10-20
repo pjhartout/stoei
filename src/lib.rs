@@ -1,5 +1,5 @@
-#[cfg(not(any(target_os = "linux", target_os = "macos")))]
-compile_error!("stoei supports Linux and macOS only");
+#[cfg(not(target_os = "linux"))]
+compile_error!("stoei supports Linux only");
 
 pub mod config;
 pub mod engine;

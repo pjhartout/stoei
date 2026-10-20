@@ -32,13 +32,9 @@ pub fn journal() -> Result<PathBuf, String> {
 }
 
 pub fn cache() -> Result<PathBuf, String> {
-    let base = if cfg!(target_os = "macos") {
-        home()?.join("Library/Caches")
-    } else {
-        match nonempty("XDG_CACHE_HOME") {
-            Some(path) => PathBuf::from(path),
-            None => home()?.join(".cache"),
-        }
+    let base = match nonempty("XDG_CACHE_HOME") {
+        Some(path) => PathBuf::from(path),
+        None => home()?.join(".cache"),
     };
     Ok(base.join("stoei/latest-release"))
 }

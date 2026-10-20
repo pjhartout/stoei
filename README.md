@@ -32,30 +32,37 @@ deadline-limited helper processes. Log tails and caches have fixed memory limits
 
 ## Installation
 
-stoei supports Linux and macOS. It ships as a single binary; Linux releases are
-statically linked. Install it on a login node: that is where the Slurm CLIs it
-drives (`squeue`, `scontrol`, …) work. Pick one of the methods below, then check
-with `stoei --version`.
+stoei runs on Linux login nodes, where the Slurm CLIs it drives (`squeue`,
+`scontrol`, …) work. Pick one of the methods below, then check with
+`stoei --version`.
 
 ### Prebuilt binary (recommended)
 
-Releases ship for Linux and macOS (amd64, arm64) as `.tar.gz` archives with a
-`checksums.txt`. Login nodes rarely allow `sudo`, so this installs into
-`~/.local/bin`:
+Prebuilt releases ship statically linked binaries only for Linux x86-64 (`amd64`)
+and AArch64 (`arm64`), in `.tar.gz` archives with `checksums.txt`. Choose the login
+node's architecture, not the compute nodes':
+MPCDF's [Raven](https://docs.mpcdf.mpg.de/doc/computing/raven-user-guide.html#login-and-interactive-nodes)
+and [Viper](https://docs.mpcdf.mpg.de/doc/computing/viper-user-guide.html#login-and-interactive-nodes)
+use x86-64, while EuroHPC's [JUPITER](https://apps.fz-juelich.de/jsc/hps/jupiter/configuration.html#jupiter-booster-design)
+uses ARM64 login nodes.
+
+Login nodes rarely allow `sudo`, so this installs into `~/.local/bin`:
 
 ```bash
+case "$(uname -s):$(uname -m)" in
+  Linux:x86_64 | Linux:amd64) arch=amd64 ;;
+  Linux:aarch64 | Linux:arm64) arch=arm64 ;;
+  *) echo "Prebuilt binaries require Linux x86-64 or AArch64." >&2; exit 1 ;;
+esac
 version=$(curl -fsSL https://api.github.com/repos/pjhartout/stoei/releases/latest | sed -n 's/.*"tag_name": *"v\([^"]*\)".*/\1/p')
-os=$(uname -s | tr '[:upper:]' '[:lower:]')                 # linux or darwin
-arch=$(uname -m | sed 's/x86_64/amd64/; s/aarch64/arm64/')  # amd64 or arm64
-archive="stoei_${version}_${os}_${arch}.tar.gz"
+archive="stoei_${version}_linux_${arch}.tar.gz"
 
 curl -fsSLO "https://github.com/pjhartout/stoei/releases/download/v${version}/${archive}"
 curl -fsSL "https://github.com/pjhartout/stoei/releases/download/v${version}/checksums.txt" | grep "${archive}" | sha256sum -c -
 mkdir -p ~/.local/bin && tar -xzf "${archive}" -C ~/.local/bin stoei && rm "${archive}"
 ```
 
-On macOS use `shasum -a 256 -c -` in place of `sha256sum -c -`. If `stoei` is not
-found afterwards, `~/.local/bin` is not on your `PATH`; add
+If `stoei` is not found afterwards, `~/.local/bin` is not on your `PATH`; add
 `export PATH="$HOME/.local/bin:$PATH"` to your shell rc and open a new shell.
 For a system-wide install, extract into `/usr/local/bin` instead
 (`sudo tar -xzf "${archive}" -C /usr/local/bin stoei`).
@@ -214,7 +221,7 @@ partition in queue order (with the cluster-wide rank as a secondary column).
 
 ## Requirements
 
-- Linux or macOS
+- Linux on x86-64 or AArch64
 - Slurm CLIs on `PATH`: `squeue`, `scontrol` (plus `sshare`/`sprio`/`scancel` for the Priority tab and cancellation)
 - A login node where those commands talk to your cluster
 

@@ -55,18 +55,16 @@ pub fn asset_name(tag: &str, os: &str, arch: &str) -> Result<String, String> {
     if semver(tag).is_none() {
         return Err("invalid release tag".into());
     }
-    let os = match os {
-        "macos" | "darwin" => "darwin",
-        "linux" => "linux",
-        _ => return Err(format!("unsupported OS: {os}")),
-    };
+    if os != "linux" {
+        return Err(format!("unsupported OS: {os}"));
+    }
     let arch = match arch {
         "x86_64" | "amd64" => "amd64",
         "aarch64" | "arm64" => "arm64",
         _ => return Err(format!("unsupported architecture: {arch}")),
     };
     Ok(format!(
-        "stoei_{}_{os}_{arch}.tar.gz",
+        "stoei_{}_linux_{arch}.tar.gz",
         tag.trim_start_matches('v')
     ))
 }
@@ -316,11 +314,14 @@ mod tests {
             "stoei_1.2.3_linux_amd64.tar.gz"
         );
         assert_eq!(
-            asset_name("v1.2.3", "macos", "aarch64").unwrap(),
-            "stoei_1.2.3_darwin_arm64.tar.gz"
+            asset_name("v1.2.3", "linux", "aarch64").unwrap(),
+            "stoei_1.2.3_linux_arm64.tar.gz"
         );
         assert!(asset_name("../latest", "linux", "x86_64").is_err());
         assert!(asset_name("v1.2.3", "windows", "x86_64").is_err());
+        assert!(asset_name("v1.2.3", "macos", "aarch64").is_err());
+        assert!(asset_name("v1.2.3", "darwin", "x86_64").is_err());
+        assert!(asset_name("v1.2.3", "linux", "powerpc64le").is_err());
     }
 
     #[test]

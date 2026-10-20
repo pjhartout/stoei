@@ -8,8 +8,8 @@ and cancel jobs, and see cluster load — all without leaving the terminal.
 - Rust **1.89+**, Ratatui, and Crossterm. Use the Cargo toolchain.
 - Build with `cargo build --release --locked`.
 - Format with `cargo fmt`; lint with Clippy.
-- Support Linux and macOS. Release single binaries via GitHub Actions; Linux
-  releases use static musl and macOS builds use its native toolchain.
+- Support Linux login nodes on x86-64 and AArch64. Release single, statically
+  linked musl binaries for amd64 and arm64 via GitHub Actions.
   `cargo install` also works.
 - **Stale-binary trap:** when a bug looks already-fixed in source, suspect the
   installed binary is old before re-debugging. `stoei update` pulls the latest
