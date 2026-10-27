@@ -155,7 +155,9 @@ impl Ui {
         if self.active == 2 && self.config.keybind_mode != "emacs" {
             globals.retain(|(_, label)| *label != "refresh");
         }
-        let globals = if area.width < 40 {
+        let globals = if area.width < 40 && store.any_loading() {
+            Line::default()
+        } else if area.width < 40 {
             hint_line(
                 &globals
                     .into_iter()
@@ -180,7 +182,7 @@ impl Ui {
             Constraint::Min(0),
             Constraint::Length(Line::from(notice.as_str()).width() as u16),
             Constraint::Length(globals.width() as u16),
-            Constraint::Length(if area.width >= 40 {
+            Constraint::Length(if area.width >= 40 || store.any_loading() {
                 Line::from(sync.as_str()).width() as u16 + 2
             } else {
                 0
@@ -191,10 +193,12 @@ impl Ui {
         frame.render_widget(Paragraph::new(self.footer_hints(hints.width, theme)), hints);
         frame.render_widget(Paragraph::new(notice).style(theme.bar_key()), update);
         frame.render_widget(Paragraph::new(globals), help);
-        let color = match store.meta(Section::RunningJobs).state {
-            State::Error => theme.error,
-            State::Loading => theme.warning,
-            _ => theme.accent_alt,
+        let color = if store.any_loading() {
+            theme.warning
+        } else if store.meta(Section::RunningJobs).state == State::Error {
+            theme.error
+        } else {
+            theme.accent_alt
         };
         frame.render_widget(
             Paragraph::new(format!(" {sync} ")).style(theme.chip(color)),
@@ -355,10 +359,12 @@ fn hint_line(hints: &[(&str, &str)], theme: Theme) -> Line<'static> {
 }
 
 fn sync_label(store: &Store, now: std::time::Instant) -> String {
+    if store.any_loading() {
+        return "Refreshing…".into();
+    }
     let meta = store.meta(Section::RunningJobs);
     let Some(updated) = meta.last_success else {
         return match meta.state {
-            State::Loading => "sync …",
             State::Error => "sync !",
             _ => "sync -",
         }
@@ -413,11 +419,8 @@ fn usage_banner(store: &Store, theme: Theme) -> Line<'static> {
         format!(" {} ", clean(&store.user)),
         theme.selected(),
     )];
-    if let Some(usage) = store
-        .running_user_stats()
-        .iter()
-        .find(|usage| usage.username == store.user)
-    {
+    let usage = store.my_job_stats();
+    if usage.job_count > 0 {
         let mut parts = vec![
             ("cpu", usage.total_cpus.to_string()),
             ("mem", super::cluster::compact_memory(usage.total_memory_gb)),
@@ -457,8 +460,10 @@ fn usage_banner(store: &Store, theme: Theme) -> Line<'static> {
         }
     } else {
         spans.push(Span::styled(
-            if store.has_data(Section::AllUsersJobs) {
+            if store.has_data(Section::RunningJobs) {
                 " no running jobs"
+            } else if store.meta(Section::RunningJobs).state == State::Error {
+                " usage unavailable"
             } else {
                 " Loading usage…"
             },

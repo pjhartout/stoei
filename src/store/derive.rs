@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use super::{
-    AllUsersJob, GPUEntry, Node, aggregate_gpu_counts, calculate_total_gpus, expand_node_list,
-    format_gpu_types, parse_array_size, parse_gpu_entries, parse_gpu_from_gres,
-    parse_tres_resources,
+    AllUsersJob, GPUEntry, Node, RunningJob, aggregate_gpu_counts, calculate_total_gpus,
+    expand_node_list, format_gpu_types, is_terminal_state, parse_array_size, parse_gpu_entries,
+    parse_gpu_from_gres, parse_tres_resources,
 };
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -412,18 +412,18 @@ pub fn aggregate_user_stats(
         .filter(|job| !is_pending_state(&job.state) && !job.user.trim().is_empty())
     {
         let user = users.entry(job.user.trim().into()).or_default();
-        accumulate_user(user, job, models);
+        accumulate_user(
+            user,
+            &job.id,
+            &job.node_list,
+            &job.num_nodes,
+            &job.tres,
+            models,
+        );
     }
     let mut rows: Vec<UserStats> = users
         .into_iter()
-        .map(|(username, mut user)| {
-            user.stats.username = username;
-            user.stats.gpu_types = format_gpu_counts(&user.gpu_types);
-            user.stats.total_nodes = user.node_names.len() as u64;
-            user.stats.node_names = user.node_names.into_iter().collect::<Vec<_>>().join(",");
-            user.stats.array_count = user.array_ids.len();
-            user.stats
-        })
+        .map(|(username, user)| finish_user_stats(username, user))
         .collect();
     rows.sort_by(|a, b| {
         b.total_cpus
@@ -433,24 +433,58 @@ pub fn aggregate_user_stats(
     rows
 }
 
+pub fn aggregate_running_job_stats(
+    username: &str,
+    jobs: &[RunningJob],
+    models: &BTreeMap<String, String>,
+) -> UserStats {
+    let mut user = UserAccumulator::default();
+    for job in jobs
+        .iter()
+        .filter(|job| !is_pending_state(&job.state) && !is_terminal_state(&job.state))
+    {
+        accumulate_user(
+            &mut user,
+            &job.id,
+            &job.node_list,
+            &job.nodes,
+            &job.tres,
+            models,
+        );
+    }
+    finish_user_stats(username.into(), user)
+}
+
+fn finish_user_stats(username: String, mut user: UserAccumulator) -> UserStats {
+    user.stats.username = username;
+    user.stats.gpu_types = format_gpu_counts(&user.gpu_types);
+    user.stats.total_nodes = user.node_names.len() as u64;
+    user.stats.node_names = user.node_names.into_iter().collect::<Vec<_>>().join(",");
+    user.stats.array_count = user.array_ids.len();
+    user.stats
+}
+
 fn accumulate_user(
     user: &mut UserAccumulator,
-    job: &AllUsersJob,
+    id: &str,
+    node_list: &str,
+    num_nodes: &str,
+    tres: &str,
     models: &BTreeMap<String, String>,
 ) {
     user.stats.job_count += 1;
-    if let Some((base, _)) = job.id.split_once('_') {
+    if let Some((base, _)) = id.split_once('_') {
         user.array_ids.insert(base.into());
     } else {
         user.stats.plain_job_count += 1;
     }
-    let nodes = expand_node_list(&job.node_list);
+    let nodes = expand_node_list(node_list);
     user.node_names.extend(nodes.iter().cloned());
-    let resources = parse_tres_resources(&job.tres);
+    let resources = parse_tres_resources(tres);
     let cpus = if resources.cpus > 0 {
         resources.cpus
     } else {
-        parse_node_count(&job.num_nodes)
+        parse_node_count(num_nodes)
     };
     user.stats.total_cpus = user.stats.total_cpus.saturating_add(cpus);
     user.stats.total_memory_gb += resources.memory_gb;

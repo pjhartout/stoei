@@ -111,7 +111,7 @@ fn commands_have_explicit_scopes_formats_and_budgets() {
     assert_call(
         &runner,
         "squeue",
-        &["-u", "alice", "-o", "%i|%j|%T|%M|%D|%R|%V|%S"],
+        &["-u", "alice", "-O", RUNNING_JOBS_FORMAT],
         30,
     );
     client.all_users_jobs().unwrap();

@@ -18,6 +18,7 @@ pub struct RunningJob {
     pub node_list: String,
     pub submit_time: String,
     pub start_time: String,
+    pub tres: String,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]

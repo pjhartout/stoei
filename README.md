@@ -145,10 +145,14 @@ GPU, so shared devices include other processes. Unsupported device mappings and
 MIG allocations report an unavailable message.
 
 > [!WARNING]
-> stoei polls `slurmctld` for live state. Personal jobs refresh at most once
-> every two minutes; cluster-wide queries run less often, are staggered, and
+> stoei polls `slurmctld` for live state. Automatic personal-job refreshes run at
+> most once every two minutes; cluster-wide queries run less often, are staggered, and
 > back off after failures. Each session polls independently, so administrators
 > may still ask users to select a longer refresh interval on busy clusters.
+
+Press `r` (`C-r` in emacs mode) to refresh immediately. Requests already in flight
+are shared, and “Refreshing…” stays visible until they finish. Your resource totals
+update together with your personal job list.
 
 ### Keyboard shortcuts
 

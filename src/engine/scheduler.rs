@@ -111,20 +111,17 @@ impl Scheduler {
             .min()
     }
 
-    pub fn request(&mut self, section: Section, now: Instant, urgent: bool) -> bool {
-        let schedule = &mut self.schedules[index(section)];
-        let minimum = if urgent {
-            Duration::from_secs(10)
-        } else {
-            cooldown(section)
-        };
-        if schedule
-            .dispatched
-            .is_some_and(|last| now.saturating_duration_since(last) < minimum)
-        {
+    pub fn request(&mut self, section: Section, now: Instant, force: bool, store: &Store) -> bool {
+        if store.meta(section).state == State::Loading {
             return false;
         }
-        if !urgent && schedule.failures > 0 && schedule.next > now {
+        let schedule = &mut self.schedules[index(section)];
+        if !force
+            && (schedule
+                .dispatched
+                .is_some_and(|last| now.saturating_duration_since(last) < cooldown(section))
+                || (schedule.failures > 0 && schedule.next > now))
+        {
             return false;
         }
         schedule.next = now;
@@ -225,21 +222,60 @@ mod tests {
     }
 
     #[test]
-    fn manual_debounce_and_failure_backoff_are_independent() {
+    fn forced_requests_bypass_cooldowns_and_failure_backoff() {
         let now = Instant::now();
-        let mut scheduler = Scheduler::new(now, &Config::default(), 3);
-        scheduler.dispatched(Section::RunningJobs, now);
-        scheduler.finished(Section::RunningJobs, true, now);
-        assert!(!scheduler.request(Section::RunningJobs, now + Duration::from_secs(9), true));
-        assert!(scheduler.request(Section::RunningJobs, now + Duration::from_secs(10), true));
-        scheduler.dispatched(Section::RunningJobs, now + Duration::from_secs(10));
-        scheduler.finished(Section::RunningJobs, true, now + Duration::from_secs(10));
-        assert!(!scheduler.request(Section::RunningJobs, now + Duration::from_secs(20), false));
+        let store = Store::new();
+        for section in SECTIONS {
+            let mut scheduler = Scheduler::new(now, &Config::default(), 3);
+            for failed in [false, true] {
+                scheduler.dispatched(section, now);
+                scheduler.finished(section, failed, now);
+                assert!(!scheduler.request(section, now + Duration::from_secs(1), false, &store));
+                assert!(scheduler.request(section, now + Duration::from_secs(1), true, &store));
+                scheduler.dispatched(section, now + Duration::from_secs(1));
+                scheduler.finished(section, failed, now + Duration::from_secs(1));
+                assert!(scheduler.request(section, now + Duration::from_secs(2), true, &store));
+            }
+        }
+    }
+
+    #[test]
+    fn forced_requests_share_fetches_in_flight() {
+        let now = Instant::now();
+        let mut scheduler = Scheduler::new(now, &Config::default(), 4);
+        let mut store = Store::new();
+        for section in SECTIONS {
+            scheduler.dispatched(section, now);
+            store.begin(section);
+            assert!(!scheduler.request(section, now + Duration::from_secs(1), true, &store));
+        }
+        assert!(
+            scheduler
+                .due(now + Duration::from_secs(1), true, true, &store)
+                .is_empty()
+        );
+        store.apply(
+            Section::RunningJobs,
+            store.generation(Section::RunningJobs),
+            Ok(crate::store::Dataset::RunningJobs(Vec::new())),
+            now + Duration::from_secs(1),
+        );
+        assert!(scheduler.request(
+            Section::RunningJobs,
+            now + Duration::from_secs(1),
+            true,
+            &store
+        ));
+        assert_eq!(
+            scheduler.due(now + Duration::from_secs(1), true, true, &store),
+            [Section::RunningJobs]
+        );
     }
 
     #[test]
     fn failures_never_accelerate_background_refreshes() {
         let now = Instant::now();
+        let store = Store::new();
         for interval in [120.0, 300.0] {
             let config = Config {
                 refresh_interval: interval,
@@ -253,7 +289,7 @@ mod tests {
                     scheduler.finished(section, true, now);
                     let retry = scheduler.schedules[index(section)].next;
                     assert!(retry > healthy, "failed {section:?} retried sooner");
-                    assert!(!scheduler.request(section, healthy, false));
+                    assert!(!scheduler.request(section, healthy, false, &store));
                 }
             }
         }

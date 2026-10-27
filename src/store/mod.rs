@@ -155,6 +155,7 @@ pub struct Store {
     completed: Vec<HistoryJob>,
     merged: Vec<MergedJob>,
     node_rows: Vec<NodeDisplay>,
+    my_job_stats: UserStats,
     running_users: Vec<UserStats>,
     pending_users: Vec<UserPendingStats>,
     users_ranked: Vec<RankedShare>,
@@ -286,6 +287,11 @@ impl Store {
             .collect();
         self.running_jobs = jobs;
         self.running_loaded = true;
+        self.my_job_stats = aggregate_running_job_stats(
+            &self.user,
+            &self.running_jobs,
+            &node_gpu_models(&self.nodes),
+        );
         self.rebuild_merged();
         vanished
     }
@@ -293,6 +299,7 @@ impl Store {
     fn rebuild_resources(&mut self) {
         self.cluster_stats = derive_cluster_stats(&self.nodes, &self.all_users_jobs);
         let models = node_gpu_models(&self.nodes);
+        self.my_job_stats = aggregate_running_job_stats(&self.user, &self.running_jobs, &models);
         self.running_users = aggregate_user_stats(&self.all_users_jobs, &models);
         self.pending_users = aggregate_pending_user_stats(&self.all_users_jobs);
     }
@@ -342,6 +349,9 @@ impl Store {
     }
     pub fn node_displays(&self) -> &[NodeDisplay] {
         &self.node_rows
+    }
+    pub fn my_job_stats(&self) -> &UserStats {
+        &self.my_job_stats
     }
     pub fn running_user_stats(&self) -> &[UserStats] {
         &self.running_users

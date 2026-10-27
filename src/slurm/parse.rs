@@ -4,6 +4,7 @@ use chrono::{DateTime, Utc};
 
 use super::*;
 
+pub const RUNNING_JOBS_FORMAT: &str = "JobID:0|,Name:0|,State:0|,TimeUsed:0|,NumNodes:0|,ReasonList:0|,SubmitTime:0|,StartTime:0|,tres-alloc:0";
 pub const ALL_USERS_FORMAT: &str = "JobID:30,Name:50,UserName:15,Partition:15,StateCompact:10,TimeUsed:12,NumNodes:6,NodeList:80,Reason:40,tres:80";
 pub const JOURNAL_SQUEUE_FORMAT: &str = "JobId:30,ArrayJobId:20,ArrayTaskId:20,UserName:15,Name:50,State:20,Partition:15,SubmitTime:25,StartTime:25,EndTime:25,TimeUsed:15,exit_code:10,RestartCnt:10,NumCPUs:10,NodeList:80,tres-alloc:200,StdErr:256,StdOut:256";
 pub const ACCT_FORMAT: &str = "JobID,User,State,Partition,Submit,Start,End,Elapsed,ExitCode,NodeList,AllocCPUS,AllocTRES,StdErr,StdOut,JobName";
@@ -120,19 +121,20 @@ pub fn parse_running_jobs(raw: &str) -> Vec<RunningJob> {
         .skip(1)
         .filter_map(|line| {
             let parts: Vec<_> = line.split('|').map(str::trim).collect();
-            if parts.len() < 8 {
+            if parts.len() < 9 {
                 return None;
             }
-            let tail = &parts[parts.len() - 6..];
+            let tail = &parts[parts.len() - 7..];
             Some(RunningJob {
                 id: parts[0].into(),
-                name: parts[1..parts.len() - 6].join("|"),
+                name: parts[1..parts.len() - 7].join("|"),
                 state: tail[0].into(),
                 time: tail[1].into(),
                 nodes: tail[2].into(),
                 node_list: tail[3].into(),
                 submit_time: tail[4].into(),
                 start_time: tail[5].into(),
+                tres: tail[6].into(),
             })
         })
         .collect()

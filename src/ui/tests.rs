@@ -277,6 +277,79 @@ fn idle_node() -> store::Node {
 }
 
 #[test]
+fn personal_resource_totals_refresh_with_jobs_before_cluster_data_arrives() {
+    let mut store = populated_store();
+    let mut jobs = store.running_jobs.clone();
+    jobs[0].tres = "cpu=8,mem=4G,gres/gpu=2,gres/gpu:a100=2".into();
+    apply_test_data(&mut store, Dataset::RunningJobs(jobs.clone()));
+    let mut ui = Ui::new(Config::default());
+    ui.observe_data(&store);
+    let banner = line(&render_buffer(&mut ui, &store, 160, 24), 2);
+    assert!(banner.contains("cpu 8"));
+    assert!(banner.contains("mem 4G"));
+    assert!(banner.contains("gpu 2×A100"));
+    assert!(!banner.contains("Loading usage"));
+
+    apply_test_data(
+        &mut store,
+        Dataset::AllUsersJobs(vec![store::AllUsersJob {
+            user: "alice".into(),
+            state: "RUNNING".into(),
+            tres: "cpu=99,mem=99G".into(),
+            ..Default::default()
+        }]),
+    );
+    jobs[0].tres = "cpu=16,mem=32G,gres/gpu:h100=4".into();
+    apply_test_data(&mut store, Dataset::RunningJobs(jobs));
+    ui.observe_data(&store);
+    let banner = line(&render_buffer(&mut ui, &store, 160, 24), 2);
+    assert!(banner.contains("cpu 16"));
+    assert!(banner.contains("mem 32G"));
+    assert!(banner.contains("gpu 4×H100"));
+    apply_test_data(&mut store, Dataset::RunningJobs(Vec::new()));
+    ui.observe_data(&store);
+    let banner = line(&render_buffer(&mut ui, &store, 160, 24), 2);
+    assert!(banner.contains("no running jobs"));
+    assert!(!banner.contains("cpu 99"));
+}
+
+#[test]
+fn refresh_indicator_stays_visible_until_every_fetch_finishes() {
+    let mut store = populated_store();
+    let mut ui = Ui::new(Config::default());
+    ui.observe_data(&store);
+    let running_generation = store.begin(Section::RunningJobs);
+    let cluster_generation = store.begin(Section::AllUsersJobs);
+    for width in [18, 36, 80, 120] {
+        let buffer = render_buffer(&mut ui, &store, width, 24);
+        assert!(
+            line(&buffer, 23).contains("Refreshing…"),
+            "missing indicator at width {width}"
+        );
+    }
+    assert!(render(&mut ui, &store, 120, 24).contains("train"));
+    let now = store.meta(Section::RunningJobs).last_success.unwrap();
+    store.apply(
+        Section::RunningJobs,
+        running_generation,
+        Ok(Dataset::RunningJobs(store.running_jobs.clone())),
+        now,
+    );
+    let buffer = render_buffer(&mut ui, &store, 120, 24);
+    assert!(line(&buffer, 23).contains("Refreshing…"));
+    store.apply(
+        Section::AllUsersJobs,
+        cluster_generation,
+        Err("squeue unavailable".into()),
+        now,
+    );
+    let buffer = render_buffer(&mut ui, &store, 120, 24);
+    assert!(!line(&buffer, 23).contains("Refreshing…"));
+    assert!(line(&buffer, 23).contains("sync 0s"));
+    assert!(render(&mut ui, &store, 120, 24).contains("train"));
+}
+
+#[test]
 fn missing_cluster_snapshots_never_display_a_capacity_percentage() {
     let mut store = populated_store();
     store.begin(Section::Nodes);

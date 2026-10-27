@@ -82,7 +82,7 @@ impl Client {
         validate_name(&self.username, "username")?;
         self.run(
             "squeue",
-            &["-u", &self.username, "-o", "%i|%j|%T|%M|%D|%R|%V|%S"],
+            &["-u", &self.username, "-O", RUNNING_JOBS_FORMAT],
             FETCH_TIMEOUT,
         )
         .map(|raw| parse_running_jobs(&raw))

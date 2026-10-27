@@ -346,9 +346,9 @@ impl Runtime {
         }
     }
 
-    fn dispatch(&mut self, section: Section, now: Instant, force: bool) {
+    fn dispatch(&mut self, section: Section, now: Instant, force: bool) -> bool {
         if self.store.meta(section).state == State::Loading {
-            return;
+            return false;
         }
         let generation = self
             .store
@@ -366,8 +366,12 @@ impl Runtime {
                 assert_eq!(self.store.begin(section), generation);
                 self.scheduler.dispatched(section, now);
                 self.dirty = true;
+                true
             }
-            Err(_) => self.scheduler.deferred(section, now),
+            Err(_) => {
+                self.scheduler.deferred(section, now);
+                false
+            }
         }
     }
 
@@ -516,7 +520,10 @@ impl Runtime {
 
     fn request_history(&mut self, urgent: bool) {
         let now = Instant::now();
-        if self.scheduler.request(Section::History, now, urgent) {
+        if self
+            .scheduler
+            .request(Section::History, now, urgent, &self.store)
+        {
             self.dispatch(Section::History, now, urgent);
         }
     }
@@ -574,26 +581,17 @@ impl Runtime {
             {
                 continue;
             }
-            if section == Section::PriorityConfig && self.store.meta(section).state == State::Loaded
-            {
-                continue;
-            }
-            if self.store.meta(section).state == State::Loading {
-                continue;
-            }
-            if self
-                .scheduler
-                .request(section, now, section == Section::RunningJobs)
-            {
-                self.dispatch(section, now, false);
-                dispatched = true;
+            if self.scheduler.request(section, now, true, &self.store) {
+                dispatched |= self.dispatch(section, now, true);
             }
         }
-        let _ = self.workers.enqueue(Work::Available);
+        if dispatched && self.unavailable.is_some() {
+            let _ = self.workers.enqueue(Work::Available);
+        }
         self.notify(if dispatched {
             "Refresh requested".into()
         } else {
-            "Data is fresh or a refresh is already running".into()
+            "Refresh already in progress".into()
         });
     }
 
@@ -613,7 +611,7 @@ impl Runtime {
                 {
                     continue;
                 }
-                self.scheduler.request(section, now, false);
+                self.scheduler.request(section, now, false, &self.store);
             }
         }
     }

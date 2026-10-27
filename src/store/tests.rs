@@ -596,6 +596,135 @@ fn running_users_resolve_generic_models_deduplicate_nodes_and_classify_arrays() 
 }
 
 #[test]
+fn personal_job_stats_use_the_job_list_and_survive_stale_cluster_updates() {
+    let now = Instant::now();
+    let mut store = Store::new();
+    store.user = "alice".into();
+    let jobs = vec![
+        RunningJob {
+            node_list: "gpu[01-02]".into(),
+            tres: "cpu=8,mem=4G,gres/gpu=2".into(),
+            ..running("1_0", "RUNNING")
+        },
+        RunningJob {
+            node_list: "gpu01".into(),
+            tres: "cpu=4,mem=2G,gres/gpu=1,gres/gpu:l40s=1".into(),
+            ..running("1_1", "RUNNING")
+        },
+        RunningJob {
+            node_list: "cpu01".into(),
+            tres: "cpu=2,mem=1G".into(),
+            ..running("2", "COMPLETING")
+        },
+        RunningJob {
+            tres: "cpu=1000,mem=1000G,gres/gpu=1000".into(),
+            ..running("3_[0-9]", "PENDING")
+        },
+        RunningJob {
+            tres: "cpu=1000,mem=1000G,gres/gpu=1000".into(),
+            ..running("4", "COMPLETED")
+        },
+    ];
+    apply(&mut store, Dataset::RunningJobs(jobs), now);
+    let stats = store.my_job_stats().clone();
+    assert_eq!(
+        (stats.total_cpus, stats.total_memory_gb, stats.total_gpus),
+        (14, 7.0, 3)
+    );
+    assert_eq!(
+        (
+            stats.job_count,
+            stats.array_count,
+            stats.plain_job_count,
+            stats.total_nodes
+        ),
+        (3, 1, 1, 3)
+    );
+    assert!(!store.has_data(Section::AllUsersJobs));
+
+    apply(
+        &mut store,
+        Dataset::AllUsersJobs(vec![job("old", "alice", "RUNNING", "cpu=99,mem=99G")]),
+        now,
+    );
+    assert_eq!(store.my_job_stats(), &stats);
+    apply(
+        &mut store,
+        Dataset::Nodes(vec![
+            Node {
+                name: "gpu01".into(),
+                gres: "gpu:l40s:4".into(),
+                ..Node::default()
+            },
+            Node {
+                name: "gpu02".into(),
+                gres: "gpu:l40s:4".into(),
+                ..Node::default()
+            },
+        ]),
+        now,
+    );
+    assert_eq!(store.my_job_stats().gpu_types, "3x L40S");
+    assert_eq!(store.my_job_stats().total_cpus, 14);
+
+    apply(
+        &mut store,
+        Dataset::RunningJobs(vec![running("3_[0-9]", "PENDING")]),
+        now,
+    );
+    assert_eq!(store.my_job_stats().job_count, 0);
+    assert_eq!(store.my_job_stats().total_cpus, 0);
+    assert_eq!(store.my_job_stats().total_memory_gb, 0.0);
+    assert_eq!(store.my_job_stats().total_gpus, 0);
+    assert_eq!(store.my_job_stats().total_nodes, 0);
+    apply(
+        &mut store,
+        Dataset::AllUsersJobs(vec![job("old", "alice", "RUNNING", "cpu=99,mem=99G")]),
+        now,
+    );
+    assert_eq!(store.my_job_stats().job_count, 0);
+}
+
+#[test]
+fn personal_job_stats_keep_the_last_snapshot_during_refresh_and_failure() {
+    let now = Instant::now();
+    let mut store = Store::new();
+    apply(
+        &mut store,
+        Dataset::RunningJobs(vec![RunningJob {
+            tres: "cpu=8,mem=4G".into(),
+            ..running("1", "RUNNING")
+        }]),
+        now,
+    );
+    let stats = store.my_job_stats().clone();
+    let stale = store.begin(Section::RunningJobs);
+    let current = store.begin(Section::RunningJobs);
+    assert_eq!(store.my_job_stats(), &stats);
+    assert!(
+        !store
+            .apply(
+                Section::RunningJobs,
+                stale,
+                Ok(Dataset::RunningJobs(Vec::new())),
+                now
+            )
+            .accepted
+    );
+    assert_eq!(store.my_job_stats(), &stats);
+    store.apply(
+        Section::RunningJobs,
+        current,
+        Err("squeue unavailable".into()),
+        now,
+    );
+    assert_eq!(store.my_job_stats(), &stats);
+    apply(&mut store, Dataset::RunningJobs(Vec::new()), now);
+    assert_eq!(store.my_job_stats().job_count, 0);
+    assert_eq!(store.my_job_stats().total_cpus, 0);
+}
+
+#[test]
 fn mixed_or_unknown_node_models_leave_generic_gpu_requests_generic() {
     let models = BTreeMap::from([
         ("gpu01".into(), "A100".into()),

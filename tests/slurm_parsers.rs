@@ -36,13 +36,20 @@ fn nodes_keep_reasons_across_blank_lines() {
 #[test]
 fn own_squeue_retains_name_delimiters_and_full_states() {
     let rows = parse_running_jobs(include_str!("fixtures/squeue_running.txt"));
-    assert!(!rows.is_empty());
-    let rows = parse_running_jobs(
-        "header\n123| a|b | COMPLETED |01:02|1|n01|2026-09-01T00:00:00|Unknown\nbad\n",
+    assert_eq!(rows.len(), 3);
+    assert_eq!(
+        rows[0].tres,
+        "cpu=128,mem=512G,node=4,gres/gpu=16,gres/gpu:a100=16"
     );
-    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[1].tres, "cpu=8,mem=32G,node=1");
+    let rows = parse_running_jobs(
+        "header\n123| a|b | COMPLETED |01:02|1|n01|2026-09-01T00:00:00|Unknown|cpu=4,mem=2G\n124|empty|PENDING|0:00|1|(Priority)|2026-09-01T00:00:00|Unknown|\nbad\n",
+    );
+    assert_eq!(rows.len(), 2);
     assert_eq!(rows[0].name, "a|b");
     assert_eq!(rows[0].state, "COMPLETED");
+    assert_eq!(rows[0].tres, "cpu=4,mem=2G");
+    assert!(rows[1].tres.is_empty());
     assert!(parse_running_jobs("").is_empty());
     assert!(parse_running_jobs("header\n").is_empty());
 }
