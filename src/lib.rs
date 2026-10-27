@@ -7,6 +7,7 @@ pub mod log;
 pub mod paths;
 pub mod slurm;
 pub mod store;
+mod temp_file;
 pub mod ui;
 pub mod update;
 

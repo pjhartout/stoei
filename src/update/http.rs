@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use std::os::unix::process::CommandExt;
 
+use crate::temp_file;
+
 use super::MAX_ARCHIVE;
 
 pub(super) const COMMAND: &str = "__stoei_http_fetch";
@@ -127,8 +129,8 @@ fn run(
     if cancelled.load(Ordering::Relaxed) {
         return Err("HTTP request cancelled".into());
     }
-    let mut stdout = tempfile::tempfile().map_err(|err| err.to_string())?;
-    let mut stderr = tempfile::tempfile().map_err(|err| err.to_string())?;
+    let mut stdout = temp_file::create().map_err(|err| err.to_string())?;
+    let mut stderr = temp_file::create().map_err(|err| err.to_string())?;
     configure(&mut command, &stdout, &stderr)?;
     let mut helper = OwnedHelper(Some(command.spawn().map_err(|err| err.to_string())?));
     let status = wait(

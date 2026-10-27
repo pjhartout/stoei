@@ -6,7 +6,7 @@ use std::process::{Child, Command, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use crate::ui::Tail;
+use crate::{temp_file, ui::Tail};
 
 use super::terminal;
 
@@ -323,7 +323,7 @@ pub fn copy(text: &str, stopped: &AtomicBool) -> Result<(), String> {
         let Some(program) = executable(name) else {
             continue;
         };
-        let mut input = tempfile::tempfile().map_err(|err| err.to_string())?;
+        let mut input = temp_file::create().map_err(|err| err.to_string())?;
         input
             .write_all(text.as_bytes())
             .map_err(|err| err.to_string())?;

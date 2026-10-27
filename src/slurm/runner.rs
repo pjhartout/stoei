@@ -13,6 +13,8 @@ use std::{
 
 use std::os::unix::process::CommandExt;
 
+use crate::temp_file;
+
 pub trait Runner: Send + Sync {
     fn run(&self, name: &str, args: &[String], timeout: Duration) -> Result<String, CommandError>;
 }
@@ -108,8 +110,8 @@ impl ExecRunner {
         let io_error = |error: std::io::Error| {
             CommandError::new(name, CommandErrorCause::Io(error.to_string()), "")
         };
-        let mut stdout = tempfile::tempfile().map_err(io_error)?;
-        let mut stderr = tempfile::tempfile().map_err(io_error)?;
+        let mut stdout = temp_file::create().map_err(io_error)?;
+        let mut stderr = temp_file::create().map_err(io_error)?;
         let mut command = Command::new(name);
         command
             .args(args)

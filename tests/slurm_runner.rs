@@ -1,4 +1,5 @@
 use std::{
+    process::Command,
     sync::{Arc, atomic::AtomicBool},
     time::Duration,
 };
@@ -64,6 +65,30 @@ fn command_output_and_nonzero_exits_are_distinct() {
 }
 
 #[test]
+fn missing_tmpdir_falls_back_for_output_capture() {
+    let directory = tempfile::tempdir().unwrap();
+    let missing = directory.path().join("missing");
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--ignored",
+            "--exact",
+            "subprocess_missing_tmpdir_fixture",
+            "--nocapture",
+        ])
+        .env("TMPDIR", &missing)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "stdout:\n{}\nstderr:\n{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    assert!(!missing.exists());
+}
+
+#[test]
 fn killed_command_preserves_the_deadline_cause() {
     let executable = std::env::current_exe().unwrap();
     let args = [
@@ -82,6 +107,17 @@ fn killed_command_preserves_the_deadline_cause() {
         .unwrap_err();
     assert_eq!(error.cause, CommandErrorCause::TimedOut);
     assert!(!error.to_string().contains("signal"));
+}
+
+#[test]
+#[ignore = "subprocess fixture only"]
+fn subprocess_missing_tmpdir_fixture() {
+    let tmpdir = std::env::var_os("TMPDIR").unwrap();
+    assert_eq!(std::env::temp_dir(), std::path::Path::new(&tmpdir));
+    assert!(!std::env::temp_dir().exists());
+    command_output_and_nonzero_exits_are_distinct();
+    hard_failure_stderr_is_detected_even_on_zero_exit();
+    assert_eq!(std::env::var_os("TMPDIR"), Some(tmpdir));
 }
 
 #[test]
