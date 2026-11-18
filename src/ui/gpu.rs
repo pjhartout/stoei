@@ -7,10 +7,10 @@ use super::format::{bytes, clean};
 use super::modals::{Modal, Response, scroll_key};
 use super::render::loading_lines;
 use super::theme::Theme;
-use super::{Effect, Ui};
+use super::{Effect, ReadToken, Ui, ViewRead};
 
 pub(super) struct GpuView {
-    pub token: u64,
+    pub read: ViewRead,
     pub id: String,
     pub snapshot: Option<GpuSnapshot>,
     pub loading: bool,
@@ -21,17 +21,16 @@ pub(super) struct GpuView {
 
 impl Ui {
     pub(super) fn gpu_response(&mut self, id: &str) -> Response {
-        let token = self.token();
-        debug_assert!(token > 0);
+        let read = ViewRead::default();
         debug_assert!(self.modals.len() < 3);
         (
             true,
             vec![Effect::FetchGpu {
-                token,
+                token: read.token(),
                 job_id: id.into(),
             }],
             Some(Modal::Gpu(GpuView {
-                token,
+                read,
                 id: id.into(),
                 snapshot: None,
                 loading: true,
@@ -44,13 +43,12 @@ impl Ui {
 
     pub(super) fn handle_gpu(&mut self, key: KeyEvent, view: &mut GpuView) -> Response {
         if key.code == KeyCode::Char('r') && !view.loading {
-            view.token = self.token();
             view.loading = true;
             view.error = None;
             return (
                 true,
                 vec![Effect::FetchGpu {
-                    token: view.token,
+                    token: view.read.renew(),
                     job_id: view.id.clone(),
                 }],
                 None,
@@ -62,12 +60,12 @@ impl Ui {
 
     pub(super) fn receive_gpu(
         &mut self,
-        token: u64,
+        token: ReadToken,
         job_id: String,
         result: Result<GpuSnapshot, String>,
     ) {
         let Some(Modal::Gpu(view)) = self.modals.iter_mut().find(
-            |modal| matches!(modal, Modal::Gpu(view) if view.token == token && view.id == job_id),
+            |modal| matches!(modal, Modal::Gpu(view) if view.read.matches(&token) && view.id == job_id),
         ) else {
             return;
         };

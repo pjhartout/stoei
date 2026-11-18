@@ -6,7 +6,7 @@ use crate::config::{Config, THEMES};
 use crate::store::{self, JobDetail, Store};
 
 use super::gpu::GpuView;
-use super::{Effect, JobSnapshot, Tail, Ui, append_bounded};
+use super::{Effect, JobSnapshot, ReadToken, Tail, Ui, ViewRead, append_bounded};
 
 pub(super) enum Modal {
     Job(DetailView),
@@ -40,7 +40,7 @@ pub(super) enum Modal {
 }
 
 pub(super) struct DetailView {
-    pub token: u64,
+    pub read: ViewRead,
     pub id: String,
     pub modify_id: String,
     pub state: String,
@@ -52,7 +52,7 @@ pub(super) struct DetailView {
 }
 
 pub(super) struct NodeView {
-    pub token: u64,
+    pub read: ViewRead,
     pub name: String,
     pub detail: Option<JobDetail>,
     pub loading: bool,
@@ -62,7 +62,7 @@ pub(super) struct NodeView {
 }
 
 pub(super) struct LogView {
-    pub token: u64,
+    pub read: ViewRead,
     pub path: PathBuf,
     pub label: String,
     pub tail: Option<Tail>,
@@ -103,9 +103,9 @@ pub(super) struct SettingsView {
 }
 
 impl Modal {
-    pub fn node(token: u64, name: String) -> Self {
+    pub fn node(read: ViewRead, name: String) -> Self {
         Self::Node(NodeView {
-            token,
+            read,
             name,
             detail: None,
             loading: true,
@@ -207,12 +207,11 @@ impl Ui {
             return self.gpu_response(&view.id);
         }
         if key.code == KeyCode::Char('r') && !view.loading {
-            view.token = self.token();
             view.loading = true;
             return (
                 true,
                 vec![Effect::FetchJob {
-                    token: view.token,
+                    token: view.read.renew(),
                     job_id: view.id.clone(),
                     state: view.state.clone(),
                     fallback: view
@@ -263,9 +262,10 @@ impl Ui {
     }
 
     fn log_response(&mut self, path: PathBuf, label: &str) -> Response {
-        let token = self.token();
+        let read = ViewRead::default();
+        let token = read.token();
         let view = LogView {
-            token,
+            read,
             path: path.clone(),
             label: label.into(),
             tail: None,
@@ -342,12 +342,11 @@ impl Ui {
             KeyCode::Char('n') => view.next_match(false),
             KeyCode::Char('N') => view.next_match(true),
             KeyCode::Char('r') if !view.loading => {
-                view.token = self.token();
                 view.loading = true;
                 return (
                     true,
                     vec![Effect::FetchLog {
-                        token: view.token,
+                        token: view.read.renew(),
                         path: view.path.clone(),
                         max_lines: self.config.log_viewer_lines,
                     }],
@@ -385,12 +384,12 @@ impl Ui {
 
     pub(super) fn receive_node(
         &mut self,
-        token: u64,
+        token: ReadToken,
         name: String,
         result: Result<JobDetail, String>,
     ) {
         let Some(Modal::Node(view)) = self.modals.iter_mut().find(
-            |modal| matches!(modal, Modal::Node(view) if view.token == token && view.name == name),
+            |modal| matches!(modal, Modal::Node(view) if view.read.matches(&token) && view.name == name),
         ) else {
             return;
         };
@@ -404,11 +403,11 @@ impl Ui {
         }
     }
 
-    pub(super) fn receive_log(&mut self, token: u64, result: Result<Tail, String>) {
+    pub(super) fn receive_log(&mut self, token: ReadToken, result: Result<Tail, String>) {
         let Some(Modal::Log(view)) = self
             .modals
             .iter_mut()
-            .find(|modal| matches!(modal, Modal::Log(view) if view.token == token))
+            .find(|modal| matches!(modal, Modal::Log(view) if view.read.matches(&token)))
         else {
             return;
         };
@@ -433,14 +432,12 @@ impl Ui {
     }
 
     pub(super) fn reload_log(&mut self) -> Vec<Effect> {
-        let token = self.token();
         let Some(Modal::Log(view)) = self.modals.last_mut() else {
             return Vec::new();
         };
-        view.token = token;
         view.loading = true;
         vec![Effect::FetchLog {
-            token,
+            token: view.read.renew(),
             path: view.path.clone(),
             max_lines: self.config.log_viewer_lines,
         }]
@@ -464,7 +461,6 @@ impl Ui {
             self.notify(format!("Job {id} updated"));
         }
         self.invalidate(&id);
-        let token = self.token();
         let mut effects = vec![Effect::Refresh];
         if let Some(Modal::Job(view)) = self
             .modals
@@ -472,10 +468,9 @@ impl Ui {
             .rev()
             .find(|modal| matches!(modal, Modal::Job(_)))
         {
-            view.token = token;
             view.loading = true;
             effects.push(Effect::FetchJob {
-                token,
+                token: view.read.renew(),
                 job_id: view.id.clone(),
                 state: view.state.clone(),
                 fallback: view
@@ -898,7 +893,7 @@ mod tests {
     fn details_help_and_load_pan_without_moving_the_selected_line() {
         let modals = [
             Modal::Job(DetailView {
-                token: 1,
+                read: ViewRead::default(),
                 id: "123".into(),
                 modify_id: "123".into(),
                 state: "RUNNING".into(),
@@ -908,7 +903,7 @@ mod tests {
                 scroll: 0,
                 horizontal: 0,
             }),
-            Modal::node(2, "n001".into()),
+            Modal::node(ViewRead::default(), "n001".into()),
             Modal::info("alice".into(), false),
             Modal::help(),
             Modal::load(),
@@ -978,7 +973,7 @@ mod tests {
     #[test]
     fn literal_log_search_wraps_both_directions() {
         let mut view = LogView {
-            token: 1,
+            read: ViewRead::default(),
             path: "log".into(),
             label: "stdout".into(),
             tail: Some(Tail {

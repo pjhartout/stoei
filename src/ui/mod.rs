@@ -8,6 +8,7 @@ mod theme;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use chrono::NaiveDate;
@@ -24,6 +25,27 @@ use table::{Source, TableView};
 const CACHE_CAPACITY: usize = 64;
 const TOAST_CAPACITY: usize = 4;
 const INPUT_LIMIT: usize = 4096;
+
+/// A queued read stays valid while its requesting view owns this particular request.
+pub type ReadToken = Weak<()>;
+
+#[derive(Default)]
+struct ViewRead(Arc<()>);
+
+impl ViewRead {
+    fn token(&self) -> ReadToken {
+        Arc::downgrade(&self.0)
+    }
+
+    fn renew(&mut self) -> ReadToken {
+        *self = Self::default();
+        self.token()
+    }
+
+    fn matches(&self, token: &ReadToken) -> bool {
+        token.ptr_eq(&self.token())
+    }
+}
 
 #[derive(Clone, Debug)]
 pub struct JobSnapshot {
@@ -43,22 +65,22 @@ pub struct Tail {
 #[derive(Debug)]
 pub enum ActionResult {
     Job {
-        token: u64,
+        token: ReadToken,
         job_id: String,
         result: Result<JobSnapshot, String>,
     },
     Node {
-        token: u64,
+        token: ReadToken,
         name: String,
         result: Result<JobDetail, String>,
     },
     Gpu {
-        token: u64,
+        token: ReadToken,
         job_id: String,
         result: Result<GpuSnapshot, String>,
     },
     Log {
-        token: u64,
+        token: ReadToken,
         result: Result<Tail, String>,
     },
     Cancel {
@@ -76,21 +98,21 @@ pub enum ActionResult {
 #[derive(Clone, Debug)]
 pub enum Effect {
     FetchJob {
-        token: u64,
+        token: ReadToken,
         job_id: String,
         state: String,
         fallback: Option<JobDetail>,
     },
     FetchNode {
-        token: u64,
+        token: ReadToken,
         name: String,
     },
     FetchGpu {
-        token: u64,
+        token: ReadToken,
         job_id: String,
     },
     FetchLog {
-        token: u64,
+        token: ReadToken,
         path: PathBuf,
         max_lines: usize,
     },
@@ -126,6 +148,7 @@ struct CachedDetail {
     id: String,
     state: String,
     snapshot: JobSnapshot,
+    retry_usage: bool,
 }
 
 struct Toast {
@@ -142,7 +165,6 @@ pub struct Ui {
     sidebar: cluster::Sidebar,
     modals: Vec<Modal>,
     cache: VecDeque<CachedDetail>,
-    next_token: u64,
     toasts: VecDeque<Toast>,
     today: NaiveDate,
     log_snapshot: Vec<crate::log::LogEntry>,
@@ -160,7 +182,6 @@ impl Ui {
             sidebar: cluster::Sidebar::default(),
             modals: Vec::new(),
             cache: VecDeque::new(),
-            next_token: 0,
             toasts: VecDeque::new(),
             today: NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch date is valid"),
             log_snapshot: Vec::new(),
@@ -481,14 +502,6 @@ impl Ui {
         }
     }
 
-    fn token(&mut self) -> u64 {
-        self.next_token = self
-            .next_token
-            .checked_add(1)
-            .expect("modal generation exhausted");
-        self.next_token
-    }
-
     fn open_selected(&mut self, store: &Store) -> Vec<Effect> {
         let index = self.table_index();
         let Some(row) = self.tables[index].selected() else {
@@ -501,8 +514,9 @@ impl Ui {
             }
             1 => {
                 let node = &store.node_displays()[row];
-                let token = self.token();
-                self.modals.push(Modal::node(token, node.name.clone()));
+                let read = ViewRead::default();
+                let token = read.token();
+                self.modals.push(Modal::node(read, node.name.clone()));
                 vec![Effect::FetchNode {
                     token,
                     name: node.name.clone(),
@@ -542,39 +556,38 @@ impl Ui {
     fn open_job(&mut self, id: &str, state: &str, fallback: Option<JobDetail>) -> Vec<Effect> {
         let modify_id = id.to_owned();
         let id = store::normalize_array_job_id(id);
-        let token = self.token();
+        let read = ViewRead::default();
+        let token = read.token();
         let cached = self
             .cache
             .iter()
-            .find(|entry| entry.id == id && (state.is_empty() || entry.state == state))
-            .map(|entry| entry.snapshot.clone());
-        let terminal_cached = cached.as_ref().is_some_and(|snapshot| {
-            snapshot
-                .detail
-                .fields
-                .get("JobState")
-                .is_some_and(|state| store::is_terminal_state(state))
-        });
+            .find(|entry| entry.id == id && (state.is_empty() || entry.state == state));
+        let state = cached.map_or(state, |entry| &entry.state);
+        let loading = cached.is_none_or(|entry| entry.retry_usage);
+        let fallback = cached
+            .filter(|entry| entry.retry_usage)
+            .map(|entry| entry.snapshot.detail.clone())
+            .or(fallback);
         self.modals.push(Modal::Job(DetailView {
-            token,
+            read,
             id: id.clone(),
             modify_id,
             state: state.into(),
-            snapshot: cached,
-            loading: !terminal_cached,
+            snapshot: cached.map(|entry| entry.snapshot.clone()),
+            loading,
             error: None,
             scroll: 0,
             horizontal: 0,
         }));
-        if terminal_cached {
-            Vec::new()
-        } else {
+        if loading {
             vec![Effect::FetchJob {
                 token,
                 job_id: id,
                 state: state.into(),
                 fallback,
             }]
+        } else {
+            Vec::new()
         }
     }
 
@@ -639,37 +652,49 @@ impl Ui {
 
     fn receive_job(
         &mut self,
-        token: u64,
+        token: ReadToken,
         id: String,
         result: Result<JobSnapshot, String>,
     ) -> Vec<Effect> {
         let Some(Modal::Job(view)) = self.modals.iter_mut().find(
-            |modal| matches!(modal, Modal::Job(view) if view.token == token && view.id == id),
+            |modal| matches!(modal, Modal::Job(view) if view.read.matches(&token) && view.id == id),
         ) else {
             return Vec::new();
         };
         view.loading = false;
         match result {
-            Ok(snapshot) => {
-                view.state = snapshot
+            Ok(mut snapshot) => {
+                let state = snapshot
                     .detail
                     .fields
                     .get("JobState")
                     .cloned()
                     .unwrap_or_else(|| view.state.clone());
                 view.error = None;
-                view.snapshot = Some(snapshot.clone());
                 self.cache.retain(|entry| entry.id != id);
-                if store::is_terminal_state(&view.state) {
+                if store::is_terminal_state(&state) {
+                    let retry_usage = snapshot.usage.is_none();
+                    if retry_usage
+                        && state == view.state
+                        && let Some(usage) = view.snapshot.as_mut().and_then(|old| old.usage.take())
+                    {
+                        snapshot.usage = Some(usage);
+                        if let Some(note) = &mut snapshot.note {
+                            note.push_str(" Showing the previous accounting result.");
+                        }
+                    }
                     if self.cache.len() == CACHE_CAPACITY {
                         self.cache.pop_front();
                     }
                     self.cache.push_back(CachedDetail {
                         id,
-                        state: view.state.clone(),
-                        snapshot,
+                        state: state.clone(),
+                        snapshot: snapshot.clone(),
+                        retry_usage,
                     });
                 }
+                view.state = state;
+                view.snapshot = Some(snapshot);
             }
             Err(error) => {
                 view.error = Some(error);
