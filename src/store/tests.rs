@@ -891,9 +891,8 @@ fn live_efficiency_uses_allocated_cpus_and_fresh_runtime_and_alloc_tres_memory()
 fn mig_gpu_utilization_is_unknown_but_memory_is_measured() {
     let usage = JobUsage {
         sampled: true,
-        gpu_util_known: true,
-        gpu_mem_known: true,
-        gpu_mem_bytes: 1024,
+        gpu_util_per_task_percent: Some(0.0),
+        gpu_mem_bytes: Some(1024),
         gpus: vec![GPUEntry {
             gpu_type: "h100_pcie_1g.10gb".into(),
             count: 1,
@@ -901,30 +900,56 @@ fn mig_gpu_utilization_is_unknown_but_memory_is_measured() {
         ..JobUsage::default()
     };
     let efficiency = derive_job_efficiency(&usage, &BTreeMap::new());
-    assert!(efficiency.gpu_is_mig);
-    assert!(!efficiency.gpu_util_known);
-    assert!(efficiency.gpu_mem_known);
-    assert_eq!(efficiency.gpu_mem_bytes, 1024);
+    assert_eq!(efficiency.gpu_utilization, GpuUtilization::Mig);
+    assert_eq!(efficiency.gpu_mem_bytes, Some(1024));
 }
 
 #[test]
-fn multi_gpu_utilization_is_per_card_and_clamped_and_unsampled_cpu_is_unknown() {
-    let mut usage = JobUsage {
-        gpu_util_known: true,
-        gpu_util_percent: 240.0,
-        gpus: vec![GPUEntry {
-            gpu_type: "a100".into(),
-            count: 3,
-        }],
+fn sixteen_gpu_job_preserves_slurms_per_task_average() {
+    let live = crate::slurm::parse_sstat_usage(
+        "123",
+        include_str!("../../tests/fixtures/sstat_usage_multi_gpu.txt"),
+    );
+    let completed = crate::slurm::parse_sacct_usage(
+        "123",
+        include_str!("../../tests/fixtures/sacct_usage_multi_gpu.txt"),
+    );
+    let fields = BTreeMap::from([("AllocTRES".into(), "gres/gpu=16".into())]);
+    for (usage, fields) in [(live, fields), (completed, BTreeMap::new())] {
+        let efficiency = derive_job_efficiency(&usage, &fields);
+        assert_eq!(
+            efficiency.gpu_utilization,
+            GpuUtilization::PerTaskAverage(76.0)
+        );
+    }
+}
+
+#[test]
+fn allocated_gpus_distinguish_missing_zero_and_multi_device_task_readings() {
+    let fields = BTreeMap::from([("AllocTRES".into(), "gres/gpu=3".into())]);
+    for (average, expected) in [
+        ("gres/gpumem=0", GpuUtilization::NoData),
+        ("gres/gpuutil=0", GpuUtilization::PerTaskAverage(0.0)),
+        ("gres/gpuutil=240", GpuUtilization::PerTaskAverage(240.0)),
+    ] {
+        let raw = format!("123.0|||{average}|gres/gpumem=0|");
+        let usage = crate::slurm::parse_sstat_usage("123", &raw);
+        let efficiency = derive_job_efficiency(&usage, &fields);
+        assert_eq!(efficiency.gpu_utilization, expected);
+        assert_eq!(efficiency.gpu_mem_bytes, Some(0));
+    }
+}
+
+#[test]
+fn unsampled_cpu_and_memory_are_unknown() {
+    let usage = JobUsage {
+        elapsed_sec: 60.0,
+        alloc_cpus: 1,
+        max_rss_bytes: 1024,
         ..JobUsage::default()
     };
-    assert_eq!(
-        derive_job_efficiency(&usage, &BTreeMap::new()).gpu_util_percent,
-        80.0
-    );
-    usage.gpu_util_percent = 400.0;
-    let efficiency = derive_job_efficiency(&usage, &BTreeMap::new());
-    assert_eq!(efficiency.gpu_util_percent, 100.0);
+    let fields = BTreeMap::from([("AllocTRES".into(), "mem=1G".into())]);
+    let efficiency = derive_job_efficiency(&usage, &fields);
     assert!(!efficiency.cpu_known && !efficiency.mem_known);
 }
 

@@ -72,18 +72,16 @@ fn merge_step_usage(
     if let Some(util) = ave
         .get("gres/gpuutil")
         .and_then(|v| v.parse::<f64>().ok())
-        .filter(|v| v.is_finite())
+        .filter(|v| v.is_finite() && *v >= 0.0)
     {
-        u.gpu_util_known = true;
-        u.gpu_util_percent = u.gpu_util_percent.max(util);
+        u.gpu_util_per_task_percent =
+            Some(u.gpu_util_per_task_percent.unwrap_or_default().max(util));
     }
     let max = parse_tres_pairs(in_max);
-    let memory = max
-        .get("gres/gpumem")
-        .filter(|v| !v.trim().is_empty())
-        .or_else(|| ave.get("gres/gpumem"));
-    if let Some(memory) = memory.filter(|v| !v.trim().is_empty()) {
-        u.gpu_mem_known = true;
-        u.gpu_mem_bytes = u.gpu_mem_bytes.max(parse_size_bytes(memory));
-    }
+    let memory = [&max, &ave]
+        .into_iter()
+        .filter_map(|tres| tres.get("gres/gpumem"))
+        .find(|v| !v.trim().is_empty())
+        .map(|v| parse_size_bytes(v));
+    u.gpu_mem_bytes = u.gpu_mem_bytes.max(memory);
 }

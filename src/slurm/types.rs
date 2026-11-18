@@ -263,9 +263,8 @@ pub struct JobUsage {
     pub max_rss_bytes: u64,
     pub disk_read_bytes: u64,
     pub disk_write_bytes: u64,
-    pub gpu_util_percent: f64,
-    pub gpu_util_known: bool,
-    pub gpu_mem_bytes: u64,
-    pub gpu_mem_known: bool,
+    /// Highest per-task GPU utilization average reported by a step in TRESUsageInAve.
+    pub gpu_util_per_task_percent: Option<f64>,
+    pub gpu_mem_bytes: Option<u64>,
     pub sampled: bool,
 }

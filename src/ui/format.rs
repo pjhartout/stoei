@@ -3,7 +3,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use ratatui::style::Modifier;
 use ratatui::text::{Line, Span};
 
-use crate::store::{self, JobUsage};
+use crate::store::{self, GpuUtilization, JobUsage};
 
 use super::theme::Theme;
 
@@ -399,39 +399,28 @@ fn memory_usage_line(eff: &store::JobEfficiency, theme: Theme) -> Line<'static> 
 }
 
 fn gpu_usage_lines(eff: &store::JobEfficiency, theme: Theme) -> Vec<Line<'static>> {
-    let mut lines = Vec::new();
-    if eff.gpu_count > 0 {
-        let values = if eff.gpu_is_mig {
+    let values = match eff.gpu_utilization {
+        GpuUtilization::NoAllocation => return Vec::new(),
+        GpuUtilization::Mig => vec![Span::styled(
+            "n/a (MIG slice — not measurable)",
+            theme.subtle(),
+        )],
+        GpuUtilization::NoData => vec![Span::styled("no data", theme.subtle())],
+        GpuUtilization::PerTaskAverage(percent) => vec![
+            percentage_span(percent, theme),
+            Span::styled(" (per-task avg)", theme.subtle()),
+        ],
+    };
+    let mut lines = vec![labelled_line("GPU utilization", values, theme)];
+    if let Some(memory) = eff.gpu_mem_bytes {
+        lines.push(labelled_line(
+            "GPU memory peak",
             vec![Span::styled(
-                "n/a (MIG slice — not measurable)",
-                theme.subtle(),
-            )]
-        } else if eff.gpu_util_known {
-            vec![
-                percentage_span(eff.gpu_util_percent, theme),
-                Span::styled(
-                    if eff.gpu_count > 1 {
-                        format!(" (avg across {} GPUs)", eff.gpu_count)
-                    } else {
-                        " (avg)".into()
-                    },
-                    theme.subtle(),
-                ),
-            ]
-        } else {
-            vec![Span::styled("no data", theme.subtle())]
-        };
-        lines.push(labelled_line("GPU utilization", values, theme));
-        if eff.gpu_mem_known {
-            lines.push(labelled_line(
-                "GPU memory peak",
-                vec![Span::styled(
-                    bytes(eff.gpu_mem_bytes),
-                    theme.text().add_modifier(Modifier::BOLD),
-                )],
-                theme,
-            ));
-        }
+                bytes(memory),
+                theme.text().add_modifier(Modifier::BOLD),
+            )],
+            theme,
+        ));
     }
     lines
 }
@@ -597,10 +586,9 @@ mod tests {
             max_rss_bytes: 512 << 20,
             gpus: vec![store::GPUEntry {
                 gpu_type: "a100".into(),
-                count: 1,
+                count: 16,
             }],
-            gpu_util_percent: 40.0,
-            gpu_util_known: true,
+            gpu_util_per_task_percent: Some(76.0),
             ..Default::default()
         };
         let fields = [("AllocTRES".into(), "cpu=4,mem=1G".into())]
@@ -618,7 +606,7 @@ mod tests {
         );
         assert!(
             text.iter()
-                .any(|line| line == "  GPU utilization......... 40% (avg)")
+                .any(|line| line == "  GPU utilization......... 76% (per-task avg)")
         );
         assert!(
             text.iter()
@@ -632,6 +620,6 @@ mod tests {
             assert_eq!(line.spans[0].width(), 27);
         }
         assert_eq!(lines[2].spans[1].style.fg, Some(theme.success));
-        assert_eq!(lines[4].spans[1].style.fg, Some(theme.warning));
+        assert_eq!(lines[4].spans[1].style.fg, Some(theme.success));
     }
 }
