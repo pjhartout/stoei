@@ -135,6 +135,8 @@ Slurm restricts non-root `sstat` queries.
 Reopening your running job refreshes its runtime and allocation before sampling
 usage again. CPU efficiency is relative to all allocated CPUs, not a single core;
 disk throughput is averaged over the refreshed runtime.
+GPU utilization shows the highest per-task average Slurm reports for a job step.
+A task that uses multiple GPUs can report more than 100%.
 
 For a current GPU snapshot, open your running job with `Enter`, then press `v`.
 The popup shows utilization and VRAM used/total for each allocated NVIDIA GPU.

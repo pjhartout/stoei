@@ -5,6 +5,15 @@ use super::{
     parse_gpu_from_gres, parse_tres_resources,
 };
 
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum GpuUtilization {
+    #[default]
+    NoAllocation,
+    Mig,
+    NoData,
+    PerTaskAverage(f64),
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct JobEfficiency {
     pub live: bool,
@@ -18,12 +27,8 @@ pub struct JobEfficiency {
     pub req_mem_bytes: u64,
     pub mem_percent: f64,
     pub mem_known: bool,
-    pub gpu_count: u64,
-    pub gpu_is_mig: bool,
-    pub gpu_util_percent: f64,
-    pub gpu_util_known: bool,
-    pub gpu_mem_bytes: u64,
-    pub gpu_mem_known: bool,
+    pub gpu_utilization: GpuUtilization,
+    pub gpu_mem_bytes: Option<u64>,
     pub disk_read_bytes: u64,
     pub disk_write_bytes: u64,
     pub read_bytes_per_sec: f64,
@@ -38,13 +43,12 @@ pub fn derive_job_efficiency(usage: &JobUsage, fields: &BTreeMap<String, String>
         cpu_time_sec: usage.cpu_time_sec,
         max_rss_bytes: usage.max_rss_bytes,
         gpu_mem_bytes: usage.gpu_mem_bytes,
-        gpu_mem_known: usage.gpu_mem_known,
         disk_read_bytes: usage.disk_read_bytes,
         disk_write_bytes: usage.disk_write_bytes,
         ..JobEfficiency::default()
     };
     fill_allocation(&mut efficiency, usage, fields);
-    fill_percentages(&mut efficiency, usage);
+    fill_percentages(&mut efficiency);
     efficiency
 }
 
@@ -80,12 +84,19 @@ fn fill_allocation(
     } else {
         &usage.gpus
     };
-    efficiency.gpu_count = calculate_total_gpus(gpus, true);
-    efficiency.gpu_is_mig = gpus.iter().any(|gpu| is_mig_type(&gpu.gpu_type));
+    efficiency.gpu_utilization = if calculate_total_gpus(gpus, true) == 0 {
+        GpuUtilization::NoAllocation
+    } else if gpus.iter().any(|gpu| is_mig_type(&gpu.gpu_type)) {
+        GpuUtilization::Mig
+    } else {
+        usage
+            .gpu_util_per_task_percent
+            .map_or(GpuUtilization::NoData, GpuUtilization::PerTaskAverage)
+    };
     efficiency.req_mem_bytes = (memory * (1u64 << 30) as f64) as u64;
 }
 
-fn fill_percentages(efficiency: &mut JobEfficiency, usage: &JobUsage) {
+fn fill_percentages(efficiency: &mut JobEfficiency) {
     efficiency.cpu_known =
         efficiency.sampled && efficiency.elapsed_sec > 0.0 && efficiency.alloc_cpus > 0;
     if efficiency.cpu_known {
@@ -97,11 +108,6 @@ fn fill_percentages(efficiency: &mut JobEfficiency, usage: &JobUsage) {
     if efficiency.mem_known {
         efficiency.mem_percent =
             100.0 * efficiency.max_rss_bytes as f64 / efficiency.req_mem_bytes as f64;
-    }
-    efficiency.gpu_util_known = usage.gpu_util_known && !efficiency.gpu_is_mig;
-    if efficiency.gpu_count > 0 {
-        efficiency.gpu_util_percent =
-            (usage.gpu_util_percent / efficiency.gpu_count as f64).clamp(0.0, 100.0);
     }
     if efficiency.elapsed_sec > 0.0 {
         efficiency.read_bytes_per_sec = efficiency.disk_read_bytes as f64 / efficiency.elapsed_sec;

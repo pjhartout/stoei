@@ -293,7 +293,8 @@ fn cpu_usage_fixture_reads_allocation_and_step_measurements() {
     assert_eq!(usage.disk_read_bytes, 32225772153);
     assert_eq!(usage.disk_write_bytes, 1572864182);
     assert!(usage.sampled);
-    assert!(!usage.gpu_util_known);
+    assert_eq!(usage.gpu_util_per_task_percent, None);
+    assert_eq!(usage.gpu_mem_bytes, None);
 }
 
 #[test]
@@ -305,9 +306,8 @@ fn gpu_usage_uses_peaks_but_sums_io() {
     assert_eq!(usage.max_rss_bytes, 53418351 * 1024);
     assert_eq!(usage.disk_read_bytes, 14756614381);
     assert_eq!(usage.disk_write_bytes, 22090669340);
-    assert!(usage.gpu_util_known);
-    assert_eq!(usage.gpu_util_percent, 43.0);
-    assert_eq!(usage.gpu_mem_bytes, 14382 << 20);
+    assert_eq!(usage.gpu_util_per_task_percent, Some(43.0));
+    assert_eq!(usage.gpu_mem_bytes, Some(14382 << 20));
 }
 
 #[test]

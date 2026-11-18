@@ -1,0 +1,2 @@
+123.0|1G|gres/gpuutil=1216|gres/gpuutil=76|gres/gpuutil=98|
+123.batch|1M|gres/gpuutil=0|gres/gpuutil=0|gres/gpuutil=0|
