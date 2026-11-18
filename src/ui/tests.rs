@@ -503,6 +503,37 @@ fn development_build_label_is_explained_in_help() {
 }
 
 #[test]
+fn cancelling_a_selected_row_uses_the_confirmed_scope() {
+    for (row, target, prompt) in [
+        (
+            "123_[5-9,12%3]",
+            "123_[5-9,12]",
+            "Cancel array tasks 123_[5-9,12]?",
+        ),
+        ("123", "123", "Cancel job 123 (all tasks if an array)?"),
+    ] {
+        let mut store = Store::new();
+        let jobs = [(row, "PENDING"), ("123_4", "RUNNING")].map(|(id, state)| RunningJob {
+            id: id.into(),
+            state: state.into(),
+            ..RunningJob::default()
+        });
+        apply_test_data(&mut store, Dataset::RunningJobs(jobs.into()));
+        let mut ui = Ui::new(Config::default());
+        ui.observe_data(&store);
+        ui.handle_key(key(KeyCode::Char('c')), &store);
+        assert!(render(&mut ui, &store, 100, 24).contains(prompt));
+        assert!(ui.handle_key(key(KeyCode::Enter), &store).is_empty());
+        assert!(ui.modals.is_empty());
+
+        ui.handle_key(key(KeyCode::Char('c')), &store);
+        ui.handle_key(key(KeyCode::Tab), &store);
+        let effects = ui.handle_key(key(KeyCode::Enter), &store);
+        assert!(matches!(effects.as_slice(), [Effect::Cancel { job_id }] if job_id == target));
+    }
+}
+
+#[test]
 fn array_partition_edits_keep_the_selected_group_when_detail_shows_a_running_task() {
     let store = populated_store();
     let mut ui = Ui::new(Config::default());

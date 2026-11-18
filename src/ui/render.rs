@@ -876,7 +876,7 @@ fn modal_title(modal: &Modal) -> String {
         ),
         Modal::Log(view) => format!(" {} · {} ", view.label, clean(&view.path.to_string_lossy())),
         Modal::Modify(view) => format!(" Modify job {} ", clean(&view.id)),
-        Modal::Cancel { id, .. } => format!(" Cancel job {}? ", clean(id)),
+        Modal::Cancel { .. } => " Cancel job ".into(),
         Modal::Input { .. } => " Inspect job ".into(),
         Modal::Settings(_) => " Settings ".into(),
         Modal::Help { .. } => " Help ".into(),
@@ -1026,12 +1026,18 @@ fn render_cancel(frame: &mut Frame<'_>, area: Rect, id: &str, yes: bool, theme: 
         Span::raw("   "),
         Span::styled("  No  ", if yes { theme.text() } else { theme.selected() }),
     ]);
-    let lines = vec![
-        Line::from(format!(" Cancel Slurm job {}?", clean(id))),
-        Line::default(),
-        buttons,
-    ];
-    frame.render_widget(Paragraph::new(lines).style(theme.text()), area);
+    let question = if id.contains('_') {
+        format!(" Cancel array tasks {id}?")
+    } else {
+        format!(" Cancel job {id} (all tasks if an array)?")
+    };
+    let lines = vec![Line::from(question), Line::default(), buttons];
+    frame.render_widget(
+        Paragraph::new(lines)
+            .wrap(Wrap { trim: false })
+            .style(theme.text()),
+        area,
+    );
 }
 
 fn render_job_input(

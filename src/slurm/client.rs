@@ -239,7 +239,7 @@ impl Client {
     }
 
     pub fn cancel_job(&self, id: &str) -> Result<(), String> {
-        let id = checked_job_id(id)?;
+        let id = cancellation_target(id)?;
         self.run("scancel", &[&id], ACTION_TIMEOUT)
             .map(|_| ())
             .map_err(|e| format!("scancel error: {e}"))

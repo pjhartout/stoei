@@ -946,20 +946,6 @@ mod tests {
     }
 
     #[test]
-    fn cancellation_defaults_to_no_and_needs_an_explicit_choice() {
-        let mut yes = false;
-        assert!(
-            handle_cancel(key(KeyCode::Enter), "123", &mut yes)
-                .1
-                .is_empty()
-        );
-        handle_cancel(key(KeyCode::Tab), "123", &mut yes);
-        assert!(
-            matches!(handle_cancel(key(KeyCode::Enter), "123", &mut yes).1.first(), Some(Effect::Cancel { job_id }) if job_id == "123")
-        );
-    }
-
-    #[test]
     fn array_throttle_targets_the_leader_and_raw_fields_validate_inline() {
         let mut detail = JobDetail::default();
         detail.fields.insert("ArrayJobId".into(), "123".into());

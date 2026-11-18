@@ -4,6 +4,7 @@ use super::checked_job_id;
 
 const MAX_SELECTION_BYTES: usize = 64 * 1024;
 const MAX_PENDING_TASKS: usize = 100_000;
+const INVALID_RANGE: &str = "invalid or incomplete array task selection";
 
 pub(super) struct PendingSelection {
     pub query_id: String,
@@ -12,19 +13,8 @@ pub(super) struct PendingSelection {
 
 impl PendingSelection {
     pub fn parse(id: &str) -> Result<Self, String> {
-        if id.len() > MAX_SELECTION_BYTES {
-            return Err("job selection exceeds size limit".into());
-        }
-        let query_id = checked_job_id(id)?
-            .split('_')
-            .map(|part| part.parse::<u32>().map(|number| number.to_string()))
-            .collect::<Result<Vec<_>, _>>()
-            .map_err(|_| "invalid numeric job ID".to_owned())?
-            .join("_");
-        let ranges = id
-            .split_once("_[")
-            .map(|(_, spec)| parse_ranges(spec))
-            .transpose()?;
+        let (query_id, spec) = selection_parts(id)?;
+        let ranges = spec.map(parse_ranges).transpose()?;
         Ok(Self { query_id, ranges })
     }
 
@@ -79,6 +69,68 @@ impl PendingSelection {
     }
 }
 
+/// Return the `scancel` target, omitting the concurrency limit from an `squeue` range.
+pub fn cancellation_target(id: &str) -> Result<String, String> {
+    let (id, spec) = selection_parts(id)?;
+    let Some(spec) = spec else {
+        return Ok(id);
+    };
+    for part in spec.split(',') {
+        let range = if let Some((range, step)) = part.split_once(':') {
+            if !range.contains('-') || array_index(step)? == 0 {
+                return Err(INVALID_RANGE.into());
+            }
+            range
+        } else {
+            part
+        };
+        parse_range(range)?;
+    }
+    Ok(format!("{id}_[{spec}]"))
+}
+
+fn selection_parts(id: &str) -> Result<(String, Option<&str>), String> {
+    if id.len() > MAX_SELECTION_BYTES {
+        return Err("job selection exceeds size limit".into());
+    }
+    let query_id = checked_job_id(id)?
+        .split('_')
+        .map(|part| part.parse::<u32>().map(|number| number.to_string()))
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|_| "invalid numeric job ID".to_owned())?
+        .join("_");
+    let Some((_, spec)) = id.split_once("_[") else {
+        return Ok((query_id, None));
+    };
+    if query_id.contains('_') {
+        return Err("invalid array job ID".into());
+    }
+    let spec = spec.strip_suffix(']').ok_or(INVALID_RANGE)?;
+    let spec = if let Some((spec, throttle)) = spec.split_once('%') {
+        array_index(throttle)?;
+        spec
+    } else {
+        spec
+    };
+    Ok((query_id, Some(spec)))
+}
+
+fn array_index(s: &str) -> Result<u32, &'static str> {
+    if !s.bytes().all(|byte| byte.is_ascii_digit()) {
+        return Err(INVALID_RANGE);
+    }
+    s.parse::<u32>().map_err(|_| INVALID_RANGE)
+}
+
+fn parse_range(range: &str) -> Result<(u32, u32), &'static str> {
+    let (first, last) = range.split_once('-').unwrap_or((range, range));
+    let (first, last) = (array_index(first)?, array_index(last)?);
+    if first > last {
+        return Err(INVALID_RANGE);
+    }
+    Ok((first, last))
+}
+
 fn pending_ids(row: &str) -> Result<(&str, &str), String> {
     let (id, number) = row.split_once('|').ok_or("invalid pending job record")?;
     if checked_job_id(id)? != id {
@@ -91,33 +143,9 @@ fn pending_ids(row: &str) -> Result<(&str, &str), String> {
 }
 
 fn parse_ranges(spec: &str) -> Result<Vec<(u32, u32)>, String> {
-    let invalid = || "invalid or incomplete array task selection".to_owned();
-    let spec = spec.strip_suffix(']').ok_or_else(invalid)?;
-    let spec = if let Some((spec, throttle)) = spec.split_once('%') {
-        if !throttle.bytes().all(|byte| byte.is_ascii_digit()) {
-            return Err(invalid());
-        }
-        throttle.parse::<u32>().map_err(|_| invalid())?;
-        spec
-    } else {
-        spec
-    };
     let mut ranges = spec
         .split(',')
-        .map(|part| {
-            let (first, last) = part.split_once('-').unwrap_or((part, part));
-            if !first.bytes().all(|byte| byte.is_ascii_digit())
-                || !last.bytes().all(|byte| byte.is_ascii_digit())
-            {
-                return Err(invalid());
-            }
-            let first = first.parse::<u32>().map_err(|_| invalid())?;
-            let last = last.parse::<u32>().map_err(|_| invalid())?;
-            if first > last {
-                return Err(invalid());
-            }
-            Ok((first, last))
-        })
+        .map(parse_range)
         .collect::<Result<Vec<_>, _>>()?;
     ranges.sort_unstable();
     let mut merged: Vec<(u32, u32)> = Vec::with_capacity(ranges.len());
