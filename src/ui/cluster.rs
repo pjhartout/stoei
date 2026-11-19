@@ -144,7 +144,7 @@ fn section_status(store: &Store, section: Section, name: &str, theme: Theme) -> 
 }
 
 fn node_lines(store: &Store, theme: Theme, lines: &mut Vec<Line<'static>>) {
-    let stats = &store.cluster_stats;
+    let stats = store.cluster_stats();
     match store.meta(Section::Nodes).state {
         State::Loading => lines.push(Line::from(Span::styled(
             "Refreshing cluster…",
@@ -239,18 +239,11 @@ fn free_percent_line(prefix: String, free: f64, total: f64, theme: Theme) -> Lin
 }
 
 fn gpu_lines(store: &Store, theme: Theme, lines: &mut Vec<Line<'static>>) {
-    let stats = &store.cluster_stats;
-    if stats.total_gpus.saturating_add(stats.unavail_gpus) == 0 {
+    let stats = store.cluster_stats();
+    if stats.gpus.total == 0 {
         return;
     }
     lines.push(heading("GPUs:", theme));
-    if stats.gpus_by_type.is_empty() {
-        lines.push(free_line(
-            stats.total_gpus.saturating_sub(stats.allocated_gpus),
-            stats.total_gpus.saturating_add(stats.unavail_gpus),
-            theme,
-        ));
-    }
     for (name, counts) in &stats.gpus_by_type {
         let name = if name.eq_ignore_ascii_case("gpu") {
             "generic".into()
@@ -259,16 +252,25 @@ fn gpu_lines(store: &Store, theme: Theme, lines: &mut Vec<Line<'static>>) {
         } else {
             clean(name)
         };
-        let mut line = free_line(
-            counts.total.saturating_sub(counts.allocated),
-            counts.total.saturating_add(counts.unavail),
-            theme,
-        );
+        let free = counts.known_free();
+        let mut line = if counts.unknown == 0 {
+            free_line(free, counts.total, theme)
+        } else {
+            Line::styled(
+                format!(
+                    "{free}–{}/{} free · {} unknown",
+                    free + counts.unknown,
+                    counts.total,
+                    counts.unknown
+                ),
+                theme.text(),
+            )
+        };
         line.spans
             .insert(0, Span::styled(format!("{name} "), theme.text()));
-        if counts.unavail > 0 {
+        if counts.unavailable > 0 {
             line.spans.push(Span::styled(
-                format!(" · {} unavail", counts.unavail),
+                format!(" · {} unavail", counts.unavailable),
                 theme.subtle(),
             ));
         }
@@ -278,9 +280,9 @@ fn gpu_lines(store: &Store, theme: Theme, lines: &mut Vec<Line<'static>>) {
 }
 
 fn pending_lines(store: &Store, theme: Theme, lines: &mut Vec<Line<'static>>) {
-    let stats = &store.cluster_stats;
+    let queue = &store.pending_by_partition;
     let state = store.meta(Section::AllUsersJobs).state;
-    if stats.pending_jobs_count == 0 && !matches!(state, State::Loading | State::Error) {
+    if queue.is_empty() && !matches!(state, State::Loading | State::Error) {
         return;
     }
     lines.push(heading("Pending:", theme));
@@ -295,15 +297,10 @@ fn pending_lines(store: &Store, theme: Theme, lines: &mut Vec<Line<'static>>) {
             theme.role("warning"),
         )));
     }
-    if stats.pending_jobs_count == 0 {
+    if queue.is_empty() {
         lines.push(Line::from("No pending jobs."));
-    } else if stats.pending_by_partition.is_empty() {
-        lines.push(Line::from(format!(
-            "{} jobs · no partition breakdown",
-            stats.pending_jobs_count
-        )));
     }
-    for (partition, pending) in &stats.pending_by_partition {
+    for (partition, pending) in queue {
         let mut parts = vec![format!("{}j", pending.jobs_count)];
         if pending.cpus > 0 {
             parts.push(format!("{}c", pending.cpus));
@@ -311,17 +308,10 @@ fn pending_lines(store: &Store, theme: Theme, lines: &mut Vec<Line<'static>>) {
         if pending.memory_gb > 0.0 {
             parts.push(compact_memory(pending.memory_gb));
         }
-        if pending.gpus_by_type.is_empty() && pending.gpus > 0 {
-            parts.push(format!("{}×gpu", pending.gpus));
-        }
         for (name, count) in &pending.gpus_by_type {
             parts.push(format!("{count}×{}", clean(&store::short_gpu_label(name))));
         }
-        let name = if partition.is_empty() {
-            "unknown".into()
-        } else {
-            clean(partition)
-        };
+        let name = clean(partition);
         lines.push(Line::from(format!("{name} {}", parts.join("·"))));
     }
 }

@@ -16,7 +16,7 @@ use ratatui::Frame;
 
 use crate::config::Config;
 use crate::log::LogRing;
-use crate::store::{self, GpuSnapshot, JobDetail, JobUsage, Store};
+use crate::store::{self, GpuSnapshot, JobDetail, JobUsage, Section, Store};
 
 use modals::{DetailView, Modal};
 use table::{Source, TableView};
@@ -146,6 +146,7 @@ pub struct Ui {
     toasts: VecDeque<Toast>,
     today: NaiveDate,
     log_snapshot: Vec<crate::log::LogEntry>,
+    log_revision: u64,
     seeded_priority_user: bool,
 }
 
@@ -164,6 +165,7 @@ impl Ui {
             toasts: VecDeque::new(),
             today: NaiveDate::from_ymd_opt(1970, 1, 1).expect("epoch date is valid"),
             log_snapshot: Vec::new(),
+            log_revision: 0,
             seeded_priority_user: false,
         }
     }
@@ -182,9 +184,23 @@ impl Ui {
     }
 
     pub fn observe_data(&mut self, store: &Store) {
-        self.rebuild_active(store);
+        self.prune_job_cache(store);
+        self.activate_table(store);
+    }
+
+    pub fn dataset_changed(&mut self, store: &Store, section: Section) {
+        if matches!(section, Section::RunningJobs | Section::History) {
+            self.prune_job_cache(store);
+        }
+        if source_for(self.table_index(), store, &self.log_snapshot).depends_on(section) {
+            self.rebuild_active(store);
+        }
+    }
+
+    fn activate_table(&mut self, store: &Store) {
         if self.active != 4 {
             self.log_snapshot = Vec::new();
+            self.log_revision = 0;
         }
         let active = self.table_index();
         for (index, table) in self.tables.iter_mut().enumerate() {
@@ -192,23 +208,15 @@ impl Ui {
                 table.indices = Vec::new();
             }
         }
+        self.rebuild_active(store);
+    }
+
+    fn prune_job_cache(&mut self, store: &Store) {
         self.cache.retain(|entry| {
             store.merged_jobs().iter().any(|job| {
-                store::normalize_array_job_id(&job.id) == entry.id && job.state == entry.state
+                job.state == entry.state && store::normalize_array_job_id(&job.id) == entry.id
             })
         });
-        if active == 4 && !self.seeded_priority_user && !store.ranked_users().is_empty() {
-            let source = Source::Shares(store.ranked_users(), false);
-            if let Some(position) = self.tables[4]
-                .indices
-                .iter()
-                .position(|index| source.key(*index) == store.user)
-            {
-                self.tables[4].cursor = position;
-                self.tables[4].selected_key = Some(store.user.clone());
-            }
-            self.seeded_priority_user = true;
-        }
     }
 
     pub fn notify(&mut self, message: String) {
@@ -264,12 +272,12 @@ impl Ui {
         }
         if let KeyCode::Char(ch @ '1'..='5') = key.code {
             self.active = usize::from(ch as u8 - b'1');
-            self.observe_data(store);
+            self.activate_table(store);
             return vec![Effect::TabChanged];
         }
         if key.code == KeyCode::Tab || key.code == KeyCode::BackTab {
             self.active = (self.active + if key.code == KeyCode::Tab { 1 } else { 4 }) % 5;
-            self.observe_data(store);
+            self.activate_table(store);
             return vec![Effect::TabChanged];
         }
         if self.open_global_modal(key) {
@@ -369,7 +377,7 @@ impl Ui {
                 KeyCode::Char('p') => self.users_pending = true,
                 _ => return None,
             }
-            self.observe_data(store);
+            self.activate_table(store);
             return Some(Vec::new());
         }
         if self.active == 3 {
@@ -380,7 +388,7 @@ impl Ui {
                 KeyCode::Char('j') => 3,
                 _ => return None,
             };
-            self.observe_data(store);
+            self.activate_table(store);
             return Some(vec![Effect::TabChanged]);
         }
         None
@@ -428,20 +436,25 @@ impl Ui {
 
     fn rebuild_active(&mut self, store: &Store) {
         let index = self.table_index();
-        if index == 7 {
-            self.tables[index].rebuild(&Source::Logs(&self.log_snapshot), self.today);
-        } else {
-            self.tables[index].rebuild(&source_for(index, store), self.today);
+        let source = source_for(index, store, &self.log_snapshot);
+        let table = &mut self.tables[index];
+        table.rebuild(&source, self.today);
+        if index == 4 && !self.seeded_priority_user && !store.ranked_users().is_empty() {
+            if let Some(position) = table
+                .indices
+                .iter()
+                .position(|row| source.key(*row) == store.user)
+            {
+                table.cursor = position;
+                table.selected_key = Some(store.user.clone());
+            }
+            self.seeded_priority_user = true;
         }
     }
 
     fn sort_active(&mut self, store: &Store) {
         let index = self.table_index();
-        if index == 7 {
-            self.tables[index].cycle_sort(&Source::Logs(&self.log_snapshot), self.today);
-        } else {
-            self.tables[index].cycle_sort(&source_for(index, store), self.today);
-        }
+        self.tables[index].cycle_sort(&source_for(index, store, &self.log_snapshot), self.today);
     }
 
     fn navigate(&mut self, key: KeyEvent, store: &Store) {
@@ -465,11 +478,7 @@ impl Ui {
             }
             _ => None,
         };
-        let source = if index == 7 {
-            Source::Logs(&self.log_snapshot)
-        } else {
-            source_for(index, store)
-        };
+        let source = source_for(index, store, &self.log_snapshot);
         if let Some(amount) = amount {
             self.tables[index].move_by(amount, &source);
         }
@@ -688,16 +697,22 @@ impl Ui {
     pub fn render(&mut self, frame: &mut Frame<'_>, store: &Store, status: &RuntimeStatus<'_>) {
         if self.today != status.today {
             self.today = status.today;
+            if self.history_visible() {
+                self.rebuild_active(store);
+            }
         }
-        if self.active == 4 {
-            self.log_snapshot = status.logs.snapshot();
+        if self.active == 4
+            && let Some((revision, rows)) = status.logs.snapshot_since(self.log_revision)
+        {
+            self.log_revision = revision;
+            self.log_snapshot = rows;
             self.tables[7].rebuild(&Source::Logs(&self.log_snapshot), self.today);
         }
         self.render_frame(frame, store, status);
     }
 }
 
-fn source_for(index: usize, store: &Store) -> Source<'_> {
+fn source_for<'a>(index: usize, store: &'a Store, logs: &'a [crate::log::LogEntry]) -> Source<'a> {
     match index {
         0 => Source::Jobs(store.merged_jobs()),
         1 => Source::Nodes(store.node_displays()),
@@ -705,6 +720,7 @@ fn source_for(index: usize, store: &Store) -> Source<'_> {
         3 => Source::Pending(store.pending_user_stats()),
         4 => Source::Shares(store.ranked_users(), false),
         5 => Source::Accounts(store.ranked_accounts(), &store.fair_share),
+        7 => Source::Logs(logs),
         8 => Source::MyPriority(store.ranked_pending(), &store.user),
         _ => Source::Priority(store.ranked_pending()),
     }

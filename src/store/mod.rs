@@ -119,6 +119,7 @@ impl Dataset {
 #[derive(Clone, Debug, Default)]
 pub struct ApplyOutcome {
     pub accepted: bool,
+    pub changed: Option<Section>,
     pub notification: Option<String>,
     pub completed_ids: Vec<String>,
 }
@@ -149,12 +150,12 @@ pub struct Store {
     pub fair_share: Vec<FairShareEntry>,
     pub pending_prio: Vec<PriorityEntry>,
     pub priority_config: PriorityConfig,
-    pub cluster_stats: ClusterStats,
+    pub pending_by_partition: BTreeMap<String, PendingPartitionStats>,
     meta: [Meta; 7],
     running_loaded: bool,
     completed: Vec<HistoryJob>,
     merged: Vec<MergedJob>,
-    node_rows: Vec<NodeDisplay>,
+    inventory: NodeInventory,
     my_job_stats: UserStats,
     running_users: Vec<UserStats>,
     pending_users: Vec<UserPendingStats>,
@@ -210,13 +211,14 @@ impl Store {
         }
         let result = result.and_then(|data| validate_dataset(section, data));
         let error = result.as_ref().err().cloned();
-        let completed_ids = match result {
+        let (changed, completed_ids) = match result {
             Ok(data) => self.apply_data(data),
-            Err(_) => Vec::new(),
+            Err(_) => (false, Vec::new()),
         };
         let notification = self.apply_meta(section, generation, error, now);
         ApplyOutcome {
             accepted: true,
+            changed: changed.then_some(section),
             notification,
             completed_ids,
         }
@@ -247,34 +249,50 @@ impl Store {
         notification
     }
 
-    fn apply_data(&mut self, data: Dataset) -> Vec<String> {
+    fn apply_data(&mut self, data: Dataset) -> (bool, Vec<String>) {
         match data {
-            Dataset::RunningJobs(jobs) => return self.apply_running(jobs),
+            Dataset::RunningJobs(jobs) if !self.running_loaded || jobs != self.running_jobs => {
+                return (true, self.apply_running(jobs));
+            }
             Dataset::History(result) => {
                 self.history_stats = result.stats;
-                self.rebuild_history(result.jobs);
+                return (self.rebuild_history(result.jobs), Vec::new());
             }
-            Dataset::Nodes(nodes) => {
+            Dataset::Nodes(nodes) if self.nodes != nodes => {
+                let inventory = NodeInventory::from_nodes(&nodes);
+                if self.inventory.models != inventory.models {
+                    self.my_job_stats = aggregate_running_job_stats(
+                        &self.user,
+                        &self.running_jobs,
+                        &inventory.models,
+                    );
+                    self.running_users =
+                        aggregate_user_stats(&self.all_users_jobs, &inventory.models);
+                }
+                self.inventory = inventory;
                 self.nodes = nodes;
-                self.node_rows = derive_node_displays(&self.nodes);
-                self.rebuild_resources();
             }
-            Dataset::AllUsersJobs(jobs) => {
+            Dataset::AllUsersJobs(jobs) if self.all_users_jobs != jobs => {
+                self.pending_by_partition = aggregate_pending_queue(&jobs);
+                self.running_users = aggregate_user_stats(&jobs, &self.inventory.models);
+                self.pending_users = aggregate_pending_user_stats(&jobs);
                 self.all_users_jobs = jobs;
-                self.rebuild_resources();
             }
-            Dataset::FairShare(entries) => {
+            Dataset::FairShare(entries) if self.fair_share != entries => {
                 self.fair_share = entries;
                 self.users_ranked = rank_active_users(&self.fair_share);
                 self.accounts_ranked = rank_accounts(&self.fair_share);
             }
-            Dataset::PendingPrio(entries) => {
+            Dataset::PendingPrio(entries) if self.pending_prio != entries => {
                 self.pending_prio = entries;
                 self.pending_ranked = rank_pending(&self.pending_prio);
             }
-            Dataset::PriorityConfig(config) => self.priority_config = config,
+            Dataset::PriorityConfig(config) if self.priority_config != config => {
+                self.priority_config = config
+            }
+            _ => return (false, Vec::new()),
         }
-        Vec::new()
+        (true, Vec::new())
     }
 
     fn apply_running(&mut self, jobs: Vec<RunningJob>) -> Vec<String> {
@@ -287,24 +305,13 @@ impl Store {
             .collect();
         self.running_jobs = jobs;
         self.running_loaded = true;
-        self.my_job_stats = aggregate_running_job_stats(
-            &self.user,
-            &self.running_jobs,
-            &node_gpu_models(&self.nodes),
-        );
+        self.my_job_stats =
+            aggregate_running_job_stats(&self.user, &self.running_jobs, &self.inventory.models);
         self.rebuild_merged();
         vanished
     }
 
-    fn rebuild_resources(&mut self) {
-        self.cluster_stats = derive_cluster_stats(&self.nodes, &self.all_users_jobs);
-        let models = node_gpu_models(&self.nodes);
-        self.my_job_stats = aggregate_running_job_stats(&self.user, &self.running_jobs, &models);
-        self.running_users = aggregate_user_stats(&self.all_users_jobs, &models);
-        self.pending_users = aggregate_pending_user_stats(&self.all_users_jobs);
-    }
-
-    pub fn add_completed_job(&mut self, job: HistoryJob) -> Result<(), String> {
+    pub fn add_completed_job(&mut self, job: HistoryJob) -> Result<bool, String> {
         if !is_terminal_state(&job.state) {
             return Err(format!("completion record for {} is not terminal", job.id));
         }
@@ -312,32 +319,36 @@ impl Store {
         if self.completed.len() >= MAX_ROWS {
             return Err("session completion history exceeds row limit".into());
         }
+        let changed = self.history_jobs.first() != Some(&job);
+        self.completed.insert(0, job.clone());
+        if !changed {
+            return Ok(false);
+        }
         self.history_jobs.retain(|previous| previous.id != job.id);
-        self.history_jobs.insert(0, job.clone());
-        self.completed.insert(0, job);
+        self.history_jobs.insert(0, job);
         self.rebuild_merged();
-        Ok(())
+        Ok(true)
     }
 
-    fn rebuild_history(&mut self, base: Vec<HistoryJob>) {
-        let terminal: BTreeSet<&str> = base
-            .iter()
-            .filter(|job| is_terminal_state(&job.state))
-            .map(|job| job.id.as_str())
-            .collect();
-        self.completed
-            .retain(|job| !terminal.contains(job.id.as_str()));
-        let overlay: BTreeSet<&str> = self.completed.iter().map(|job| job.id.as_str()).collect();
-        self.history_jobs = self
-            .completed
-            .iter()
-            .cloned()
-            .chain(
-                base.into_iter()
-                    .filter(|job| !overlay.contains(job.id.as_str())),
-            )
-            .collect();
+    fn rebuild_history(&mut self, mut jobs: Vec<HistoryJob>) -> bool {
+        if !self.completed.is_empty() {
+            let terminal: BTreeSet<_> = jobs
+                .iter()
+                .filter(|job| is_terminal_state(&job.state))
+                .map(|job| job.id.as_str())
+                .collect();
+            self.completed
+                .retain(|job| !terminal.contains(job.id.as_str()));
+            let overlay: BTreeSet<_> = self.completed.iter().map(|job| job.id.as_str()).collect();
+            jobs.retain(|job| !overlay.contains(job.id.as_str()));
+            jobs.splice(..0, self.completed.iter().cloned());
+        }
+        if self.history_jobs == jobs {
+            return false;
+        }
+        self.history_jobs = jobs;
         self.rebuild_merged();
+        true
     }
 
     fn rebuild_merged(&mut self) {
@@ -348,7 +359,10 @@ impl Store {
         &self.merged
     }
     pub fn node_displays(&self) -> &[NodeDisplay] {
-        &self.node_rows
+        &self.inventory.rows
+    }
+    pub fn cluster_stats(&self) -> &ClusterStats {
+        &self.inventory.cluster
     }
     pub fn my_job_stats(&self) -> &UserStats {
         &self.my_job_stats

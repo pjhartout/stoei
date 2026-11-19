@@ -17,12 +17,9 @@ fn ctrl(ch: char) -> KeyEvent {
 fn populated_store() -> Store {
     let mut store = Store::new();
     store.user = "alice".into();
-    let now = Instant::now();
-    let generation = store.begin(Section::RunningJobs);
-    store.apply(
-        Section::RunningJobs,
-        generation,
-        Ok(Dataset::RunningJobs(vec![
+    apply_test_data(
+        &mut store,
+        Dataset::RunningJobs(vec![
             RunningJob {
                 id: "123".into(),
                 name: "train 日本語".into(),
@@ -38,14 +35,11 @@ fn populated_store() -> Store {
                 state: "PENDING".into(),
                 ..Default::default()
             },
-        ])),
-        now,
+        ]),
     );
-    let generation = store.begin(Section::History);
-    store.apply(
-        Section::History,
-        generation,
-        Ok(Dataset::History(HistoryResult {
+    apply_test_data(
+        &mut store,
+        Dataset::History(HistoryResult {
             jobs: vec![HistoryJob {
                 id: "10".into(),
                 name: "Finished".into(),
@@ -55,8 +49,7 @@ fn populated_store() -> Store {
                 ..Default::default()
             }],
             ..Default::default()
-        })),
-        now,
+        }),
     );
     store
 }
@@ -246,22 +239,29 @@ fn line(buffer: &ratatui::buffer::Buffer, row: u16) -> String {
         .collect()
 }
 
-fn apply_test_data(store: &mut Store, data: Dataset) {
+fn apply_test_data(store: &mut Store, data: Dataset) -> store::ApplyOutcome {
     let section = data.section();
     let generation = store.begin(section);
     let now = store
         .meta(Section::RunningJobs)
         .last_success
         .unwrap_or_else(Instant::now);
-    store.apply(section, generation, Ok(data), now);
+    store.apply(section, generation, Ok(data), now)
 }
 
-fn cluster_views(store: &Store) -> [String; 2] {
+fn assert_cluster_views(store: &Store, visible: &[&str], absent: &[&str]) {
     let mut ui = Ui::new(Config::default());
     ui.observe_data(store);
     let sidebar = render(&mut ui, store, 160, 36);
     ui.modals.push(Modal::load());
-    [sidebar, render(&mut ui, store, 100, 36)]
+    for text in [sidebar, render(&mut ui, store, 100, 36)] {
+        for expected in visible {
+            assert!(text.contains(expected), "missing {expected:?}");
+        }
+        for unexpected in absent {
+            assert!(!text.contains(unexpected), "unexpected {unexpected:?}");
+        }
+    }
 }
 
 fn idle_node() -> store::Node {
@@ -350,56 +350,45 @@ fn refresh_indicator_stays_visible_until_every_fetch_finishes() {
 }
 
 #[test]
-fn missing_cluster_snapshots_never_display_a_capacity_percentage() {
+fn cluster_capacity_can_load_before_the_queue_and_become_empty() {
     let mut store = populated_store();
     store.begin(Section::Nodes);
     store.begin(Section::AllUsersJobs);
-    for text in cluster_views(&store) {
-        assert!(text.contains("Loading cluster…"));
-        assert!(text.contains("Loading queue…"));
-        assert!(!text.contains('%'));
-        assert!(!text.contains("0/0"));
-    }
-    store.apply(
-        Section::Nodes,
-        store.generation(Section::Nodes),
-        Err("node request failed".into()),
-        store.meta(Section::RunningJobs).last_success.unwrap(),
+    assert_cluster_views(
+        &store,
+        &["Loading cluster…", "Loading queue…"],
+        &["%", "0/0"],
     );
-    for text in cluster_views(&store) {
-        assert!(text.contains("cluster unavailable"));
-        assert!(text.contains("Loading queue…"));
-        assert!(!text.contains('%'));
-    }
-}
-
-#[test]
-fn cluster_capacity_and_queue_become_ready_independently() {
-    let mut store = populated_store();
     apply_test_data(&mut store, Dataset::Nodes(vec![idle_node()]));
-    for text in cluster_views(&store) {
-        assert!(text.contains("64/64 free (100.0%)"));
-        assert!(text.contains("Loading queue…"));
-        assert!(!text.contains("Loading cluster…"));
-        assert!(!text.contains("GPUs:"));
-    }
+    assert_cluster_views(
+        &store,
+        &["64/64 free (100.0%)", "Loading queue…"],
+        &["Loading cluster…", "GPUs:"],
+    );
     apply_test_data(&mut store, Dataset::AllUsersJobs(Vec::new()));
-    for text in cluster_views(&store) {
-        assert!(!text.contains("Loading queue…"));
-        assert!(!text.contains("Pending:"));
-        assert!(text.contains("64/64 free (100.0%)"));
-    }
+    assert_cluster_views(
+        &store,
+        &["64/64 free (100.0%)"],
+        &["Loading queue…", "Pending:"],
+    );
     apply_test_data(&mut store, Dataset::Nodes(Vec::new()));
-    for text in cluster_views(&store) {
-        assert!(text.contains("0/0 free (n/a)"));
-        assert!(!text.contains("100.0%"));
-        assert!(!text.contains("Loading cluster…"));
-    }
+    assert_cluster_views(&store, &["0/0 free (n/a)"], &["100.0%", "Loading cluster…"]);
 }
 
 #[test]
-fn loaded_queue_does_not_invent_unknown_cluster_capacity() {
+fn queue_can_load_first_and_node_refreshes_only_show_last_successful_capacity() {
     let mut store = populated_store();
+    let now = store.meta(Section::RunningJobs).last_success.unwrap();
+    store.begin(Section::AllUsersJobs);
+    let failed = store.begin(Section::Nodes);
+    store.apply(Section::Nodes, failed, Err("nodes unavailable".into()), now);
+    assert_cluster_views(
+        &store,
+        &["cluster unavailable", "Loading queue…"],
+        &["%", "0/0"],
+    );
+
+    let retry = store.begin(Section::Nodes);
     apply_test_data(
         &mut store,
         Dataset::AllUsersJobs(vec![store::AllUsersJob {
@@ -411,55 +400,86 @@ fn loaded_queue_does_not_invent_unknown_cluster_capacity() {
             ..Default::default()
         }]),
     );
-    for text in cluster_views(&store) {
-        assert!(text.contains("Loading cluster…"));
-        assert!(text.contains("cpu 1j·4c·2G"));
-        assert!(!text.contains("Loading queue…"));
-        assert!(!text.contains('%'));
-    }
-}
-
-#[test]
-fn cluster_refresh_and_failure_keep_last_successful_capacity_visible() {
-    let mut store = populated_store();
-    apply_test_data(&mut store, Dataset::Nodes(vec![idle_node()]));
-    apply_test_data(&mut store, Dataset::AllUsersJobs(Vec::new()));
-    let generation = store.begin(Section::Nodes);
-    for text in cluster_views(&store) {
-        assert!(text.contains("Refreshing cluster…"));
-        assert!(text.contains("64/64 free (100.0%)"));
-    }
+    assert_cluster_views(
+        &store,
+        &["Loading cluster…", "cpu 1j·4c·2G"],
+        &["Loading queue…", "%"],
+    );
     store.apply(
         Section::Nodes,
-        generation,
-        Err("nodes failed".into()),
-        store.meta(Section::RunningJobs).last_success.unwrap(),
+        retry,
+        Ok(Dataset::Nodes(vec![idle_node()])),
+        now,
     );
-    for text in cluster_views(&store) {
-        assert!(text.contains("Last known cluster"));
-        assert!(text.contains("refresh failed"));
-        assert!(text.contains("64/64 free (100.0%)"));
-    }
+    let refresh = store.begin(Section::Nodes);
+    assert_cluster_views(
+        &store,
+        &["Refreshing cluster…", "64/64 free (100.0%)", "cpu 1j·4c·2G"],
+        &[],
+    );
+    store.apply(
+        Section::Nodes,
+        refresh,
+        Err("nodes unavailable".into()),
+        now,
+    );
+    assert_cluster_views(
+        &store,
+        &[
+            "Last known cluster · refresh failed",
+            "64/64 free (100.0%)",
+            "cpu 1j·4c·2G",
+        ],
+        &["Refreshing cluster…"],
+    );
 }
 
 #[test]
-fn unavailable_gpu_hardware_is_distinct_from_allocated_capacity() {
+fn missing_gpu_allocations_and_unavailable_hardware_use_the_same_inventory_in_both_views() {
     let mut store = populated_store();
     apply_test_data(
         &mut store,
-        Dataset::Nodes(vec![store::Node {
-            name: "gpu001".into(),
-            state: "DOWN".into(),
-            gres: "gpu:h200:8".into(),
-            ..idle_node()
-        }]),
+        Dataset::Nodes(vec![
+            store::Node {
+                name: "gpu001".into(),
+                state: "DOWN".into(),
+                gres: "gpu:h200:8".into(),
+                ..idle_node()
+            },
+            store::Node {
+                name: "gpu002".into(),
+                state: "MIXED".into(),
+                cpu_alloc: "32".into(),
+                alloc_mem: "32768".into(),
+                cfg_tres: "cpu=64,mem=64G,gres/gpu=4".into(),
+                gres: "gpu:h100:4(S:0-1)".into(),
+                ..idle_node()
+            },
+        ]),
     );
-    for text in cluster_views(&store) {
-        assert!(text.contains("H200 0/8 free (0.0%)"));
-        assert!(text.contains("8 unavail"));
-        assert!(!text.contains("allocated"));
-        assert!(!text.contains("100.0%"));
-    }
+    assert_cluster_views(
+        &store,
+        &[
+            "H200 0/8 free (0.0%) · 8 unavail",
+            "H100 0–4/4 free · 4 unknown",
+        ],
+        &["allocated", "100.0%"],
+    );
+
+    let mut ui = Ui::new(Config::default());
+    ui.handle_key(key(KeyCode::Char('2')), &store);
+    let buffer = render_buffer(&mut ui, &store, 180, 32);
+    let (y, row) = (0..buffer.area.height)
+        .map(|y| (y, line(&buffer, y)))
+        .find(|(_, text)| text.contains("gpu002"))
+        .expect("mixed node row");
+    let (before_percent, _) = row.split_once("N/A").expect("unknown GPU usage");
+    assert!(before_percent.trim_end().ends_with("?/4"));
+    let x = before_percent.chars().count() as u16;
+    assert_eq!(
+        buffer[(x, y)].fg,
+        theme::Theme::by_name(&ui.config().theme).text
+    );
 }
 
 #[test]
@@ -821,29 +841,52 @@ fn all_tabs_and_modals_render_without_a_terminal_or_scheduler() {
 }
 
 #[test]
-fn switching_tabs_displays_loaded_rows_without_waiting_for_a_refresh() {
+fn table_refreshes_follow_the_active_source_and_switching_tabs_uses_the_latest_rows() {
     let mut store = populated_store();
-    let generation = store.begin(Section::Nodes);
-    store.apply(
-        Section::Nodes,
-        generation,
-        Ok(Dataset::Nodes(vec![store::Node {
-            name: "node001".into(),
-            state: "IDLE".into(),
-            ..Default::default()
-        }])),
-        Instant::now(),
-    );
     let mut ui = Ui::new(Config::default());
     ui.observe_data(&store);
-    for switch in [KeyCode::Char('2'), KeyCode::Tab] {
-        ui.handle_key(key(switch), &store);
-        assert_eq!(ui.active_tab(), 1);
-        assert!(render(&mut ui, &store, 80, 24).contains("node001"));
-        ui.handle_key(key(KeyCode::BackTab), &store);
-        assert_eq!(ui.active_tab(), 0);
-        assert!(render(&mut ui, &store, 160, 24).contains("Finished"));
+    let Some(Effect::FetchJob { token, job_id, .. }) = ui.open_job("10", "COMPLETED", None).pop()
+    else {
+        panic!("expected a detail request");
+    };
+    ui.receive(ActionResult::Job {
+        token,
+        job_id,
+        result: Ok(snapshot("10", "COMPLETED")),
+    });
+    ui.handle_key(key(KeyCode::Esc), &store);
+
+    // Defer the history delivery so an unrelated rebuild or cache prune would be observable.
+    let history = store.history_jobs.clone();
+    let removed = apply_test_data(&mut store, Dataset::History(HistoryResult::default()));
+    let nodes = apply_test_data(&mut store, Dataset::Nodes(vec![idle_node()]));
+    let status_only = apply_test_data(&mut store, Dataset::History(HistoryResult::default()));
+    let changes = [nodes.changed, status_only.changed];
+    assert_eq!(changes, [Some(Section::Nodes), None]);
+    for section in changes.into_iter().flatten() {
+        ui.dataset_changed(&store, section);
     }
+    assert_eq!(ui.tables[0].indices.len(), 3);
+    assert_eq!(ui.cache.len(), 1);
+    ui.dataset_changed(&store, removed.changed.expect("removed history row"));
+    assert_eq!(ui.tables[0].indices.len(), 2);
+    assert!(ui.cache.is_empty());
+
+    ui.handle_key(key(KeyCode::Char('2')), &store);
+    assert!(render(&mut ui, &store, 80, 24).contains("cpu001"));
+    let restored = apply_test_data(
+        &mut store,
+        Dataset::History(HistoryResult {
+            jobs: history,
+            ..Default::default()
+        }),
+    );
+    ui.dataset_changed(&store, restored.changed.expect("restored history row"));
+    assert!(ui.tables[0].indices.is_empty());
+    ui.handle_key(key(KeyCode::BackTab), &store);
+    assert!(render(&mut ui, &store, 160, 24).contains("Finished"));
+    ui.handle_key(key(KeyCode::Tab), &store);
+    assert_eq!(ui.active_tab(), 1);
 }
 
 #[test]
@@ -1218,6 +1261,9 @@ fn sidebar_shortcuts_remain_literal_filter_text_in_both_key_presets() {
         );
         assert_eq!(ui.tables[0].filter, "b[]=");
         assert_eq!(ui.tables[0].indices.len(), 1);
-        assert_eq!(source_for(0, &store).key(ui.tables[0].indices[0]), "789");
+        assert_eq!(
+            source_for(0, &store, &[]).key(ui.tables[0].indices[0]),
+            "789"
+        );
     }
 }

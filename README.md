@@ -138,6 +138,10 @@ disk throughput is averaged over the refreshed runtime.
 GPU utilization shows the highest per-task average Slurm reports for a job step.
 A task that uses multiple GPUs can report more than 100%.
 
+If Slurm omits GPU allocation for a busy node, the Nodes tab shows `?/4` for
+a four-GPU node. Cluster load shows a range of possible free GPUs and the
+number with unknown allocation. Draining and offline GPUs count as unavailable.
+
 For a current GPU snapshot, open your running job with `Enter`, then press `v`.
 The popup shows utilization and VRAM used/total for each allocated NVIDIA GPU.
 Press `r` to take another snapshot and `Esc` to return to job details. Snapshots

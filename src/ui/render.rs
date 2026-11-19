@@ -9,7 +9,6 @@ use crate::store::{self, Section, State, Store};
 use super::format::{clean, efficiency_lines, field_lines};
 use super::gpu::gpu_lines;
 use super::modals::{DetailView, LogView, Modal, ModifyView, SettingsView};
-use super::table::Source;
 use super::theme::Theme;
 use super::{RuntimeStatus, Ui, source_for};
 
@@ -279,11 +278,7 @@ impl Ui {
         if self.active == 3 && matches!(self.priority_pane, 1 | 2) {
             content = render_share_note(frame, content, store, self.priority_pane == 2, theme);
         }
-        let source = if index == 7 {
-            Source::Logs(&self.log_snapshot)
-        } else {
-            source_for(index, store)
-        };
+        let source = source_for(index, store, &self.log_snapshot);
         if self.tables[index].indices.is_empty() {
             let text = empty_message(
                 self.active,
