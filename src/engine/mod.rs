@@ -40,6 +40,7 @@ enum Event {
     Data {
         section: Section,
         generation: u64,
+        history_days: u32,
         result: Result<Dataset, String>,
     },
     Action(ActionResult),
@@ -347,9 +348,7 @@ impl Runtime {
     }
 
     fn dispatch(&mut self, section: Section, now: Instant, force: bool) -> bool {
-        if self.store.meta(section).state == State::Loading {
-            return false;
-        }
+        let force = force || self.scheduler.history_pending(section);
         let generation = self
             .store
             .generation(section)
@@ -369,7 +368,7 @@ impl Runtime {
                 true
             }
             Err(_) => {
-                self.scheduler.deferred(section, now);
+                self.scheduler.deferred(section, now, force);
                 false
             }
         }
@@ -381,8 +380,9 @@ impl Runtime {
             Event::Data {
                 section,
                 generation,
+                history_days,
                 result,
-            } => self.process_data(section, generation, result),
+            } => self.process_data(section, generation, history_days, result),
             Event::Action(result) => self.process_action(result)?,
             Event::Completed(Ok(Some(job))) => {
                 if let Err(err) = self.store.add_completed_job(job) {
@@ -455,15 +455,30 @@ impl Runtime {
         Ok(())
     }
 
-    fn process_data(&mut self, section: Section, generation: u64, result: Result<Dataset, String>) {
+    fn process_data(
+        &mut self,
+        section: Section,
+        generation: u64,
+        history_days: u32,
+        result: Result<Dataset, String>,
+    ) {
         if generation < self.store.generation(section) {
             return;
         }
-        let warning = match &result {
-            Ok(Dataset::History(history)) => history.warning.clone(),
-            _ => None,
-        };
+        if let Ok(Dataset::History(history)) = &result
+            && let Some(warning) = &history.warning
+        {
+            // Accounting reconciliation warnings apply to every history window.
+            self.notify(warning.clone());
+        }
         let now = Instant::now();
+        if section == Section::History
+            && !self
+                .scheduler
+                .accept_history(history_days, self.ui.config().job_history_days, now)
+        {
+            return;
+        }
         let outcome = self.store.apply(section, generation, result, now);
         if !outcome.accepted {
             return;
@@ -475,9 +490,6 @@ impl Runtime {
                 Some(err) => format!("{message}: {err}"),
                 None => message,
             });
-        }
-        if let Some(warning) = warning {
-            self.notify(warning);
         }
         match outcome.completed_ids.as_slice() {
             [] => {}
@@ -504,11 +516,10 @@ impl Runtime {
             self.suspended = false;
         }
         let effects = self.ui.receive(result);
-        self.effects(effects)?;
         if saved {
             self.scheduler.configure(Instant::now(), self.ui.config());
-            self.request_history(true);
         }
+        self.effects(effects)?;
         if editor_done {
             self.input
                 .send(InputDirective::Read)

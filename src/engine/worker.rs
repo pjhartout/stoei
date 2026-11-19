@@ -147,6 +147,7 @@ fn perform(
         } => Event::Data {
             section,
             generation,
+            history_days: days,
             result: fetch(client, section, days, force),
         },
         Work::Action(effect) => action(effect, client, config_path, stopped),

@@ -24,6 +24,7 @@ pub struct Scheduler {
     schedules: [Schedule; 7],
     fast: Duration,
     seed: u64,
+    history_pending: bool,
 }
 
 fn index(section: Section) -> usize {
@@ -59,15 +60,37 @@ impl Scheduler {
             schedules,
             fast: Duration::from_secs_f64(config.clone().clamped().refresh_interval),
             seed: seed.max(1),
+            history_pending: false,
         }
     }
 
     pub fn configure(&mut self, now: Instant, config: &Config) {
         self.fast = Duration::from_secs_f64(config.clone().clamped().refresh_interval);
         for section in SECTIONS {
+            if self.history_pending(section) {
+                continue;
+            }
             let period = self.period(section);
             self.schedules[index(section)].next = now + period;
         }
+    }
+
+    pub(super) fn history_pending(&self, section: Section) -> bool {
+        section == Section::History && self.history_pending
+    }
+
+    pub(super) fn accept_history(
+        &mut self,
+        fetched_days: u32,
+        requested_days: u32,
+        now: Instant,
+    ) -> bool {
+        if fetched_days == requested_days {
+            return true;
+        }
+        self.history_pending = true;
+        self.schedules[index(Section::History)].next = now;
+        false
     }
 
     fn period(&self, section: Section) -> Duration {
@@ -80,21 +103,24 @@ impl Scheduler {
             }
     }
 
-    fn visible(section: Section, history: bool, priority: bool, store: &Store) -> bool {
-        match section {
-            Section::History => history,
-            Section::FairShare | Section::PendingPrio => priority,
-            Section::PriorityConfig => priority && store.meta(section).state != State::Loaded,
-            _ => true,
+    fn eligible(&self, section: Section, history: bool, priority: bool, store: &Store) -> bool {
+        if self.history_pending(section) {
+            return true;
         }
+        store.meta(section).state != State::Loading
+            && match section {
+                Section::History => history,
+                Section::FairShare | Section::PendingPrio => priority,
+                Section::PriorityConfig => priority && store.meta(section).state != State::Loaded,
+                _ => true,
+            }
     }
 
     pub fn due(&self, now: Instant, history: bool, priority: bool, store: &Store) -> Vec<Section> {
         SECTIONS
             .into_iter()
             .filter(|section| {
-                Self::visible(*section, history, priority, store)
-                    && store.meta(*section).state != State::Loading
+                self.eligible(*section, history, priority, store)
                     && self.schedules[index(*section)].next <= now
             })
             .collect()
@@ -103,10 +129,7 @@ impl Scheduler {
     pub fn next_deadline(&self, history: bool, priority: bool, store: &Store) -> Option<Instant> {
         SECTIONS
             .into_iter()
-            .filter(|section| {
-                Self::visible(*section, history, priority, store)
-                    && store.meta(*section).state != State::Loading
-            })
+            .filter(|section| self.eligible(*section, history, priority, store))
             .map(|section| self.schedules[index(section)].next)
             .min()
     }
@@ -129,13 +152,19 @@ impl Scheduler {
     }
 
     pub fn dispatched(&mut self, section: Section, now: Instant) {
+        if section == Section::History {
+            self.history_pending = false;
+        }
         let period = self.jitter(self.period(section));
         let schedule = &mut self.schedules[index(section)];
         schedule.dispatched = Some(now);
         schedule.next = now + period;
     }
 
-    pub fn deferred(&mut self, section: Section, now: Instant) {
+    pub fn deferred(&mut self, section: Section, now: Instant, force: bool) {
+        if section == Section::History && force {
+            self.history_pending = true;
+        }
         self.schedules[index(section)].next = now + Duration::from_secs(1);
     }
 
@@ -269,6 +298,61 @@ mod tests {
         assert_eq!(
             scheduler.due(now + Duration::from_secs(1), true, true, &store),
             [Section::RunningJobs]
+        );
+    }
+
+    #[test]
+    fn history_window_changes_coalesce_across_inflight_and_deferred_fetches() {
+        let now = Instant::now();
+        let mut config = Config::default();
+        let mut scheduler = Scheduler::new(now, &config, 1);
+        let mut store = Store::new();
+        let section = Section::History;
+        let initial_window = config.job_history_days;
+        store.begin(section);
+        scheduler.dispatched(section, now);
+
+        for days in [30, 14] {
+            config.job_history_days = days;
+            scheduler.configure(now, &config);
+            assert!(!scheduler.request(section, now, true, &store));
+            assert!(!scheduler.due(now, true, false, &store).contains(&section));
+        }
+        assert!(!scheduler.accept_history(initial_window, config.job_history_days, now));
+        assert_eq!(scheduler.due(now, false, false, &store), [section]);
+
+        scheduler.deferred(section, now, true);
+        config.job_history_days = 90;
+        scheduler.configure(now, &config);
+        let retry = now + Duration::from_secs(1);
+        assert_eq!(scheduler.next_deadline(false, false, &store), Some(retry));
+        assert_eq!(scheduler.due(retry, false, false, &store), [section]);
+        assert!(scheduler.history_pending(section));
+
+        let latest_window = config.job_history_days;
+        let generation = store.begin(section);
+        scheduler.dispatched(section, retry);
+        for days in [14, latest_window, latest_window] {
+            config.job_history_days = days;
+            scheduler.configure(retry, &config);
+            assert!(!scheduler.request(section, retry, true, &store));
+        }
+        assert!(scheduler.accept_history(latest_window, config.job_history_days, retry));
+        assert!(!scheduler.history_pending(section));
+        store.apply(
+            section,
+            generation,
+            Err("controller unavailable".into()),
+            retry,
+        );
+        scheduler.finished(section, true, retry);
+        assert!(scheduler.due(retry, true, false, &store).is_empty());
+        assert!(!scheduler.request(section, retry, false, &store));
+        assert!(scheduler.request(section, retry, true, &store));
+        scheduler.deferred(section, retry, true);
+        assert_eq!(
+            scheduler.due(retry + Duration::from_secs(1), false, false, &store),
+            [section]
         );
     }
 
