@@ -77,6 +77,13 @@ fn snapshot(id: &str, state: &str) -> JobSnapshot {
     }
 }
 
+fn job_read(effects: &[Effect]) -> ReadToken {
+    let [Effect::FetchJob { token, .. }] = effects else {
+        panic!("expected a job detail request");
+    };
+    token.clone()
+}
+
 fn gpu_snapshot() -> GpuSnapshot {
     GpuSnapshot {
         devices: vec![store::GpuDevice {
@@ -108,7 +115,7 @@ fn gpu_snapshots_are_requested_and_refreshed_only_by_modal_keys() {
     assert!(render(&mut ui, &store, 100, 24).contains("Loading"));
     assert!(ui.handle_key(key(KeyCode::Char('r')), &store).is_empty());
     ui.receive(ActionResult::Gpu {
-        token: *token,
+        token: token.clone(),
         job_id: job_id.clone(),
         result: Ok(gpu_snapshot()),
     });
@@ -120,10 +127,11 @@ fn gpu_snapshots_are_requested_and_refreshed_only_by_modal_keys() {
     let [Effect::FetchGpu { token: next, .. }] = refresh.as_slice() else {
         panic!("expected a manual GPU refresh");
     };
-    assert_ne!(next, token);
+    assert!(!next.ptr_eq(token));
+    assert_eq!(token.strong_count(), 0);
     assert!(render(&mut ui, &store, 100, 24).contains("previous snapshot"));
     ui.receive(ActionResult::Gpu {
-        token: *next,
+        token: next.clone(),
         job_id: "123".into(),
         result: Err("SSH connection failed".into()),
     });
@@ -139,19 +147,20 @@ fn gpu_snapshots_are_requested_and_refreshed_only_by_modal_keys() {
 fn gpu_results_for_closed_or_other_requests_are_ignored() {
     let store = populated_store();
     let mut ui = Ui::new(Config::default());
-    ui.open_job("123", "RUNNING", None);
+    let parent = job_read(&ui.open_job("123", "RUNNING", None));
     let effects = ui.handle_key(key(KeyCode::Char('v')), &store);
     let [Effect::FetchGpu { token: first, .. }] = effects.as_slice() else {
         panic!("expected a GPU query");
     };
     ui.handle_key(key(KeyCode::Esc), &store);
+    assert_eq!(first.strong_count(), 0);
     let effects = ui.handle_key(key(KeyCode::Char('v')), &store);
     let [Effect::FetchGpu { token: second, .. }] = effects.as_slice() else {
         panic!("expected another GPU query");
     };
-    for (token, job_id) in [(*first, "123"), (*second, "456")] {
+    for (token, job_id) in [(first, "123"), (second, "456")] {
         ui.receive(ActionResult::Gpu {
-            token,
+            token: token.clone(),
             job_id: job_id.into(),
             result: Ok(gpu_snapshot()),
         });
@@ -161,11 +170,14 @@ fn gpu_results_for_closed_or_other_requests_are_ignored() {
     }
     ui.handle_key(key(KeyCode::Esc), &store);
     ui.receive(ActionResult::Gpu {
-        token: *second,
+        token: second.clone(),
         job_id: "123".into(),
         result: Ok(gpu_snapshot()),
     });
     assert!(matches!(ui.modals.last(), Some(Modal::Job(_))));
+    assert!(parent.upgrade().is_some());
+    ui.handle_key(key(KeyCode::Esc), &store);
+    assert!(parent.upgrade().is_none());
 }
 
 #[test]
@@ -182,7 +194,7 @@ fn gpu_popup_distinguishes_unavailable_readings_from_zero_and_reports_partial_fa
     data.devices[0].utilization_percent = None;
     data.warnings.push("gpu002: SSH unavailable".into());
     ui.receive(ActionResult::Gpu {
-        token: *token,
+        token: token.clone(),
         job_id: "123".into(),
         result: Ok(data.clone()),
     });
@@ -193,7 +205,7 @@ fn gpu_popup_distinguishes_unavailable_readings_from_zero_and_reports_partial_fa
     data.devices[0].memory_used_bytes = Some(0);
     data.devices[0].utilization_percent = Some(0.0);
     ui.receive(ActionResult::Gpu {
-        token: *token,
+        token: token.clone(),
         job_id: "123".into(),
         result: Ok(data),
     });
@@ -538,9 +550,7 @@ fn array_partition_edits_keep_the_selected_group_when_detail_shows_a_running_tas
     let store = populated_store();
     let mut ui = Ui::new(Config::default());
     let effects = ui.open_job("123_[0-9%3]", "PENDING", None);
-    let Effect::FetchJob { token, .. } = effects[0] else {
-        panic!("expected detail request");
-    };
+    let token = job_read(&effects);
     let mut value = snapshot("123", "RUNNING");
     value
         .detail
@@ -635,9 +645,7 @@ fn detail_modals_keep_the_original_centered_fraction_and_reach_long_values() {
     let store = populated_store();
     let mut ui = Ui::new(Config::default());
     let effects = ui.open_job("123", "RUNNING", None);
-    let Effect::FetchJob { token, .. } = effects[0] else {
-        panic!("expected detail request");
-    };
+    let token = job_read(&effects);
     let mut value = snapshot("123", "RUNNING");
     value.detail.fields.insert(
         "StdOut".into(),
@@ -935,19 +943,16 @@ fn stale_closed_or_other_job_results_do_not_reopen_or_replace_a_modal() {
     let store = populated_store();
     let mut ui = Ui::new(Config::default());
     let first = ui.open_job("123", "RUNNING", None);
-    let Effect::FetchJob {
-        token: first_token, ..
-    } = first[0]
-    else {
-        panic!("expected a detail fetch");
-    };
+    let first_token = job_read(&first);
     ui.handle_key(key(KeyCode::Esc), &store);
     let second = ui.open_job("456_[0-9]", "PENDING", None);
-    let Effect::FetchJob {
-        token: second_token,
-        ref job_id,
-        ..
-    } = second[0]
+    let [
+        Effect::FetchJob {
+            token: second_token,
+            job_id,
+            ..
+        },
+    ] = second.as_slice()
     else {
         panic!("expected a detail fetch");
     };
@@ -961,7 +966,7 @@ fn stale_closed_or_other_job_results_do_not_reopen_or_replace_a_modal() {
         matches!(ui.modals.last(), Some(Modal::Job(view)) if view.loading && view.id == "456" && view.snapshot.is_none())
     );
     ui.receive(ActionResult::Job {
-        token: second_token,
+        token: second_token.clone(),
         job_id: "456".into(),
         result: Ok(snapshot("456", "PENDING")),
     });
@@ -972,20 +977,52 @@ fn stale_closed_or_other_job_results_do_not_reopen_or_replace_a_modal() {
 }
 
 #[test]
-fn terminal_cache_reuses_samples_and_live_reopen_always_fetches() {
+fn terminal_detail_retries_failed_accounting_and_keeps_successful_results() {
     let store = populated_store();
     let mut ui = Ui::new(Config::default());
-    let effect = ui.open_job("10", "COMPLETED", None);
-    let Effect::FetchJob { token, .. } = effect[0] else {
-        panic!("expected a detail fetch");
-    };
+    let token = job_read(&ui.open_job("10", "COMPLETED", None));
+    let mut failed = snapshot("10", "COMPLETED");
+    failed.note = Some("Efficiency unavailable: accounting timeout".into());
     ui.receive(ActionResult::Job {
         token,
         job_id: "10".into(),
-        result: Ok(snapshot("10", "COMPLETED")),
+        result: Ok(failed.clone()),
+    });
+    ui.handle_key(key(KeyCode::Esc), &store);
+    let retry = ui.open_job("10", "COMPLETED", None);
+    assert!(
+        matches!(retry.as_slice(), [Effect::FetchJob { fallback: Some(detail), .. }] if detail == &failed.detail)
+    );
+    assert!(render(&mut ui, &store, 120, 40).contains("accounting timeout"));
+    let mut recovered = snapshot("10", "COMPLETED");
+    let usage = JobUsage {
+        source: "sacct".into(),
+        ..JobUsage::default()
+    };
+    recovered.usage = Some(usage.clone());
+    ui.receive(ActionResult::Job {
+        token: job_read(&retry),
+        job_id: "10".into(),
+        result: Ok(recovered),
     });
     ui.handle_key(key(KeyCode::Esc), &store);
     assert!(ui.open_job("10", "COMPLETED", None).is_empty());
+    let token = job_read(&ui.handle_key(key(KeyCode::Char('r')), &store));
+    ui.receive(ActionResult::Job {
+        token,
+        job_id: "10".into(),
+        result: Ok(failed),
+    });
+    ui.handle_key(key(KeyCode::Esc), &store);
+    assert!(matches!(
+        ui.open_job("10", "", None).as_slice(),
+        [Effect::FetchJob { .. }]
+    ));
+    let Some(Modal::Job(view)) = ui.modals.last() else {
+        panic!("expected job detail");
+    };
+    assert_eq!(view.snapshot.as_ref().unwrap().usage.as_ref(), Some(&usage));
+    assert!(render(&mut ui, &store, 120, 40).contains("previous accounting result"));
     ui.handle_key(key(KeyCode::Esc), &store);
     let effect = ui.open_job("123_4", "RUNNING", None);
     assert!(matches!(&effect[0], Effect::FetchJob { job_id, .. } if job_id == "123_4"));
@@ -1035,24 +1072,19 @@ fn detail_log_keeps_original_line_numbers_and_editor_handoff_effect() {
     let store = populated_store();
     let mut ui = Ui::new(Config::default());
     let effects = ui.open_job("10", "COMPLETED", None);
-    let Effect::FetchJob { token, .. } = effects[0] else {
-        panic!("expected detail");
-    };
+    let token = job_read(&effects);
     ui.receive(ActionResult::Job {
         token,
         job_id: "10".into(),
         result: Ok(snapshot("10", "COMPLETED")),
     });
     let effects = ui.handle_key(key(KeyCode::Char('o')), &store);
-    let Effect::FetchLog {
-        token, ref path, ..
-    } = effects[0]
-    else {
+    let [Effect::FetchLog { token, path, .. }] = effects.as_slice() else {
         panic!("expected log");
     };
     let path = path.clone();
     ui.receive(ActionResult::Log {
-        token,
+        token: token.clone(),
         result: Ok(Tail {
             lines: vec!["line 900".into(), "line 901".into()],
             first_line: 900,
@@ -1063,14 +1095,14 @@ fn detail_log_keeps_original_line_numbers_and_editor_handoff_effect() {
     let text = render(&mut ui, &store, 120, 24);
     assert!(text.contains("900 │ line 900"));
     let effects = ui.handle_key(key(KeyCode::Char('r')), &store);
-    let Effect::FetchLog { token, .. } = effects[0] else {
+    let [Effect::FetchLog { token, .. }] = effects.as_slice() else {
         panic!("expected reload");
     };
     let loading = render(&mut ui, &store, 120, 24);
     assert!(loading.contains("line 900"));
     assert!(loading.contains("Loading…"));
     ui.receive(ActionResult::Log {
-        token,
+        token: token.clone(),
         result: Err("reload failed".into()),
     });
     let failed = render(&mut ui, &store, 120, 24);

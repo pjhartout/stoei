@@ -71,9 +71,11 @@ impl Workers {
                             perform(work, &client, &config_path, &stopped)
                         }))
                         .unwrap_or_else(|_| {
-                            Event::WorkerError("background worker panicked".into())
+                            Some(Event::WorkerError("background worker panicked".into()))
                         });
-                        if !send_event(&events, event, &stopped) {
+                        if let Some(event) = event
+                            && !send_event(&events, event, &stopped)
+                        {
                             break;
                         }
                     }
@@ -137,8 +139,18 @@ fn perform(
     client: &Client,
     config_path: &std::path::Path,
     stopped: &AtomicBool,
-) -> Event {
-    match work {
+) -> Option<Event> {
+    if let Work::Action(
+        Effect::FetchJob { token, .. }
+        | Effect::FetchNode { token, .. }
+        | Effect::FetchGpu { token, .. }
+        | Effect::FetchLog { token, .. },
+    ) = &work
+        && token.strong_count() == 0
+    {
+        return None;
+    }
+    Some(match work {
         Work::Fetch {
             section,
             generation,
@@ -154,7 +166,7 @@ fn perform(
         Work::Completed(id) => Event::Completed(client.completed_job_record(&id)),
         Work::Available => Event::Available(client.available()),
         Work::Latest => Event::Latest(ReleaseClient::default().latest_cached_with_cancel(stopped)),
-    }
+    })
 }
 
 fn fetch(client: &Client, section: Section, days: u32, force: bool) -> Result<Dataset, String> {
@@ -329,6 +341,70 @@ mod tests {
                 name => panic!("unexpected scheduler command in fake: {name}"),
             }
         }
+    }
+
+    #[test]
+    fn dequeued_work_skips_obsolete_view_reads_and_runs_current_reads_and_writes() {
+        let runner = Arc::new(DetailRunner {
+            calls: Mutex::new(Vec::new()),
+            user: "alice",
+            state: "PENDING",
+        });
+        let client = Client::new(runner.clone(), "alice".into(), PathBuf::new());
+        let stopped = AtomicBool::new(false);
+        let execute = |effect| {
+            perform(
+                Work::Action(effect),
+                &client,
+                std::path::Path::new("unused"),
+                &stopped,
+            )
+        };
+        let job_read = |token| Effect::FetchJob {
+            token,
+            job_id: "123".into(),
+            state: "PENDING".into(),
+            fallback: None,
+        };
+        let view = Arc::new(());
+        let token = Arc::downgrade(&view);
+        let queued = [
+            job_read(token.clone()),
+            Effect::FetchNode {
+                token: token.clone(),
+                name: "node".into(),
+            },
+            Effect::FetchGpu {
+                token: token.clone(),
+                job_id: "123".into(),
+            },
+            Effect::FetchLog {
+                token,
+                path: "output".into(),
+                max_lines: 100,
+            },
+        ];
+        drop(view);
+        for read in queued {
+            assert!(execute(read).is_none());
+        }
+        assert!(runner.calls.lock().unwrap().is_empty());
+
+        let active = Arc::new(());
+        assert!(matches!(
+            execute(job_read(Arc::downgrade(&active))),
+            Some(Event::Action(ActionResult::Job { result: Ok(_), .. }))
+        ));
+        assert!(matches!(
+            execute(Effect::Hold {
+                job_id: "123".into(),
+                hold: true
+            }),
+            Some(Event::Action(ActionResult::Modify { result: Ok(()), .. }))
+        ));
+        let calls = runner.calls.lock().unwrap();
+        assert_eq!(calls.len(), 2);
+        assert_eq!(calls[1].1, ["hold", "123"]);
     }
 
     #[test]
