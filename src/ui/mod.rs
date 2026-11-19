@@ -582,7 +582,10 @@ impl Ui {
         if let Some(row) = self.tables[0].selected() {
             let job = &store.merged_jobs()[row];
             if job.active && !store::is_terminal_state(&job.state) {
-                self.modals.push(Modal::cancel(job.id.clone()));
+                match store::cancellation_target(&job.id) {
+                    Ok(target) => self.modals.push(Modal::cancel(target)),
+                    Err(error) => self.notify(error),
+                }
             }
         }
         Vec::new()

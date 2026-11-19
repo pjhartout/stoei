@@ -171,11 +171,18 @@ fn commands_have_explicit_scopes_formats_and_budgets() {
 }
 
 #[test]
-fn mutations_normalize_array_leaders_and_preserve_single_arguments() {
+fn mutations_preserve_their_target_and_single_argument_boundaries() {
     let runner = Arc::new(FakeRunner::default());
     let client = client(&runner);
-    client.cancel_job("123_[0-99]").unwrap();
-    assert_call(&runner, "scancel", &["123"], 10);
+    for (id, target) in [
+        ("123", "123"),
+        ("123_4", "123_4"),
+        ("123_[5-9,12%3]", "123_[5-9,12]"),
+        ("123_[6-30:2%3]", "123_[6-30:2]"),
+    ] {
+        client.cancel_job(id).unwrap();
+        assert_call(&runner, "scancel", &[target], 10);
+    }
     client.hold_job("123_[0-99]", true).unwrap();
     assert_call(&runner, "scontrol", &["hold", "123"], 10);
     client.hold_job("123_7", false).unwrap();
@@ -190,7 +197,17 @@ fn mutations_normalize_array_leaders_and_preserve_single_arguments() {
         10,
     );
     let calls = runner.calls.lock().unwrap().len();
-    for id in ["", "123_", "123_1_2", "123;evil", "$(whoami)"] {
+    for id in [
+        "",
+        "123_",
+        "123_1_2",
+        "123;evil",
+        "$(whoami)",
+        "123_[4-...]",
+        "123_[6-30:0]",
+        "123_[6:2]",
+        "123_4_[6-7]",
+    ] {
         assert!(client.cancel_job(id).is_err(), "{id}");
     }
     assert!(client.update_job("123", "jObId", "456").is_err());

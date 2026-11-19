@@ -171,7 +171,7 @@ and sort keys are rebound to their `ctrl`-prefixed equivalents (`C-r`, `C-s`,
 | `Enter` | View the selected row's details |
 | `v` | Job details: current GPU utilization and VRAM snapshot |
 | `i` | Enter a job ID to view (Jobs tab) |
-| `c` | Cancel the selected job (Jobs tab) |
+| `c` | Cancel the selected job or array task range (Jobs tab) |
 | `/` | Filter (`col:value` or substring) |
 | `Esc` | Close / clear the filter |
 | `o` | Cycle sort order |

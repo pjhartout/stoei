@@ -15,6 +15,7 @@ pub use journal::{Journal, acct_stamp_path, journal_path};
 pub use parse::*;
 pub use resources::*;
 pub use runner::*;
+pub use selection::cancellation_target;
 pub use time::*;
 pub use types::*;
 pub use usage::*;
