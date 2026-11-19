@@ -1,9 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
+use std::ops::RangeInclusive;
 
 use super::{
-    AllUsersJob, GPUEntry, Node, RunningJob, aggregate_gpu_counts, calculate_total_gpus,
-    expand_node_list, format_gpu_types, is_terminal_state, parse_array_size, parse_gpu_entries,
-    parse_gpu_from_gres, parse_tres_resources,
+    AllUsersJob, Node, RunningJob, aggregate_gpu_counts, calculate_total_gpus, expand_node_list,
+    format_gpu_types, is_terminal_state, parse_array_size, parse_gpu_entries, parse_gpu_from_gres,
+    parse_tres_resources,
 };
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -11,15 +12,36 @@ pub struct PendingPartitionStats {
     pub jobs_count: u64,
     pub cpus: u64,
     pub memory_gb: f64,
-    pub gpus: u64,
     pub gpus_by_type: BTreeMap<String, u64>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub struct GPUTotalAlloc {
+pub struct GpuCapacity {
     pub total: u64,
     pub allocated: u64,
-    pub unavail: u64,
+    pub unavailable: u64,
+    pub unknown: u64,
+}
+
+impl GpuCapacity {
+    pub fn known_free(&self) -> u64 {
+        self.total
+            .saturating_sub(self.unavailable)
+            .saturating_sub(self.unknown)
+            .saturating_sub(self.allocated)
+    }
+
+    fn add_node(&mut self, total: u64, allocated: RangeInclusive<u64>, available: bool) {
+        self.total = self.total.saturating_add(total);
+        if available {
+            self.allocated = self.allocated.saturating_add(*allocated.start());
+            self.unknown = self
+                .unknown
+                .saturating_add(allocated.end() - allocated.start());
+        } else {
+            self.unavailable = self.unavailable.saturating_add(total);
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -31,18 +53,10 @@ pub struct ClusterStats {
     pub allocated_cpus: u64,
     pub total_memory_gb: f64,
     pub allocated_memory_gb: f64,
-    pub total_gpus: u64,
-    pub allocated_gpus: u64,
-    pub unavail_gpus: u64,
-    pub gpus_by_type: BTreeMap<String, GPUTotalAlloc>,
+    pub gpus: GpuCapacity,
+    pub gpus_by_type: BTreeMap<String, GpuCapacity>,
     pub draining_nodes: u64,
     pub offline_nodes: u64,
-    pub pending_jobs_count: u64,
-    pub pending_cpus: u64,
-    pub pending_memory_gb: f64,
-    pub pending_gpus: u64,
-    pub pending_gpus_by_type: BTreeMap<String, u64>,
-    pub pending_by_partition: BTreeMap<String, PendingPartitionStats>,
 }
 
 impl ClusterStats {
@@ -61,20 +75,6 @@ impl ClusterStats {
             self.total_memory_gb,
         )
     }
-    pub fn free_gpus_pct(&self) -> f64 {
-        percent(
-            self.total_gpus.saturating_sub(self.allocated_gpus) as f64,
-            self.total_gpus.saturating_add(self.unavail_gpus) as f64,
-        )
-    }
-    pub fn gpu_type_free_pct(&self, gpu_type: &str) -> f64 {
-        self.gpus_by_type.get(gpu_type).map_or(0.0, |gpu| {
-            percent(
-                gpu.total.saturating_sub(gpu.allocated) as f64,
-                gpu.total.saturating_add(gpu.unavail) as f64,
-            )
-        })
-    }
 }
 
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -85,7 +85,7 @@ pub struct NodeDisplay {
     pub cpus_total: u64,
     pub memory_alloc_gb: f64,
     pub memory_total_gb: f64,
-    pub gpus_alloc: u64,
+    pub gpus_alloc: Option<u64>,
     pub gpus_total: u64,
     pub gpu_types: String,
     pub partitions: String,
@@ -99,8 +99,10 @@ impl NodeDisplay {
     pub fn memory_usage_pct(&self) -> f64 {
         percent(self.memory_alloc_gb, self.memory_total_gb)
     }
-    pub fn gpu_usage_pct(&self) -> f64 {
-        percent(self.gpus_alloc as f64, self.gpus_total as f64)
+    pub fn gpu_usage_pct(&self) -> Option<f64> {
+        self.gpus_alloc
+            .filter(|_| self.gpus_total > 0)
+            .map(|allocated| percent(allocated as f64, self.gpus_total as f64))
     }
 }
 
@@ -180,188 +182,62 @@ pub fn node_offline(state: &str) -> bool {
         .any(|marker| upper.contains(marker))
 }
 
-fn allocated(state: &str) -> bool {
-    state.contains("ALLOCATED") || state.contains("MIXED")
+fn gpu_total(counts: &BTreeMap<String, u64>) -> u64 {
+    counts.values().copied().fold(0, u64::saturating_add)
 }
 
-pub fn node_gpu_model(node: &Node) -> String {
-    let mut models = parse_gpu_from_gres(&node.gres)
-        .into_iter()
-        .filter(|gpu| !gpu.gpu_type.eq_ignore_ascii_case("gpu"));
-    let Some(first) = models.next() else {
-        return String::new();
+fn single_gpu_model(counts: &BTreeMap<String, u64>) -> Option<&String> {
+    counts
+        .keys()
+        .next()
+        .filter(|model| counts.len() == 1 && model.as_str() != "GPU")
+}
+
+fn configured_gpus(node: &Node) -> BTreeMap<String, u64> {
+    let configured = aggregate_gpu_counts(&parse_gpu_entries(&node.cfg_tres), true);
+    if !configured.is_empty() && !configured.contains_key("GPU") {
+        return configured;
+    }
+    let gres = aggregate_gpu_counts(&parse_gpu_from_gres(&node.gres), true);
+    let Some(&total) = configured.get("GPU") else {
+        return gres;
     };
-    if models.all(|gpu| gpu.gpu_type.eq_ignore_ascii_case(&first.gpu_type)) {
-        first.gpu_type.to_ascii_uppercase()
-    } else {
-        String::new()
+    if let Some(model) = single_gpu_model(&gres) {
+        return BTreeMap::from([(model.clone(), total)]);
     }
-}
-
-fn relabel_generic(mut entries: Vec<GPUEntry>, model: &str) -> Vec<GPUEntry> {
-    if !model.is_empty()
-        && !entries
-            .iter()
-            .any(|gpu| !gpu.gpu_type.eq_ignore_ascii_case("gpu"))
-    {
-        for gpu in &mut entries {
-            gpu.gpu_type = model.into();
-        }
+    if !gres.is_empty() && gpu_total(&gres) == total {
+        return gres;
     }
-    entries
+    configured
 }
 
-fn configured_gpus(node: &Node, model: &str) -> Vec<GPUEntry> {
-    let entries = parse_gpu_entries(&node.cfg_tres);
-    if entries.is_empty() {
-        relabel_generic(parse_gpu_from_gres(&node.gres), model)
-    } else {
-        relabel_generic(entries, model)
-    }
+#[derive(Clone, Debug, Default)]
+pub(super) struct NodeInventory {
+    pub rows: Vec<NodeDisplay>,
+    pub models: BTreeMap<String, String>,
+    pub cluster: ClusterStats,
 }
 
-pub fn derive_cluster_stats(nodes: &[Node], jobs: &[AllUsersJob]) -> ClusterStats {
-    let mut stats = ClusterStats::default();
-    for node in nodes {
-        let state = node.state.to_ascii_uppercase();
-        let model = node_gpu_model(node);
-        if node_offline(&state) {
-            stats.offline_nodes += 1;
-            record_gpus(
-                &mut stats,
-                configured_gpus(node, &model),
-                GPUKind::Unavailable,
-            );
-            continue;
-        }
-        let draining = state.contains("DRAIN");
-        if draining {
-            stats.draining_nodes += 1;
-        } else {
-            stats.total_nodes += 1;
-            if state.contains("IDLE") {
-                stats.free_nodes += 1;
-            }
-            stats.total_cpus = stats.total_cpus.saturating_add(number(&node.cpu_tot));
-            stats.total_memory_gb += number(&node.real_mem) as f64 / 1024.0;
-            if allocated(&state) {
-                stats.allocated_nodes += 1;
-            }
-            stats.allocated_cpus = stats.allocated_cpus.saturating_add(number(&node.cpu_alloc));
-            stats.allocated_memory_gb += number(&node.alloc_mem) as f64 / 1024.0;
-        }
-        if draining {
-            record_gpus(
-                &mut stats,
-                configured_gpus(node, &model),
-                GPUKind::Unavailable,
-            );
-            continue;
-        }
-        let total = configured_gpus(node, &model);
-        let allocation = if !node.alloc_tres.is_empty() {
-            relabel_generic(parse_gpu_entries(&node.alloc_tres), &model)
-        } else if node.cfg_tres.is_empty() && allocated(&state) {
-            total.clone()
-        } else {
-            Vec::new()
-        };
-        record_gpus(&mut stats, total, GPUKind::Total);
-        record_gpus(&mut stats, allocation, GPUKind::Allocated);
-    }
-    aggregate_pending(jobs, &mut stats);
-    stats
-}
-
-enum GPUKind {
-    Total,
-    Allocated,
-    Unavailable,
-}
-
-fn record_gpus(stats: &mut ClusterStats, entries: Vec<GPUEntry>, kind: GPUKind) {
-    for (gpu_type, count) in aggregate_gpu_counts(&entries, true) {
-        let gpu = stats.gpus_by_type.entry(gpu_type).or_default();
-        match kind {
-            GPUKind::Total => {
-                gpu.total = gpu.total.saturating_add(count);
-                stats.total_gpus = stats.total_gpus.saturating_add(count);
-            }
-            GPUKind::Allocated => {
-                gpu.allocated = gpu.allocated.saturating_add(count);
-                stats.allocated_gpus = stats.allocated_gpus.saturating_add(count);
-            }
-            GPUKind::Unavailable => {
-                gpu.unavail = gpu.unavail.saturating_add(count);
-                stats.unavail_gpus = stats.unavail_gpus.saturating_add(count);
-            }
-        }
-    }
-}
-
-fn aggregate_pending(jobs: &[AllUsersJob], stats: &mut ClusterStats) {
-    for job in jobs.iter().filter(|job| is_pending_state(&job.state)) {
-        let tasks = parse_array_size(job.id.trim()) as u64;
-        let resources = parse_tres_resources(&job.tres);
-        let partition = if job.partition.trim().is_empty() {
-            "unknown"
-        } else {
-            job.partition.trim()
-        };
-        let group = stats
-            .pending_by_partition
-            .entry(partition.into())
-            .or_default();
-        stats.pending_jobs_count = stats.pending_jobs_count.saturating_add(tasks);
-        group.jobs_count = group.jobs_count.saturating_add(tasks);
-        let cpus = resources.cpus.saturating_mul(tasks);
-        stats.pending_cpus = stats.pending_cpus.saturating_add(cpus);
-        group.cpus = group.cpus.saturating_add(cpus);
-        let memory = resources.memory_gb * tasks as f64;
-        stats.pending_memory_gb += memory;
-        group.memory_gb += memory;
-        for (gpu_type, count) in aggregate_gpu_counts(&resources.gpus, true) {
-            let count = count.saturating_mul(tasks);
-            stats.pending_gpus = stats.pending_gpus.saturating_add(count);
-            group.gpus = group.gpus.saturating_add(count);
-            add_count(&mut stats.pending_gpus_by_type, gpu_type.clone(), count);
-            add_count(&mut group.gpus_by_type, gpu_type, count);
-        }
-    }
-}
-
-pub fn derive_node_displays(nodes: &[Node]) -> Vec<NodeDisplay> {
-    nodes
-        .iter()
-        .filter(|node| !node.name.trim().is_empty())
-        .map(|node| {
-            let state = if node.state.trim().is_empty() {
-                "UNKNOWN"
-            } else {
-                node.state.trim()
-            };
-            let model = node_gpu_model(node);
-            let total = configured_gpus(node, &model);
-            let gpus_total = calculate_total_gpus(&total, true);
-            let gpus_alloc = if node.alloc_tres.is_empty() {
-                if allocated(&state.to_ascii_uppercase()) {
-                    gpus_total
-                } else {
-                    0
-                }
-            } else {
-                calculate_total_gpus(&parse_gpu_entries(&node.alloc_tres), true)
-            };
-            NodeDisplay {
+impl NodeInventory {
+    pub fn from_nodes(nodes: &[Node]) -> Self {
+        let mut inventory = Self::default();
+        for node in nodes {
+            let state = node.state.trim();
+            let state = if state.is_empty() { "UNKNOWN" } else { state };
+            let upper = state.to_ascii_uppercase();
+            let configured = configured_gpus(node);
+            let allocated = crate::slurm::reported_gpu_counts(&node.alloc_tres)
+                .or_else(|| (upper.split('+').next() == Some("IDLE")).then(BTreeMap::new));
+            let row = NodeDisplay {
                 name: node.name.trim().into(),
                 state: state.into(),
                 cpus_alloc: number(&node.cpu_alloc),
                 cpus_total: number(&node.cpu_tot),
                 memory_alloc_gb: number(&node.alloc_mem) as f64 / 1024.0,
                 memory_total_gb: number(&node.real_mem) as f64 / 1024.0,
-                gpus_alloc,
-                gpus_total,
-                gpu_types: format_gpu_counts(&aggregate_gpu_counts(&total, true)),
+                gpus_alloc: allocated.as_ref().map(gpu_total),
+                gpus_total: gpu_total(&configured),
+                gpu_types: format_gpu_types(&configured),
                 partitions: node
                     .fields
                     .get("Partitions")
@@ -369,24 +245,96 @@ pub fn derive_node_displays(nodes: &[Node]) -> Vec<NodeDisplay> {
                     .cloned()
                     .unwrap_or_else(|| "N/A".into()),
                 reason: node.reason.trim().into(),
+            };
+            inventory
+                .cluster
+                .add_node(&row, &upper, &configured, allocated.as_ref());
+            if !row.name.is_empty() {
+                if let Some(model) = single_gpu_model(&configured) {
+                    inventory.models.insert(row.name.clone(), model.clone());
+                }
+                inventory.rows.push(row);
             }
-        })
-        .collect()
+        }
+        inventory
+    }
 }
 
-pub fn node_gpu_models(nodes: &[Node]) -> BTreeMap<String, String> {
-    nodes
-        .iter()
-        .filter_map(|node| {
-            let model = node_gpu_model(node);
-            (!node.name.trim().is_empty() && !model.is_empty())
-                .then(|| (node.name.trim().into(), model))
-        })
-        .collect()
+impl ClusterStats {
+    fn add_node(
+        &mut self,
+        row: &NodeDisplay,
+        state: &str,
+        configured: &BTreeMap<String, u64>,
+        allocated: Option<&BTreeMap<String, u64>>,
+    ) {
+        let offline = node_offline(state);
+        let draining = state.contains("DRAIN");
+        let available = !offline && !draining;
+        let total = row.gpus_total;
+        let bounds = row.gpus_alloc.map_or(0..=total, |n| n..=n);
+        self.gpus.add_node(total, bounds.clone(), available);
+        for (model, &count) in configured {
+            let model_bounds = if configured.len() == 1 {
+                bounds.clone()
+            } else if let Some(counts) = allocated {
+                if let Some(&generic) = counts.get("GPU") {
+                    // A generic allocation can occupy at most the installed count of each model.
+                    generic.min(total).saturating_sub(total - count)..=generic.min(count)
+                } else {
+                    let n = counts.get(model).copied().unwrap_or_default();
+                    n..=n
+                }
+            } else {
+                0..=count
+            };
+            self.gpus_by_type
+                .entry(model.clone())
+                .or_default()
+                .add_node(count, model_bounds, available);
+        }
+        if offline {
+            self.offline_nodes += 1;
+            return;
+        }
+        if draining {
+            self.draining_nodes += 1;
+            return;
+        }
+        self.total_nodes += 1;
+        self.free_nodes += u64::from(state.contains("IDLE"));
+        self.allocated_nodes += u64::from(state.contains("ALLOCATED") || state.contains("MIXED"));
+        self.total_cpus = self.total_cpus.saturating_add(row.cpus_total);
+        self.allocated_cpus = self.allocated_cpus.saturating_add(row.cpus_alloc);
+        self.total_memory_gb += row.memory_total_gb;
+        self.allocated_memory_gb += row.memory_alloc_gb;
+    }
 }
 
-pub fn format_gpu_counts(counts: &BTreeMap<String, u64>) -> String {
-    format_gpu_types(counts)
+pub fn aggregate_pending_queue(jobs: &[AllUsersJob]) -> BTreeMap<String, PendingPartitionStats> {
+    let mut queue = BTreeMap::<String, PendingPartitionStats>::new();
+    for job in jobs.iter().filter(|job| is_pending_state(&job.state)) {
+        let tasks = parse_array_size(job.id.trim()) as u64;
+        let resources = parse_tres_resources(&job.tres);
+        let partition = match job.partition.trim() {
+            "" => "unknown",
+            name => name,
+        };
+        let group = queue.entry(partition.into()).or_default();
+        group.jobs_count = group.jobs_count.saturating_add(tasks);
+        group.cpus = group
+            .cpus
+            .saturating_add(resources.cpus.saturating_mul(tasks));
+        group.memory_gb += resources.memory_gb * tasks as f64;
+        for (gpu_type, count) in aggregate_gpu_counts(&resources.gpus, true) {
+            add_count(
+                &mut group.gpus_by_type,
+                gpu_type,
+                count.saturating_mul(tasks),
+            );
+        }
+    }
+    queue
 }
 
 fn add_count(counts: &mut BTreeMap<String, u64>, key: String, count: u64) {
@@ -457,7 +405,7 @@ pub fn aggregate_running_job_stats(
 
 fn finish_user_stats(username: String, mut user: UserAccumulator) -> UserStats {
     user.stats.username = username;
-    user.stats.gpu_types = format_gpu_counts(&user.gpu_types);
+    user.stats.gpu_types = format_gpu_types(&user.gpu_types);
     user.stats.total_nodes = user.node_names.len() as u64;
     user.stats.node_names = user.node_names.into_iter().collect::<Vec<_>>().join(",");
     user.stats.array_count = user.array_ids.len();
@@ -554,7 +502,7 @@ pub fn aggregate_pending_user_stats(jobs: &[AllUsersJob]) -> Vec<UserPendingStat
                 },
             )| {
                 stats.username = username;
-                stats.pending_gpu_types = format_gpu_counts(&gpus);
+                stats.pending_gpu_types = format_gpu_types(&gpus);
                 stats.pending_reasons = format_pending_reasons(&reasons);
                 stats
             },

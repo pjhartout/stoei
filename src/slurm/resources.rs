@@ -45,23 +45,36 @@ pub fn parse_tres_pairs(raw: &str) -> BTreeMap<String, String> {
 }
 
 pub fn parse_gpu_entries(raw: &str) -> Vec<GPUEntry> {
-    raw.split(',')
-        .filter_map(|part| {
-            let (key, count) = part.trim().split_once('=')?;
-            let lower = key.to_ascii_lowercase();
-            let gpu_type = if lower == "gres/gpu" {
-                "gpu"
-            } else if lower.starts_with("gres/gpu:") {
-                &key[9..]
-            } else {
-                return None;
-            };
-            Some(GPUEntry {
-                gpu_type: gpu_type.into(),
-                count: count.parse().ok()?,
-            })
-        })
-        .collect()
+    gpu_tres_entries(raw).filter_map(Result::ok).collect()
+}
+
+pub(crate) fn reported_gpu_counts(raw: &str) -> Option<BTreeMap<String, u64>> {
+    if !raw.contains('=') {
+        return None;
+    }
+    // A complete CPU-only allocation reports zero GPUs. An unreadable GPU count is unknown.
+    let gpus = gpu_tres_entries(raw).collect::<Result<Vec<_>, _>>().ok()?;
+    Some(aggregate_gpu_counts(&gpus, true))
+}
+
+fn gpu_tres_entries(
+    raw: &str,
+) -> impl Iterator<Item = Result<GPUEntry, std::num::ParseIntError>> + '_ {
+    raw.split(',').filter_map(|part| {
+        let (key, count) = part.trim().split_once('=')?;
+        let lower = key.to_ascii_lowercase();
+        let gpu_type = if lower == "gres/gpu" {
+            "gpu"
+        } else if lower.starts_with("gres/gpu:") {
+            &key[9..]
+        } else {
+            return None;
+        };
+        Some(count.trim().parse().map(|count| GPUEntry {
+            gpu_type: gpu_type.into(),
+            count,
+        }))
+    })
 }
 
 pub fn parse_gpu_from_gres(raw: &str) -> Vec<GPUEntry> {

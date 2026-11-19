@@ -10,8 +10,8 @@ use ratatui::widgets::{Cell, Row, Table};
 
 use crate::log::LogEntry;
 use crate::store::{
-    self, FairShareEntry, MergedJob, NodeDisplay, RankedPriority, RankedShare, UserPendingStats,
-    UserStats,
+    self, FairShareEntry, MergedJob, NodeDisplay, RankedPriority, RankedShare, Section,
+    UserPendingStats, UserStats,
 };
 
 use super::format::clean;
@@ -118,6 +118,18 @@ pub(super) enum Source<'a> {
 }
 
 impl Source<'_> {
+    pub fn depends_on(&self, changed: Section) -> bool {
+        match self {
+            Self::Jobs(_) => matches!(changed, Section::RunningJobs | Section::History),
+            Self::Nodes(_) => changed == Section::Nodes,
+            Self::Running(_) => matches!(changed, Section::AllUsersJobs | Section::Nodes),
+            Self::Pending(_) => changed == Section::AllUsersJobs,
+            Self::Shares(..) | Self::Accounts(..) => changed == Section::FairShare,
+            Self::Priority(_) | Self::MyPriority(..) => changed == Section::PendingPrio,
+            Self::Logs(_) => false,
+        }
+    }
+
     pub fn len(&self) -> usize {
         match self {
             Self::Jobs(rows) => rows.len(),
@@ -210,9 +222,7 @@ impl Source<'_> {
             Self::Nodes(rows) if column == 1 => store::state_role(&rows[index].state),
             Self::Nodes(rows) if column == 3 => usage_role(rows[index].cpu_usage_pct()),
             Self::Nodes(rows) if column == 5 => usage_role(rows[index].memory_usage_pct()),
-            Self::Nodes(rows) if column == 7 && rows[index].gpus_total > 0 => {
-                usage_role(rows[index].gpu_usage_pct())
-            }
+            Self::Nodes(rows) if column == 7 => rows[index].gpu_usage_pct().map_or("", usage_role),
             Self::Shares(rows, false) if column == 3 || column == 7 => rows[index].band.role(),
             Self::Shares(rows, true) | Self::Accounts(rows, _) if column == 5 => {
                 rows[index].band.role()
@@ -467,8 +477,13 @@ fn job_cells(row: &MergedJob, today: NaiveDate) -> Vec<String> {
 fn node_cells(row: &NodeDisplay) -> Vec<String> {
     let (gpus, gpu_percent, gpu_types) = if row.gpus_total > 0 {
         (
-            format!("{}/{}", row.gpus_alloc, row.gpus_total),
-            format!("{:.1}%", row.gpu_usage_pct()),
+            format!(
+                "{}/{}",
+                row.gpus_alloc.map_or_else(|| "?".into(), |n| n.to_string()),
+                row.gpus_total
+            ),
+            row.gpu_usage_pct()
+                .map_or_else(|| "N/A".into(), |pct| format!("{pct:.1}%")),
             na_if_empty(&row.gpu_types),
         )
     } else {
@@ -855,7 +870,7 @@ mod tests {
             cpus_total: 64,
             memory_alloc_gb: 128.0,
             memory_total_gb: 256.0,
-            gpus_alloc: 2,
+            gpus_alloc: Some(2),
             gpus_total: 8,
             gpu_types: "8x H200".into(),
             partitions: "gpu".into(),

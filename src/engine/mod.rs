@@ -385,10 +385,11 @@ impl Runtime {
             } => self.process_data(section, generation, history_days, result),
             Event::Action(result) => self.process_action(result)?,
             Event::Completed(Ok(Some(job))) => {
-                if let Err(err) = self.store.add_completed_job(job) {
-                    self.notify(err);
+                match self.store.add_completed_job(job) {
+                    Ok(true) => self.ui.dataset_changed(&self.store, Section::History),
+                    Ok(false) => {}
+                    Err(err) => self.notify(err),
                 }
-                self.ui.observe_data(&self.store);
                 self.dirty = true;
             }
             Event::Completed(Err(err)) => self
@@ -501,7 +502,9 @@ impl Runtime {
             }
             _ => self.request_history(true),
         }
-        self.ui.observe_data(&self.store);
+        if let Some(changed) = outcome.changed {
+            self.ui.dataset_changed(&self.store, changed);
+        }
         self.dirty = true;
     }
 

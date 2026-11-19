@@ -35,227 +35,141 @@ fn apply(store: &mut Store, data: Dataset, now: Instant) -> ApplyOutcome {
 }
 
 #[test]
-fn stale_success_and_failure_leave_loading_data_and_health_unchanged() {
+fn obsolete_results_cannot_create_or_replace_a_snapshot() {
     let now = Instant::now();
+    let section = Section::RunningJobs;
     let mut store = Store::new();
-    apply(
-        &mut store,
-        Dataset::RunningJobs(vec![running("1", "RUNNING")]),
-        now,
+    let first = store.begin(section);
+    let current = store.begin(section);
+    let jobs = Dataset::RunningJobs(vec![running("1", "RUNNING")]);
+    assert!(!store.apply(section, first, Ok(jobs.clone()), now).accepted);
+    assert!(!store.has_data(section));
+    assert!(!store.settled(section));
+    assert_eq!(
+        store.apply(section, current, Ok(jobs), now).changed,
+        Some(section)
     );
-    let stale = store.begin(Section::RunningJobs);
-    let current = store.begin(Section::RunningJobs);
-    for result in [
-        Ok(Dataset::RunningJobs(vec![running("2", "PENDING")])),
-        Err("outage".into()),
-    ] {
-        let outcome = store.apply(
-            Section::RunningJobs,
-            stale,
-            result,
-            now + Duration::from_secs(2),
-        );
+
+    let stale = store.begin(section);
+    let current = store.begin(section);
+    let later = now + Duration::from_secs(2);
+    for result in [Ok(Dataset::RunningJobs(Vec::new())), Err("outage".into())] {
+        let outcome = store.apply(section, stale, result, later);
         assert!(!outcome.accepted);
+        assert_eq!(outcome.changed, None);
         assert!(outcome.notification.is_none());
         assert!(outcome.completed_ids.is_empty());
-        assert_eq!(store.meta(Section::RunningJobs).state, State::Loading);
         assert_eq!(store.running_jobs[0].id, "1");
+        assert_eq!(store.generation(section), current);
+        assert_eq!(store.meta(section).state, State::Loading);
+        assert_eq!(store.meta(section).last_success, Some(now));
+        assert_eq!(store.meta(section).last_updated, Some(now));
     }
     let outcome = store.apply(
-        Section::RunningJobs,
+        section,
         current,
         Ok(Dataset::RunningJobs(Vec::new())),
-        now,
+        later,
     );
+    assert_eq!(outcome.changed, Some(section));
     assert_eq!(outcome.completed_ids, ["1"]);
     assert!(outcome.notification.is_none());
     assert!(!store.any_loading());
 }
 
 #[test]
-fn recurring_failure_keeps_data_and_notifies_only_edges() {
+fn recurring_refresh_errors_preserve_the_snapshot_and_notify_once_until_recovery() {
     let now = Instant::now();
+    let section = Section::RunningJobs;
     let mut store = Store::new();
-    assert!(!store.settled(Section::RunningJobs));
-    apply(
-        &mut store,
-        Dataset::RunningJobs(vec![running("1", "RUNNING")]),
-        now,
-    );
-    for expected in [true, false, false] {
-        let generation = store.begin(Section::RunningJobs);
-        let outcome = store.apply(
-            Section::RunningJobs,
-            generation,
-            Err("squeue unavailable".into()),
-            now,
-        );
-        assert_eq!(outcome.notification.is_some(), expected);
-        assert_eq!(store.running_jobs[0].id, "1");
+    let jobs = Dataset::RunningJobs(vec![running("1", "RUNNING")]);
+    apply(&mut store, jobs.clone(), now);
+    for offset in 1..=3 {
+        let when = now + Duration::from_secs(offset);
+        let generation = store.begin(section);
+        assert_eq!(store.meta(section).state, State::Loading);
+        assert!(store.has_data(section));
+        let outcome = store.apply(section, generation, Err("squeue unavailable".into()), when);
+        assert_eq!(outcome.notification.is_some(), offset == 1);
+        assert_eq!(outcome.changed, None);
         assert!(outcome.completed_ids.is_empty());
-        assert_eq!(store.meta(Section::RunningJobs).state, State::Error);
+        assert_eq!(store.running_jobs[0].id, "1");
+        assert_eq!(store.meta(section).state, State::Error);
+        assert_eq!(store.meta(section).last_success, Some(now));
+        assert_eq!(store.meta(section).last_updated, Some(when));
     }
-    assert!(store.settled(Section::RunningJobs));
-    let recovery = apply(
-        &mut store,
-        Dataset::RunningJobs(vec![running("1", "RUNNING")]),
-        now,
-    );
+    let when = now + Duration::from_secs(4);
+    let recovery = apply(&mut store, jobs.clone(), when);
     assert_eq!(
         recovery.notification.as_deref(),
         Some("running_jobs: data refresh recovered")
     );
-    assert!(store.meta(Section::RunningJobs).err.is_none());
+    assert_eq!(recovery.changed, None);
+    assert_eq!(store.meta(section).last_success, Some(when));
+    assert!(store.meta(section).err.is_none());
+    assert!(apply(&mut store, jobs, when).notification.is_none());
+    let generation = store.begin(section);
     assert!(
-        apply(&mut store, Dataset::RunningJobs(Vec::new()), now)
+        store
+            .apply(section, generation, Err("down".into()), when)
             .notification
-            .is_none()
+            .is_some()
     );
 }
 
 #[test]
-fn first_failure_settles_and_health_sections_are_independent() {
+fn sections_become_ready_independently_including_successful_empty_snapshots() {
     let now = Instant::now();
     let mut store = Store::new();
     for section in [Section::Nodes, Section::History] {
         let generation = store.begin(section);
-        let outcome = store.apply(section, generation, Err("down".into()), now);
-        assert!(outcome.notification.is_some());
+        assert!(
+            store
+                .apply(section, generation, Err("down".into()), now)
+                .notification
+                .is_some()
+        );
         assert!(store.settled(section));
         assert!(!store.has_data(section));
-        assert_eq!(store.meta(section).last_success, None);
     }
+    assert_eq!(
+        apply(&mut store, Dataset::AllUsersJobs(Vec::new()), now).changed,
+        None
+    );
+    assert_eq!(store.meta(Section::AllUsersJobs).last_success, Some(now));
+    assert!(!store.has_data(Section::Nodes));
     let outcome = apply(&mut store, Dataset::Nodes(Vec::new()), now);
     assert!(outcome.notification.unwrap().contains("recovered"));
+    assert_eq!(outcome.changed, None);
+    assert_eq!(store.meta(Section::Nodes).last_success, Some(now));
     assert_eq!(store.meta(Section::History).state, State::Error);
 }
 
 #[test]
-fn successful_empty_snapshots_are_ready_independently() {
+fn invalid_refreshes_report_the_reason_and_preserve_the_previous_dataset() {
     let now = Instant::now();
-    let mut store = Store::new();
-    assert!(!store.has_data(Section::Nodes));
-    assert!(!store.has_data(Section::AllUsersJobs));
-    apply(&mut store, Dataset::AllUsersJobs(Vec::new()), now);
-    assert!(store.has_data(Section::AllUsersJobs));
-    assert!(!store.has_data(Section::Nodes));
-    apply(&mut store, Dataset::Nodes(Vec::new()), now);
-    assert!(store.has_data(Section::Nodes));
-    assert_eq!(store.meta(Section::Nodes).last_success, Some(now));
-    assert_eq!(store.meta(Section::AllUsersJobs).last_success, Some(now));
-}
-
-#[test]
-fn successful_snapshot_survives_refresh_and_error_without_freshness_reset() {
-    let now = Instant::now();
-    let mut store = Store::new();
-    let node = Node {
-        name: "n01".into(),
-        state: "IDLE".into(),
-        ..Node::default()
-    };
-    apply(&mut store, Dataset::Nodes(vec![node.clone()]), now);
-    let generation = store.begin(Section::Nodes);
-    assert!(store.has_data(Section::Nodes));
-    assert_eq!(store.meta(Section::Nodes).state, State::Loading);
-    let failed_at = now + Duration::from_secs(2);
-    store.apply(
-        Section::Nodes,
-        generation,
-        Err("controller unavailable".into()),
-        failed_at,
-    );
-    assert!(store.has_data(Section::Nodes));
-    assert_eq!(store.nodes, [node]);
-    assert_eq!(store.meta(Section::Nodes).state, State::Error);
-    assert_eq!(store.meta(Section::Nodes).last_updated, Some(failed_at));
-    assert_eq!(store.meta(Section::Nodes).last_success, Some(now));
-    let recovered_at = now + Duration::from_secs(4);
-    apply(&mut store, Dataset::Nodes(Vec::new()), recovered_at);
-    assert!(store.has_data(Section::Nodes));
-    assert_eq!(store.meta(Section::Nodes).last_success, Some(recovered_at));
-}
-
-#[test]
-fn stale_results_cannot_create_or_replace_a_successful_snapshot() {
-    let now = Instant::now();
-    let mut store = Store::new();
-    let stale = store.begin(Section::Nodes);
-    let current = store.begin(Section::Nodes);
-    let result = store.apply(Section::Nodes, stale, Ok(Dataset::Nodes(Vec::new())), now);
-    assert!(!result.accepted);
-    assert!(!store.has_data(Section::Nodes));
-    let succeeded_at = now + Duration::from_secs(1);
-    store.apply(
-        Section::Nodes,
-        current,
-        Ok(Dataset::Nodes(Vec::new())),
-        succeeded_at,
-    );
-    let stale = store.begin(Section::Nodes);
-    let current = store.begin(Section::Nodes);
-    for result in [Ok(Dataset::Nodes(Vec::new())), Err("outage".into())] {
-        let outcome = store.apply(Section::Nodes, stale, result, now + Duration::from_secs(2));
-        assert!(!outcome.accepted);
-        assert!(store.has_data(Section::Nodes));
-        assert_eq!(store.meta(Section::Nodes).last_success, Some(succeeded_at));
-        assert_eq!(store.meta(Section::Nodes).state, State::Loading);
-        assert_eq!(store.generation(Section::Nodes), current);
+    for (data, reason) in [
+        (Dataset::Nodes(Vec::new()), "received nodes"),
+        (
+            Dataset::RunningJobs(vec![RunningJob::default(); MAX_ROWS + 1]),
+            "row limit",
+        ),
+    ] {
+        let mut store = Store::new();
+        let section = Section::RunningJobs;
+        apply(
+            &mut store,
+            Dataset::RunningJobs(vec![running("1", "RUNNING")]),
+            now,
+        );
+        let generation = store.begin(section);
+        let outcome = store.apply(section, generation, Ok(data), now);
+        assert!(outcome.notification.is_some());
+        assert_eq!(outcome.changed, None);
+        assert_eq!(store.meta(section).state, State::Error);
+        assert!(store.meta(section).err.as_ref().unwrap().contains(reason));
+        assert_eq!(store.running_jobs[0].id, "1");
     }
-}
-
-#[test]
-fn mismatched_dataset_is_rejected_without_replacing_old_rows() {
-    let now = Instant::now();
-    let mut store = Store::new();
-    apply(
-        &mut store,
-        Dataset::RunningJobs(vec![running("1", "RUNNING")]),
-        now,
-    );
-    let generation = store.begin(Section::RunningJobs);
-    store.apply(
-        Section::RunningJobs,
-        generation,
-        Ok(Dataset::Nodes(Vec::new())),
-        now,
-    );
-    assert_eq!(store.running_jobs[0].id, "1");
-    assert_eq!(store.meta(Section::RunningJobs).state, State::Error);
-    assert!(
-        store
-            .meta(Section::RunningJobs)
-            .err
-            .as_ref()
-            .unwrap()
-            .contains("received nodes")
-    );
-}
-
-#[test]
-fn oversized_dataset_fails_explicitly_and_keeps_previous_snapshot() {
-    let now = Instant::now();
-    let mut store = Store::new();
-    apply(
-        &mut store,
-        Dataset::RunningJobs(vec![running("1", "RUNNING")]),
-        now,
-    );
-    let outcome = apply(
-        &mut store,
-        Dataset::RunningJobs(vec![RunningJob::default(); MAX_ROWS + 1]),
-        now,
-    );
-    assert!(outcome.notification.is_some());
-    assert_eq!(store.running_jobs[0].id, "1");
-    assert!(
-        store
-            .meta(Section::RunningJobs)
-            .err
-            .as_ref()
-            .unwrap()
-            .contains("row limit")
-    );
 }
 
 #[test]
@@ -271,7 +185,8 @@ fn completion_overlay_survives_stale_journal_and_is_absorbed_by_terminal_record(
         elapsed: "00:05:00".into(),
         ..history("1", "COMPLETED")
     };
-    store.add_completed_job(completion.clone()).unwrap();
+    assert!(store.add_completed_job(completion.clone()).unwrap());
+    assert!(!store.add_completed_job(completion.clone()).unwrap());
     assert_eq!(store.history_jobs.len(), 2);
     assert_eq!(store.history_jobs[0].state, "COMPLETED");
     apply(&mut store, history_data(vec![history("1", "RUNNING")]), now);
@@ -393,54 +308,70 @@ fn gpu_node(name: &str, state: &str, model: &str, total: u64, allocated: u64) ->
 }
 
 #[test]
-fn cluster_excludes_offline_capacity_but_retains_gpu_hardware_denominator() {
-    let nodes = [
-        gpu_node("a", "IDLE", "h200", 4, 0),
-        gpu_node("b", "DOWN", "a100", 8, 0),
-        gpu_node("c", "DOWN+DRAIN+NOT_RESPONDING", "h100", 2, 0),
-    ];
-    let stats = derive_cluster_stats(&nodes, &[]);
-    assert_eq!(
-        (
-            stats.total_nodes,
-            stats.free_nodes,
-            stats.offline_nodes,
-            stats.draining_nodes
-        ),
-        (1, 1, 2, 0)
-    );
-    assert_eq!(
-        (stats.total_cpus, stats.total_memory_gb, stats.total_gpus),
-        (64, 4.0, 4)
-    );
-    assert_eq!(stats.unavail_gpus, 10);
-    assert_eq!(stats.gpu_type_free_pct("H200"), 100.0);
-    assert_eq!(stats.gpu_type_free_pct("A100"), 0.0);
-    assert!((stats.free_gpus_pct() - 400.0 / 14.0).abs() < 1e-9);
+fn node_and_cluster_views_share_known_and_missing_gpu_allocations() {
+    let now = Instant::now();
+    let mut store = Store::new();
+    for (state, cfg, alloc, expected) in [
+        ("MIXED", "gres/gpu=4", "cpu=48,gres/gpu=3", Some(3)),
+        ("MIXED", "gres/gpu=4", "cpu=8", Some(0)),
+        ("ALLOCATED", "", "gres/gpu=0", Some(0)),
+        ("IDLE", "", "", Some(0)),
+        ("MIXED", "gres/gpu=4", "", None),
+        ("MIXED", "", "(null)", None),
+        ("MIXED", "", "cpu=8,gres/gpu=N/A", None),
+    ] {
+        let node = Node {
+            name: "gpu1".into(),
+            state: state.into(),
+            gres: "gpu:l40s:4(S:0)".into(),
+            cfg_tres: cfg.into(),
+            alloc_tres: alloc.into(),
+            ..Node::default()
+        };
+        apply(&mut store, Dataset::Nodes(vec![node]), now);
+        let row = &store.node_displays()[0];
+        let cluster = store.cluster_stats();
+        assert_eq!(row.gpu_types, "4x L40S");
+        assert_eq!(row.gpus_alloc, expected, "{state} {cfg} {alloc}");
+        assert_eq!(row.gpu_usage_pct(), expected.map(|n| n as f64 * 25.0));
+        assert_eq!(cluster.gpus, cluster.gpus_by_type["L40S"]);
+        assert_eq!(cluster.gpus.total, row.gpus_total);
+        assert_eq!(cluster.gpus.allocated, expected.unwrap_or(0));
+        assert_eq!(cluster.gpus.unknown, if expected.is_none() { 4 } else { 0 });
+        assert_eq!(cluster.gpus.known_free(), expected.map_or(0, |n| 4 - n));
+    }
+
+    for (allocation, used, a100, h200) in [
+        ("gres/gpu=1", 1, (1, 1), (1, 1)),
+        ("gres/gpu=3", 3, (0, 1), (0, 1)),
+        ("gres/gpu=1,gres/gpu:h200=1", 1, (2, 0), (1, 0)),
+    ] {
+        let node = Node {
+            name: "gpu2".into(),
+            state: "MIXED".into(),
+            cfg_tres: "gres/gpu=4".into(),
+            gres: "gpu:a100:2,gpu:h200:2".into(),
+            alloc_tres: allocation.into(),
+            ..Node::default()
+        };
+        apply(&mut store, Dataset::Nodes(vec![node]), now);
+        assert_eq!(store.node_displays()[0].gpus_alloc, Some(used));
+        assert_eq!(store.cluster_stats().gpus.known_free(), 4 - used);
+        for (model, expected) in [("A100", a100), ("H200", h200)] {
+            let capacity = &store.cluster_stats().gpus_by_type[model];
+            assert_eq!(
+                (capacity.known_free(), capacity.unknown),
+                expected,
+                "{allocation} {model}"
+            );
+        }
+    }
 }
 
 #[test]
-fn draining_mig_cards_are_unavailable_and_generic_counts_do_not_duplicate() {
-    let node = Node {
-        state: "IDLE+DRAIN".into(),
-        cfg_tres: "gres/gpu=22,gres/gpu:h100_pcie_1g.10gb=16,gres/gpu:h100_pcie_2g.20gb=6".into(),
-        gres: "gpu:h100_pcie_1g.10gb:16,gpu:h100_pcie_2g.20gb:6".into(),
-        ..Node::default()
-    };
-    let stats = derive_cluster_stats(&[node], &[]);
-    assert_eq!(
-        (stats.total_gpus, stats.allocated_gpus, stats.unavail_gpus),
-        (0, 0, 22)
-    );
-    assert_eq!(stats.gpus_by_type["H100_PCIE_1G.10GB"].unavail, 16);
-    assert_eq!(stats.gpus_by_type["H100_PCIE_2G.20GB"].unavail, 6);
-    assert!(!stats.gpus_by_type.contains_key("GPU"));
-}
-
-#[test]
-fn drained_allocations_do_not_consume_schedulable_node_cpu_or_memory_capacity() {
+fn unavailable_nodes_keep_their_reported_usage_outside_schedulable_capacity() {
     for state in ["ALLOCATED+DRAIN", "MIXED+DRAIN"] {
-        let nodes = [
+        let nodes = vec![
             Node {
                 cpu_alloc: "0".into(),
                 alloc_mem: "0".into(),
@@ -451,63 +382,54 @@ fn drained_allocations_do_not_consume_schedulable_node_cpu_or_memory_capacity() 
                 alloc_mem: "2048".into(),
                 ..gpu_node("draining", state, "a100", 8, 4)
             },
+            gpu_node("down", "DOWN", "a100", 8, 0),
+            Node {
+                state: "DOWN+DRAIN+NOT_RESPONDING".into(),
+                cfg_tres: "gres/gpu=22,gres/gpu:h100_pcie_1g.10gb=16,gres/gpu:h100_pcie_2g.20gb=6"
+                    .into(),
+                ..Node::default()
+            },
         ];
-        let stats = derive_cluster_stats(&nodes, &[]);
+        let mut store = Store::new();
+        apply(&mut store, Dataset::Nodes(nodes), Instant::now());
+        let stats = store.cluster_stats();
         assert_eq!(
             (stats.total_nodes, stats.free_nodes, stats.allocated_nodes),
             (1, 1, 0)
         );
-        assert_eq!((stats.draining_nodes, stats.offline_nodes), (1, 0));
+        assert_eq!((stats.draining_nodes, stats.offline_nodes), (1, 2));
         assert_eq!((stats.total_cpus, stats.allocated_cpus), (64, 0));
-        assert_eq!(stats.free_cpus_pct(), 100.0);
         assert_eq!(
             (stats.total_memory_gb, stats.allocated_memory_gb),
             (4.0, 0.0)
         );
-        assert_eq!(stats.free_memory_pct(), 100.0);
         assert_eq!(
-            (stats.total_gpus, stats.allocated_gpus, stats.unavail_gpus),
-            (4, 0, 8)
+            (stats.free_cpus_pct(), stats.free_memory_pct()),
+            (100.0, 100.0)
         );
-        assert_eq!(stats.gpus_by_type["A100"].unavail, 8);
-        assert_eq!(stats.gpu_type_free_pct("H200"), 100.0);
-        assert!((stats.free_gpus_pct() - 100.0 / 3.0).abs() < 1e-9);
-        let rows = derive_node_displays(&nodes);
-        assert_eq!(rows[1].cpus_alloc, 32);
-        assert_eq!(rows[1].memory_alloc_gb, 2.0);
-        assert_eq!(rows[1].gpus_alloc, 4);
+        assert_eq!(
+            stats.gpus,
+            GpuCapacity {
+                total: 42,
+                unavailable: 38,
+                ..Default::default()
+            }
+        );
+        assert_eq!(stats.gpus_by_type["H200"].known_free(), 4);
+        assert_eq!(stats.gpus_by_type["A100"].unavailable, 16);
+        assert_eq!(stats.gpus_by_type["H100_PCIE_1G.10GB"].unavailable, 16);
+        assert_eq!(stats.gpus_by_type["H100_PCIE_2G.20GB"].unavailable, 6);
+        assert!(!stats.gpus_by_type.contains_key("GPU"));
+        let draining = &store.node_displays()[1];
+        assert_eq!(
+            (
+                draining.cpus_alloc,
+                draining.memory_alloc_gb,
+                draining.gpus_alloc
+            ),
+            (32, 2.0, Some(4))
+        );
     }
-}
-
-#[test]
-fn generic_node_tres_uses_gres_model_and_partial_allocation() {
-    let node = Node {
-        name: "gpu1".into(),
-        state: "MIXED".into(),
-        gres: "gpu:l40s:4(S:0)".into(),
-        cfg_tres: "cpu=64,gres/gpu=4".into(),
-        alloc_tres: "cpu=48,gres/gpu=3".into(),
-        ..Node::default()
-    };
-    let stats = derive_cluster_stats(std::slice::from_ref(&node), &[]);
-    assert_eq!((stats.total_gpus, stats.allocated_gpus), (4, 3));
-    assert_eq!(stats.gpus_by_type["L40S"].allocated, 3);
-    let displays = derive_node_displays(&[node]);
-    assert_eq!(displays[0].gpu_usage_pct(), 75.0);
-    assert_eq!(displays[0].gpu_types, "4x L40S");
-}
-
-#[test]
-fn nodes_without_tres_estimate_gpu_allocation_from_state() {
-    let node = Node {
-        name: "gpu1".into(),
-        state: "MIXED".into(),
-        gres: "gpu:a100:4".into(),
-        ..Node::default()
-    };
-    let stats = derive_cluster_stats(std::slice::from_ref(&node), &[]);
-    assert_eq!((stats.total_gpus, stats.allocated_gpus), (4, 4));
-    assert_eq!(derive_node_displays(&[node])[0].gpus_alloc, 4);
 }
 
 fn job(id: &str, user: &str, state: &str, tres: &str) -> AllUsersJob {
@@ -535,17 +457,18 @@ fn pending_arrays_multiply_resources_and_normalize_reason_buckets() {
         },
         job("3", "alice", "RUNNING", "cpu=100"),
     ];
-    let stats = derive_cluster_stats(&[], &jobs);
+    let queue = aggregate_pending_queue(&jobs);
+    let partition = &queue["gpu"];
+    assert_eq!(queue.len(), 1);
     assert_eq!(
         (
-            stats.pending_jobs_count,
-            stats.pending_cpus,
-            stats.pending_memory_gb,
-            stats.pending_gpus
+            partition.jobs_count,
+            partition.cpus,
+            partition.memory_gb,
+            partition.gpus_by_type["A100"]
         ),
         (5, 12, 24.0, 6)
     );
-    assert_eq!(stats.pending_by_partition["gpu"].jobs_count, 5);
     let users = aggregate_pending_user_stats(&jobs);
     assert_eq!(users.len(), 1);
     assert_eq!(users[0].pending_cpus, 12);
