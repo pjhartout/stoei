@@ -16,7 +16,6 @@ pub const HTTP_HELPER_COMMAND: &str = http::COMMAND;
 
 const REPO: &str = "pjhartout/stoei";
 const MAX_ARCHIVE: u64 = 256 * 1024 * 1024;
-const CACHE_TTL: i64 = 24 * 60 * 60;
 const MAX_CACHE_BYTES: u64 = 4096;
 
 #[derive(Clone)]
@@ -185,34 +184,36 @@ pub fn cached_lookup(
     now: i64,
     lookup: impl FnOnce() -> Result<String, String>,
 ) -> Result<String, String> {
-    let mut raw = String::new();
-    let read = fs::File::open(path)
-        .and_then(|file| file.take(MAX_CACHE_BYTES + 1).read_to_string(&mut raw));
-    if read.is_err() || raw.len() as u64 > MAX_CACHE_BYTES {
-        raw.clear();
-    }
-    let mut fields = raw.split_whitespace();
-    let cached = fields
-        .next()
-        .filter(|tag| semver(tag).is_some())
-        .unwrap_or("");
-    let timestamp = fields.next().and_then(|field| field.parse::<i64>().ok());
-    let fresh = timestamp
-        .is_some_and(|timestamp| timestamp <= now && now.saturating_sub(timestamp) < CACHE_TTL);
-    if fresh && !cached.is_empty() {
-        return Ok(cached.to_owned());
-    }
     match lookup() {
         Ok(tag) => {
-            if let Some(parent) = path.parent() {
-                let _ = fs::create_dir_all(parent);
-            }
-            let _ = fs::write(path, format!("{tag} {now}\n"));
+            let _ = write_cached_tag(path, &tag, now);
             Ok(tag)
         }
-        Err(_) if !cached.is_empty() => Ok(cached.to_owned()),
-        Err(err) => Err(err),
+        Err(err) => read_cached_tag(path).ok_or(err),
     }
+}
+
+fn write_cached_tag(path: &Path, tag: &str, now: i64) -> std::io::Result<()> {
+    let parent = path.parent().unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent)?;
+    let mut file = tempfile::NamedTempFile::new_in(parent)?;
+    writeln!(file, "{tag} {now}")?;
+    file.persist(path)?;
+    Ok(())
+}
+
+fn read_cached_tag(path: &Path) -> Option<String> {
+    let mut raw = String::new();
+    fs::File::open(path)
+        .ok()?
+        .take(MAX_CACHE_BYTES + 1)
+        .read_to_string(&mut raw)
+        .ok()?;
+    if raw.len() as u64 > MAX_CACHE_BYTES {
+        return None;
+    }
+    let tag = raw.split_whitespace().next()?;
+    semver(tag).map(|_| tag.to_owned())
 }
 
 pub fn checksum_for(checksums: &str, name: &str) -> Result<String, String> {
@@ -342,32 +343,28 @@ mod tests {
     }
 
     #[test]
-    fn fresh_and_stale_caches_control_network_calls() {
+    fn fresh_cache_is_revalidated_and_the_last_release_is_available_offline() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("latest-release");
         fs::write(&path, "v1.2.3 1000\n").unwrap();
         assert_eq!(
-            cached_lookup(&path, 1001, || panic!("fresh cache must skip network")).unwrap(),
-            "v1.2.3"
-        );
-        assert_eq!(
-            cached_lookup(&path, 1000 + CACHE_TTL, || Err("offline".into())).unwrap(),
-            "v1.2.3"
-        );
-        assert_eq!(
-            cached_lookup(&path, 1000 + CACHE_TTL, || Ok("v1.2.4".into())).unwrap(),
-            "v1.2.4"
-        );
-        fs::write(&path, format!("v1.2.3 {}\n", i64::MIN)).unwrap();
-        assert_eq!(
             cached_lookup(&path, 1001, || Ok("v1.2.4".into())).unwrap(),
             "v1.2.4"
         );
-        fs::write(&path, "x".repeat(MAX_CACHE_BYTES as usize + 1)).unwrap();
         assert_eq!(
-            cached_lookup(&path, 1001, || Ok("v1.2.4".into())).unwrap(),
+            cached_lookup(&path, 1002, || Err("offline".into())).unwrap(),
             "v1.2.4"
         );
+        for invalid in [
+            "dev 1000\n".into(),
+            format!("v1.2.3 {}", "x".repeat(MAX_CACHE_BYTES as usize)),
+        ] {
+            fs::write(&path, invalid).unwrap();
+            assert_eq!(
+                cached_lookup(&path, 1003, || Err("offline".into())),
+                Err("offline".into())
+            );
+        }
     }
 
     #[test]

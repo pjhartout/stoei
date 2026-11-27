@@ -144,71 +144,87 @@ impl Ui {
         status: &RuntimeStatus<'_>,
         theme: Theme,
     ) {
+        const UPDATE_PROMPT: &str = " Run stoei update ";
         frame.render_widget(Block::default().style(theme.bar()), area);
-        let sync = sync_label(store, status.now);
-        let mut globals = if self.config.keybind_mode == "emacs" {
-            vec![("C-h", "help"), ("C-r", "refresh"), ("C-q", "quit")]
+        let brand = if area.width >= 72 {
+            Span::styled(" stoei ", theme.selected())
         } else {
-            vec![("?", "help"), ("r", "refresh"), ("q", "quit")]
+            Span::default()
         };
-        if self.active == 2 && self.config.keybind_mode != "emacs" {
-            globals.retain(|(_, label)| *label != "refresh");
-        }
-        let globals = if area.width < 40 && store.any_loading() {
-            Line::default()
-        } else if area.width < 40 {
-            hint_line(
-                &globals
-                    .into_iter()
-                    .rev()
-                    .filter(|(_, label)| *label != "refresh")
-                    .collect::<Vec<_>>(),
-                theme,
-            )
+        let width = usize::from(area.width) - brand.width();
+        let controls_width = if status.update_available.is_some() {
+            width.saturating_sub(UPDATE_PROMPT.len())
         } else {
-            hint_line(&globals, theme)
+            width
         };
-        let notice = if area.width >= 140 {
-            status
-                .update_available
-                .map(|version| format!(" {} available · stoei update ", clean(version)))
-                .unwrap_or_default()
-        } else {
-            String::new()
-        };
-        let [brand, hints, update, help, refresh] = Layout::horizontal([
-            Constraint::Length(if area.width >= 72 { 7 } else { 0 }),
-            Constraint::Min(0),
-            Constraint::Length(Line::from(notice.as_str()).width() as u16),
-            Constraint::Length(globals.width() as u16),
-            Constraint::Length(if area.width >= 40 || store.any_loading() {
-                Line::from(sync.as_str()).width() as u16 + 2
-            } else {
-                0
-            }),
-        ])
-        .areas(area);
-        frame.render_widget(Paragraph::new(" stoei ").style(theme.selected()), brand);
-        frame.render_widget(Paragraph::new(self.footer_hints(hints.width, theme)), hints);
-        frame.render_widget(Paragraph::new(notice).style(theme.bar_key()), update);
-        frame.render_widget(Paragraph::new(globals), help);
-        let color = if store.any_loading() {
+        let loading = store.any_loading();
+        let color = if loading {
             theme.warning
         } else if store.meta(Section::RunningJobs).state == State::Error {
             theme.error
         } else {
             theme.accent_alt
         };
-        frame.render_widget(
-            Paragraph::new(format!(" {sync} ")).style(theme.chip(color)),
-            refresh,
+        let sync = Span::styled(
+            format!(" {} ", sync_label(store, status.now)),
+            theme.chip(color),
         );
+        let sync = if controls_width >= 40 || (loading && sync.width() <= controls_width) {
+            sync
+        } else {
+            Span::default()
+        };
+        let mut controls = self.global_hints(controls_width - sync.width(), theme);
+        controls.push_span(sync);
+
+        let notice = match status.update_available {
+            Some(version) => {
+                let full = Span::raw(format!("{UPDATE_PROMPT}for {} ", version_label(version)));
+                let prompt = if full.width() <= width - controls.width() {
+                    full
+                } else {
+                    Span::raw(UPDATE_PROMPT)
+                };
+                prompt.style(theme.bar_key())
+            }
+            None => Span::default(),
+        };
+        let [start, hints, update, end] = Layout::horizontal([
+            Constraint::Length(brand.width() as u16),
+            Constraint::Min(0),
+            Constraint::Length(notice.width() as u16),
+            Constraint::Length(controls.width() as u16),
+        ])
+        .areas(area);
+        frame.render_widget(brand, start);
+        frame.render_widget(self.footer_hints(hints.width.into(), theme), hints);
+        frame.render_widget(notice, update);
+        frame.render_widget(controls, end);
     }
 
-    fn footer_hints(&self, width: u16, theme: Theme) -> Line<'static> {
+    fn global_hints(&self, width: usize, theme: Theme) -> Line<'static> {
+        let emacs = self.config.keybind_mode == "emacs";
+        let mut hints = if emacs {
+            vec![("C-h", "help"), ("C-r", "refresh"), ("C-q", "quit")]
+        } else {
+            vec![("?", "help"), ("r", "refresh"), ("q", "quit")]
+        };
+        if self.active == 2 && !emacs {
+            hints.retain(|(_, label)| *label != "refresh");
+        }
+        let all = hint_line(&hints, usize::MAX, theme);
+        if all.width() <= width {
+            return all;
+        }
+        hints.retain(|(_, label)| *label != "refresh");
+        hints.reverse();
+        hint_line(&hints, width, theme)
+    }
+
+    fn footer_hints(&self, width: usize, theme: Theme) -> Line<'static> {
         let view = &self.tables[self.table_index()];
         if view.editing_filter {
-            return hint_line(&[("Enter", "apply"), ("Esc", "clear")], theme);
+            return hint_line(&[("Enter", "apply"), ("Esc", "clear")], width, theme);
         }
         let (filter, sort, settings) = if self.config.keybind_mode == "emacs" {
             ("C-s", "C-o", "C-,")
@@ -231,15 +247,7 @@ impl Ui {
             hints.extend([("c", "cancel"), ("i", "job ID")]);
         }
         hints.extend([(settings, "settings"), ("L", "load")]);
-        let mut used = 0;
-        let count = hints
-            .iter()
-            .take_while(|(key, label)| {
-                used += Line::from(format!(" {key} {label} ")).width();
-                used <= usize::from(width)
-            })
-            .count();
-        hint_line(&hints[..count], theme)
+        hint_line(&hints, width, theme)
     }
 
     fn render_main(&mut self, frame: &mut Frame<'_>, area: Rect, store: &Store, theme: Theme) {
@@ -339,18 +347,19 @@ fn render_unavailable(frame: &mut Frame<'_>, area: Rect, error: &str, theme: The
     );
 }
 
-fn hint_line(hints: &[(&str, &str)], theme: Theme) -> Line<'static> {
-    Line::from(
-        hints
-            .iter()
-            .flat_map(|(key, label)| {
-                [
-                    Span::styled(format!(" {key}"), theme.bar_key()),
-                    Span::styled(format!(" {label} "), theme.bar()),
-                ]
-            })
-            .collect::<Vec<_>>(),
-    )
+fn hint_line(hints: &[(&str, &str)], mut width: usize, theme: Theme) -> Line<'static> {
+    let mut line = Line::default();
+    for (key, label) in hints {
+        let key = Span::styled(format!(" {key}"), theme.bar_key());
+        let label = Span::styled(format!(" {label} "), theme.bar());
+        let needed = key.width() + label.width();
+        if needed > width {
+            break;
+        }
+        width -= needed;
+        line.extend([key, label]);
+    }
+    line
 }
 
 fn sync_label(store: &Store, now: std::time::Instant) -> String {

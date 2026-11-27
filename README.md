@@ -103,9 +103,11 @@ stoei update
 It downloads the latest release for your platform, verifies the checksum, and
 atomically replaces the running binary in place (so it needs write access to
 wherever `stoei` lives). This also turns a Cargo or source build (which
-reports `dev` from `stoei --version`) into the latest release. The TUI checks
-for a newer release once a day (silently, cached) and shows a hint in the
-status bar when one exists; `dev` builds skip that check and never phone home.
+reports `dev` from `stoei --version`) into the latest release. Release builds
+check for updates in the background on each launch and hourly while the TUI is
+open. When a newer version is available, the footer prompts you to run
+`stoei update`. If a check fails, stoei can still show the last release it
+found. Local `dev` builds skip automatic checks.
 The same command upgrades existing Go installations to Rust releases. Restart
 stoei after updating to use the new binary.
 

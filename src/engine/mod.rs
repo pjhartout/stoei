@@ -198,6 +198,41 @@ impl Drop for Screen {
     }
 }
 
+struct ReleaseChecks {
+    version: &'static str,
+    next: Option<Instant>,
+    available: Option<String>,
+}
+
+impl ReleaseChecks {
+    fn new(version: &'static str, now: Instant) -> Self {
+        Self {
+            version,
+            next: update::semver(version).map(|_| now),
+            available: None,
+        }
+    }
+
+    fn dispatch_due(&mut self, now: Instant, enqueue: impl FnOnce() -> bool) {
+        if self.next.is_some_and(|deadline| deadline <= now) {
+            self.next = if enqueue() {
+                None
+            } else {
+                Some(now + Duration::from_secs(60))
+            };
+        }
+    }
+
+    fn finished(&mut self, now: Instant, result: Result<String, String>) -> bool {
+        self.next = Some(now + Duration::from_secs(60 * 60));
+        let Ok(tag) = result else { return false };
+        let available = update::is_newer(self.version, &tag).then_some(tag);
+        let changed = self.available != available;
+        self.available = available;
+        changed
+    }
+}
+
 struct Runtime {
     ui: Ui,
     store: Store,
@@ -207,7 +242,7 @@ struct Runtime {
     input: Input,
     logs: LogRing,
     screen: Screen,
-    latest: Option<String>,
+    releases: ReleaseChecks,
     unavailable: Option<String>,
     dirty: bool,
     suspended: bool,
@@ -252,7 +287,7 @@ pub fn run(
         input,
         logs,
         screen,
-        latest: None,
+        releases: ReleaseChecks::new(VERSION, now),
         unavailable: None,
         dirty: true,
         suspended: false,
@@ -262,9 +297,6 @@ pub fn run(
         runtime.notify(format!("Config: {err}; using defaults"));
     }
     runtime.workers.enqueue(Work::Available)?;
-    if update::semver(VERSION).is_some() {
-        runtime.workers.enqueue(Work::Latest)?;
-    }
     runtime.event_loop()
 }
 
@@ -316,13 +348,14 @@ impl Runtime {
             )
             .into_iter()
             .chain(self.ui.next_deadline())
+            .chain(self.releases.next)
             .min()
     }
 
     fn draw(&mut self) -> Result<(), String> {
         let status = RuntimeStatus {
             version: VERSION,
-            update_available: self.latest.as_deref(),
+            update_available: self.releases.available.as_deref(),
             logs: &self.logs,
             today: chrono::Local::now().date_naive(),
             unavailable: self.unavailable.as_deref(),
@@ -345,6 +378,8 @@ impl Runtime {
         ) {
             self.dispatch(section, now, false);
         }
+        self.releases
+            .dispatch_due(now, || self.workers.enqueue(Work::Latest).is_ok());
     }
 
     fn dispatch(&mut self, section: Section, now: Instant, force: bool) -> bool {
@@ -403,11 +438,9 @@ impl Runtime {
                 self.unavailable = result.err();
                 self.dirty = true;
             }
-            Event::Latest(Ok(tag)) if update::is_newer(VERSION, &tag) => {
-                self.latest = Some(tag);
-                self.dirty = true;
+            Event::Latest(result) => {
+                self.dirty |= self.releases.finished(Instant::now(), result);
             }
-            Event::Latest(_) => {}
             Event::Copy { text, result } => self.notify(match result {
                 Ok(()) => "Copied path".into(),
                 Err(_) => text,
@@ -725,6 +758,45 @@ fn failed_action(effect: Effect, error: String) -> Option<ActionResult> {
 #[cfg(test)]
 mod event_tests {
     use super::*;
+
+    #[test]
+    fn release_checks_start_at_launch_and_wait_an_hour_after_each_result() {
+        let start = Instant::now();
+        let hour = Duration::from_secs(3600);
+        let mut dev = ReleaseChecks::new("dev", start);
+        dev.dispatch_due(start + hour, || panic!("dev build checked for updates"));
+
+        let mut releases = ReleaseChecks::new("1.0.0", start);
+        assert_eq!(releases.next, Some(start));
+        releases.dispatch_due(start, || false);
+        let retry = releases.next.unwrap();
+        assert!(retry > start);
+        releases.dispatch_due(start, || panic!("busy worker retried early"));
+        releases.dispatch_due(retry, || true);
+        assert_eq!(releases.next, None);
+        releases.dispatch_due(retry + hour, || panic!("duplicate in-flight check"));
+
+        let completed = retry + hour;
+        assert!(!releases.finished(completed, Err("offline".into())));
+        assert_eq!(releases.next, Some(completed + hour));
+        releases.dispatch_due(completed + hour, || true);
+        assert_eq!(releases.next, None);
+    }
+
+    #[test]
+    fn release_notice_changes_only_when_a_different_upgrade_is_available() {
+        let now = Instant::now();
+        let mut releases = ReleaseChecks::new("1.2.3", now);
+        assert!(!releases.finished(now, Ok("v1.2.2".into())));
+        assert!(releases.finished(now, Ok("v1.2.4".into())));
+        assert!(!releases.finished(now, Ok("v1.2.4".into())));
+        assert!(!releases.finished(now, Err("offline".into())));
+        assert_eq!(releases.available.as_deref(), Some("v1.2.4"));
+        assert!(releases.finished(now, Ok("v1.2.5".into())));
+        assert_eq!(releases.available.as_deref(), Some("v1.2.5"));
+        assert!(releases.finished(now, Ok("v1.2.3".into())));
+        assert_eq!(releases.available, None);
+    }
 
     #[test]
     fn full_event_queue_does_not_trap_a_stopping_worker() {

@@ -216,20 +216,21 @@ fn render(ui: &mut Ui, store: &Store, width: u16, height: u16) -> String {
 }
 
 fn render_buffer(ui: &mut Ui, store: &Store, width: u16, height: u16) -> ratatui::buffer::Buffer {
-    render_buffer_with_version(ui, store, width, height, "dev")
+    render_buffer_with_release(ui, store, width, height, "dev", None)
 }
 
-fn render_buffer_with_version(
+fn render_buffer_with_release(
     ui: &mut Ui,
     store: &Store,
     width: u16,
     height: u16,
     version: &str,
+    update_available: Option<&str>,
 ) -> ratatui::buffer::Buffer {
     let logs = LogRing::default();
     let status = RuntimeStatus {
         version,
-        update_available: None,
+        update_available,
         unavailable: None,
         logs: &logs,
         today: NaiveDate::from_ymd_opt(2026, 9, 30).unwrap(),
@@ -503,7 +504,8 @@ fn familiar_chrome_keeps_tab_divider_and_quit_controls_in_place() {
         for (tab, title) in [('1', "1 Jobs"), ('4', "4 Priority"), ('5', "5 Logs")] {
             ui.handle_key(key(KeyCode::Char(tab)), &store);
             for (width, height) in [(40, 12), (60, 24), (80, 24), (100, 24), (160, 32)] {
-                let buffer = render_buffer_with_version(&mut ui, &store, width, height, version);
+                let buffer =
+                    render_buffer_with_release(&mut ui, &store, width, height, version, None);
                 let header = line(&buffer, 0);
                 assert!(header.starts_with(&format!(" stoei  {label} ")));
                 assert!(header.contains(title), "active tab missing: {header}");
@@ -515,10 +517,52 @@ fn familiar_chrome_keeps_tab_divider_and_quit_controls_in_place() {
                     assert!(header.contains("5 Logs"));
                     assert!(footer.ends_with(" sync 0s "));
                 }
-                assert_eq!(
-                    buffer[(width / 2, height - 1)].bg,
-                    theme::Theme::by_name("nord").border
-                );
+                let theme = theme::Theme::by_name("nord");
+                assert_eq!(buffer[(width / 2, height - 1)].bg, theme.border);
+                if width >= 72 {
+                    assert!(footer.starts_with(" stoei "));
+                    assert_eq!(buffer[(0, height - 1)].bg, theme.accent);
+                }
+                assert_eq!(buffer[(width - 1, height - 1)].bg, theme.accent_alt);
+            }
+        }
+    }
+}
+
+#[test]
+fn release_prompt_fits_on_the_bottom_row_with_both_key_presets() {
+    let store = populated_store();
+    let theme = theme::Theme::by_name("nord");
+    for (mode, quit) in [("vim", "q quit"), ("emacs", "C-q quit")] {
+        let mut ui = Ui::new(Config {
+            keybind_mode: mode.into(),
+            ..Default::default()
+        });
+        ui.observe_data(&store);
+        ui.notify("Saved".into());
+        for (width, height) in [(18, 12), (40, 12), (80, 12), (191, 58)] {
+            let buffer =
+                render_buffer_with_release(&mut ui, &store, width, height, "1.2.3", Some("v1.2.4"));
+            let row = height - 1;
+            let footer = line(&buffer, row);
+            let prompt = footer.find("Run stoei update").expect("update prompt");
+            let prompt_cell = &buffer[(prompt as u16, row)];
+            assert_eq!(prompt_cell.bg, theme.border);
+            assert_eq!(prompt_cell.fg, theme.accent_alt);
+            assert_eq!(line(&buffer, row - 1).trim(), "Saved");
+            if width >= 40 {
+                assert!(prompt < footer.find(quit).expect("quit hint"));
+            }
+            if width >= 80 {
+                assert!(footer.contains("for v1.2.4"));
+                assert!(footer.ends_with(" sync 0s "));
+            }
+            if width == 191 {
+                assert!(footer.starts_with(" stoei  b sidebar "));
+                assert!(footer.find("L load").expect("context hints") < prompt);
+                assert_eq!(buffer[(0, row)].bg, theme.accent);
+                assert_eq!(buffer[(width - 1, row)].bg, theme.accent_alt);
+                assert!((0..width).all(|x| buffer[(x, row - 1)].bg == theme.background));
             }
         }
     }
